@@ -19,9 +19,7 @@ fontScale = 1
 color = (0, 0, 255)
 thickness = 2
 
-history_length = 1
-#rel_point_history = deque(maxlen=history_length)
-#abs_point_history = deque(maxlen=history_length)
+play_audio = False
 
 
 def calc_landmark_list(image, landmarks):
@@ -113,6 +111,18 @@ def main():
 
 		image = k.draw(image, button_list, control_state)
 
+		# EVENT TEXT
+		image = cv2.putText(image, event, (50, 50), font, 
+			fontScale, color, thickness, cv2.LINE_AA)
+
+		# CONTROL STATE TEXT
+		image = cv2.putText(image, control_state, (50, 100), font, 
+			fontScale, color, thickness, cv2.LINE_AA)
+
+		# TYPED TEXT
+		image = cv2.putText(image, typed_text, (50, 600), font, 
+			fontScale, color, thickness, cv2.LINE_AA)
+
 		if results.multi_hand_landmarks is not None:
 			for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
 
@@ -134,30 +144,25 @@ def main():
 				elif event == 'Keyboard Off':
 					control_state = 'Mouse'
 
-				# EVENT TEXT
-				image = cv2.putText(image, event, (50, 50), font, 
-					fontScale, color, thickness, cv2.LINE_AA)
-
-				# CONTROL STATE TEXT
-				image = cv2.putText(image, control_state, (50, 100), font, 
-					fontScale, color, thickness, cv2.LINE_AA)
-
-				# TYPED TEXT
-				image = cv2.putText(image, typed_text, (50, 600), font, 
-					fontScale, color, thickness, cv2.LINE_AA)
+				
 
 				if control_state == 'Keyboard':
 					button_list, typed_char = k.execute_event_keyboard(event, abs_landmark_list, button_list)
 					image = k.draw(image, button_list, control_state)
 
 					if typed_char is not None:
+
 						if typed_char != '<':
 							typed_text += typed_char
+
+							if play_audio:
+								k.say_key_pressed(typed_char)
 						else:
 							typed_text = typed_text[:-1]
+
+
 				execute_event_fast(event, abs_landmark_list)
-		else:
-			print('clown')
+		
 		cv2.imshow('Video', image)
 
 	cap.release()

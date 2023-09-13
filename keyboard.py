@@ -2,8 +2,7 @@
 
 import cv2
 import pyautogui
-
-
+import os
 
 class Button():
 	def __init__(self, pos, text, size=[85, 85]):
@@ -13,6 +12,11 @@ class Button():
 		self.color = (0, 0, 0)
 
 
+def say_key_pressed(typed_char):
+	if typed_char == ' ':
+		os.system(' say space ')
+	else:
+		os.system(' say ' + str(typed_char).lower())
 
 def draw(img, buttonList, control_state):
 
