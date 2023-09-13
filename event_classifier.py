@@ -108,8 +108,41 @@ def get_event(abs_landmark_list, rel_landmark_list, abs_landmark_velocities, rel
 
 
 
+def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
+
+	finger_pos = rel_landmark_list[c.FINGER_INDICES]
+
+	distance_array_function = np.vectorize(dist)
+
+	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
+
+	#print(finger_dist)
+	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
+
+	#print(finger_out_arr)
+
+	if np.array_equal(finger_out_arr, np.array([False, False, False, False, True])):
+		return 'Quit'
+
+	if np.array_equal(finger_out_arr, np.array([True, False, False, False, False])):
+		if control_state == 'Keyboard':
+			return 'Keyboard Off'
+		return 'Keyboard On'
+
+	# Clicking
+	thumb_index_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.INDEX_IDX])
+	thumb_ring_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.RING_IDX])
+
+	if thumb_ring_dist < c.RIGHT_CLICK_CUTOFF:
+		return 'Right-Click'
+
+	if thumb_index_dist < c.LEFT_CLICK_CUTOFF and thumb_ring_dist >= c.RIGHT_CLICK_CUTOFF:
+		return 'Left-Click'
 
 
+
+
+	return 'Mousing'
 
 
 
