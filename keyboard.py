@@ -2,8 +2,7 @@
 
 import cv2
 import pyautogui
-
-
+import os
 
 class Button():
 	def __init__(self, pos, text, size=[85, 85]):
@@ -13,19 +12,28 @@ class Button():
 		self.color = (0, 0, 0)
 
 
+def say_key_pressed(typed_char):
+	if typed_char == ' ':
+		os.system(' say space ')
+	else:
+		os.system(' say ' + str(typed_char).lower())
 
 def draw(img, buttonList, control_state):
+
+	char_size = 4
 
 	if control_state == 'Keyboard':
 		for button in buttonList:
 			x, y = button.pos
 			w, h = button.size
 			color = button.color
+
+
 			#cvzone.cornerRect(img, (button.pos[0], button.pos[1],
 			#	button.size[0],button.size[0]), 20 ,rt=0)
 			cv2.rectangle(img, button.pos, (int(x + w), int(y + h)), (255, 144, 30), cv2.FILLED)
 			cv2.putText(img, button.text, (x + 20, y + 65),
-				cv2.FONT_HERSHEY_PLAIN, 4, color, 4)
+				cv2.FONT_HERSHEY_PLAIN, char_size / len(button.text), color, 4)
 	return img
 
 
@@ -37,7 +45,7 @@ def get_button_list():
 				["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
 				["A", "S", "D", "F", "G", "H", "J", "K", "L", ";"],
 				["Z", "X", "C", "V", "B", "N", "M", ",", ".", "/"],
-				[' ']
+				['Space', 'Clear']
 				]
 
 	buttonList = []
@@ -55,9 +63,9 @@ def get_button_list():
 			b = Button([100 * x + 25 + x_offset, 100 * k + 50], key)
 
 			# Special case for space
-			if b.text == ' ':
-				b.size = [425, 85]
-				b.pos[0] += 85*2
+			#if b.text == ' ':
+			#	b.size = [425, 85]
+			#	b.pos[0] += 85*2
 
 			buttonList.append(b)
 
