@@ -23,3 +23,5 @@ MOUSE_X_SENS = 1.0
 MOUSE_Y_SENS = 2.0
 
 MOUSE_SPEED = 0.1
+
+SPECIAL_KEYS = ['<', 'Copy', 'Clear', 'Space']

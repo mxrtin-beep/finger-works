@@ -9,9 +9,12 @@ from event_classifier import get_event_fast
 import constants as c
 import keyboard as k
 
+import pyperclip
+
+
 device = 0
-width = 960
-height = 540
+width = 1440
+height = 900
 
 font = cv2.FONT_HERSHEY_SIMPLEX
 org = (00, 185)
@@ -20,6 +23,8 @@ color = (0, 0, 255)
 thickness = 2
 
 play_audio = False
+history_length = 8
+event_history = deque(maxlen=history_length)
 
 
 def calc_landmark_list(image, landmarks):
@@ -139,6 +144,8 @@ def main():
 
 				event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
 
+				event_history.append(event)
+
 				if event == 'Keyboard On':
 					control_state = 'Keyboard'
 				elif event == 'Keyboard Off':
@@ -152,16 +159,21 @@ def main():
 
 					if typed_char is not None:
 
-						if typed_char != '<':
+						if typed_char not in c.SPECIAL_KEYS:
 							typed_text += typed_char
 
 							if play_audio:
 								k.say_key_pressed(typed_char)
-						else:
-							typed_text = typed_text[:-1]
+						elif typed_char == '<':
+							typed_text = typed_text[:-1]							
+						elif typed_char == 'Clear':
+							typed_text = ''
+						elif typed_char == 'Space':
+							typed_text += ' '
+						print('In clipboard: ', typed_text)
+						pyperclip.copy(typed_text)
 
-
-				execute_event_fast(event, abs_landmark_list)
+				execute_event_fast(event, abs_landmark_list, event_history)
 		
 		cv2.imshow('Video', image)
 

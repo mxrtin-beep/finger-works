@@ -39,75 +39,6 @@ def get_direction(x_vel, y_vel, x_cutoff, y_cutoff):
 	return direction
 
 
-def get_event(abs_landmark_list, rel_landmark_list, abs_landmark_velocities, rel_landmark_velocities):
-
-
-	finger_pos = rel_landmark_list[c.FINGER_INDICES]
-	
-	distance_array_function = np.vectorize(dist)
-
-	finger_dist = finger_pos[:, 0]**2 + finger_pos[:, 1]**2
-	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
-
-	z = abs_landmark_list[c.INDEX_IDX][2]
-
-	if z > -0.1:
-		return ''
-
-	### DIRECTIONS
-	x_vel = abs_landmark_velocities[c.INDEX_IDX][0]
-	y_vel = abs_landmark_velocities[c.INDEX_IDX][1]
-
-	direction_str = get_direction(x_vel, y_vel, c.SCROLL_VEL_CUTOFF, c.SCROLL_VEL_CUTOFF)
-
-	print(finger_out_arr)
-
-	
-	### EVENTS
-	if np.array_equal(finger_out_arr, np.array([False, False, False, False, True])):
-		return 'Quit'
-
-
-	thumb_index_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.INDEX_IDX])
-	thumb_middle_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.MIDDLE_IDX])
-
-	#print(thumb_index_dist, thumb_middle_dist)
-
-	if thumb_index_dist < c.LEFT_CLICK_CUTOFF and thumb_middle_dist < c.RIGHT_CLICK_CUTOFF:
-		return 'Right-Click'
-
-	if thumb_index_dist < c.LEFT_CLICK_CUTOFF and thumb_middle_dist >= c.RIGHT_CLICK_CUTOFF:
-		return 'Left-Click'
-
-
-	if rel_landmark_velocities[c.INDEX_IDX][0] < -2 and rel_landmark_velocities[c.INDEX_IDX][0] > -10:
-		if rel_landmark_velocities[c.INDEX_IDX][1] < 20 and rel_landmark_velocities[c.INDEX_IDX][1] > 5:
-			return 'Zoom Out'
-
-
-	### STEADY STATES
-
-	if np.array_equal(finger_out_arr, np.array([False, True, False, False, False])):
-		#return 'Mousing ' + direction_str
-		return 'Mousing'
-
-	if np.array_equal(finger_out_arr, np.array([False, True, True, False, False])):
-		return 'Scrolling ' + direction_str
-
-	if np.array_equal(finger_out_arr, np.array([True, True, True, True, True])):
-		return 'Swiping ' + direction_str
-
-	if np.array_equal(finger_out_arr, np.array([True, True, False, False, False])): 
-		if rel_landmark_velocities[c.INDEX_IDX][0] > 2 and rel_landmark_velocities[c.INDEX_IDX][0] < 7:
-			if rel_landmark_velocities[c.INDEX_IDX][1] > -15 and rel_landmark_velocities[c.INDEX_IDX][1] < -5:
-				return 'Zoom In'
-	
-
-	
-	return ''
-
-
-
 def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 
 	finger_pos = rel_landmark_list[c.FINGER_INDICES]
@@ -116,13 +47,11 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 
 	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
 
-	#print(finger_dist)
 	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
 
-	#print(finger_out_arr)
 
-	if np.array_equal(finger_out_arr, np.array([False, False, False, False, True])):
-		return 'Quit'
+	#if np.array_equal(finger_out_arr, np.array([False, False, False, False, True])):
+	#	return 'Quit'
 
 	if np.array_equal(finger_out_arr, np.array([True, False, False, False, False])):
 		if control_state == 'Keyboard':
@@ -138,7 +67,6 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 
 	if thumb_index_dist < c.LEFT_CLICK_CUTOFF and thumb_ring_dist >= c.RIGHT_CLICK_CUTOFF:
 		return 'Left-Click'
-
 
 
 
