@@ -5,6 +5,7 @@ import urllib.request
 
 import cv2
 import mediapipe as mp
+import pyautogui
 from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python.vision import (
 	HandLandmarker,
@@ -14,12 +15,11 @@ from mediapipe.tasks.python.vision import (
 import numpy as np
 from collections import deque
 
-from mouse_control import execute_event_fast
+from mouse_control import execute_event_fast, screenWidth, screenHeight
 from event_classifier import get_event_fast
 import constants as c
 import keyboard as k
-
-import pyperclip
+import overlay as ov
 
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hand_landmarker.task')
@@ -37,12 +37,6 @@ def ensure_model_downloaded(model_path=MODEL_PATH, model_url=MODEL_URL):
 device = 0
 width = 1440
 height = 900
-
-font = cv2.FONT_HERSHEY_SIMPLEX
-org = (00, 185)
-fontScale = 1
-color = (0, 0, 255)
-thickness = 2
 
 play_audio = False
 history_length = 8
@@ -96,6 +90,47 @@ def pre_process_landmark(landmark_list):
 	return landmark_list
 
 
+def type_char(typed_char, typed_text):
+	"""Send a real keystroke (or clipboard hotkey) to whatever window has
+	OS focus, and return the updated local preview-text string shown on
+	the overlay (which is just an echo/log for feedback -- the real
+	destination of every keystroke is the focused app, not this string)."""
+
+	if typed_char == '<':
+		pyautogui.press('backspace')
+		return typed_text[:-1]
+
+	if typed_char == 'Space':
+		pyautogui.press('space')
+		return typed_text + ' '
+
+	if typed_char == 'Clear':
+		# Only clears our own preview line -- there's no general way to
+		# clear whatever's focused elsewhere on the desktop.
+		return ''
+
+	if typed_char == 'Copy':
+		pyautogui.hotkey('ctrl', 'c')
+		return typed_text
+
+	if typed_char == 'Cut':
+		pyautogui.hotkey('ctrl', 'x')
+		return typed_text
+
+	if typed_char == 'Paste':
+		pyautogui.hotkey('ctrl', 'v')
+		return typed_text
+
+	# Regular character key. pyautogui.press() accepts single letters,
+	# digits, and this keyboard's punctuation (',', '.', '/', ';') as
+	# literal key names directly.
+	pyautogui.press(typed_char.lower())
+
+	if play_audio:
+		k.say_key_pressed(typed_char)
+
+	return typed_text + typed_char
+
 
 def main():
 
@@ -106,9 +141,10 @@ def main():
 	min_detection_confidence = 0.7
 	min_tracking_confidence = 0.5
 
-	# Camera
-
-	cap = cv2.VideoCapture(0)
+	# Camera (used only to feed the hand-tracking model -- no video window
+	# is shown; the overlay panel is the only thing on screen besides
+	# whatever else you're using your computer for).
+	cap = cv2.VideoCapture(cap_device)
 	cap.set(cv2.CAP_PROP_FRAME_WIDTH, cap_width)
 	cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cap_height)
 
@@ -128,139 +164,82 @@ def main():
 	# detect_for_video requires monotonically increasing timestamps.
 	start_time_ms = int(time.time() * 1000)
 
-	mode = 0
-
 	event = ''
-
 	control_state = 'Mouse'	# Mouse or Keyboard
-
 	typed_text = '>'
 
-	# The camera may not honor the requested cap_width/cap_height above
-	# (this varies by machine/OS/camera, and some drivers even report a
-	# different size on their first frame while still negotiating format),
-	# so the keyboard/text layout is (re)computed from each frame's actual
-	# dimensions below, instead of trusting a single reading taken once
-	# before the loop starts.
-	button_list = None
-	last_frame_dims = None
+	overlay = ov.Overlay(screenWidth, screenHeight)
 
-	while event != 'Quit':
+	# The keyboard's layout is now sized to the overlay panel (fixed at
+	# startup), not the camera frame, so it only needs to be built once.
+	button_list = k.get_button_list(overlay.panel_width, overlay.panel_height)
 
-		key = cv2.waitKey(10)
-		if key == 27:  # ESC
-			break
+	try:
+		while event != 'Quit' and not overlay.should_quit:
 
-		ret, image = cap.read()
-		if not ret:
-			break
-		image = cv2.flip(image, 1)  # Mirror display
+			ret, image = cap.read()
+			if not ret:
+				break
+			image = cv2.flip(image, 1)  # Mirror display
 
-		frame_height, frame_width = image.shape[:2]
-		if (frame_width, frame_height) != last_frame_dims:
-			last_frame_dims = (frame_width, frame_height)
-			print(f'[DEBUG] Camera frame size: {frame_width}x{frame_height}')
+			frame_height, frame_width = image.shape[:2]
 
-			button_list = k.get_button_list(frame_width, frame_height)
+			image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-			text_font_scale = max(0.5, frame_height / 900.0)
-			text_thickness = max(1, int(round(thickness * text_font_scale)))
-			event_text_pos = (int(frame_width * 0.03), int(frame_height * 0.07))
-			control_text_pos = (int(frame_width * 0.03), int(frame_height * 0.13))
-			typed_text_pos = (int(frame_width * 0.03), int(frame_height * 0.95))
+			mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image)
+			timestamp_ms = int(time.time() * 1000) - start_time_ms
+			results = landmarker.detect_for_video(mp_image, timestamp_ms)
 
-		image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+			if results.hand_landmarks:
+				for hand_landmarks, handedness in zip(results.hand_landmarks, results.handedness):
 
-		mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image)
-		timestamp_ms = int(time.time() * 1000) - start_time_ms
-		results = landmarker.detect_for_video(mp_image, timestamp_ms)
+					abs_landmark_list = calc_landmark_list(image, hand_landmarks)
+					rel_landmark_list = pre_process_landmark(abs_landmark_list)
 
-		image = k.draw(image, button_list, control_state)
+					abs_landmark_list = np.array(abs_landmark_list)
+					rel_landmark_list = np.array(rel_landmark_list)
 
-		# EVENT TEXT
-		image = cv2.putText(image, event, event_text_pos, font,
-			text_font_scale, color, text_thickness, cv2.LINE_AA)
+					event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
 
-		# CONTROL STATE TEXT
-		image = cv2.putText(image, control_state, control_text_pos, font,
-			text_font_scale, color, text_thickness, cv2.LINE_AA)
+					event_history.append(event)
 
-		# TYPED TEXT
-		image = cv2.putText(image, typed_text, typed_text_pos, font,
-			text_font_scale, color, text_thickness, cv2.LINE_AA)
+					if event == 'Keyboard On':
+						control_state = 'Keyboard'
+					elif event == 'Keyboard Off':
+						control_state = 'Mouse'
 
-		if results.hand_landmarks:
-			for hand_landmarks, handedness in zip(results.hand_landmarks, results.handedness):
+					# Always drive the real OS cursor so it tracks your
+					# finger in both modes (so it visually hovers over the
+					# overlay's keys too) -- but only let it actually click
+					# the real desktop while in Mouse mode. In Keyboard
+					# mode the same pinch is instead intercepted below as a
+					# key press.
+					execute_event_fast(
+						event, abs_landmark_list, event_history,
+						frame_width, frame_height,
+						allow_click=(control_state == 'Mouse'),
+					)
 
-				abs_landmark_list = calc_landmark_list(image, hand_landmarks)
-				rel_landmark_list = pre_process_landmark(abs_landmark_list)
+					if control_state == 'Keyboard':
+						mouse_screen_pos = pyautogui.position()
+						button_list, typed_char = k.execute_event_keyboard(
+							event, mouse_screen_pos, overlay.origin(), button_list
+						)
 
-				abs_landmark_list = np.array(abs_landmark_list)
-				rel_landmark_list = np.array(rel_landmark_list)
+						if typed_char is not None:
+							typed_text = type_char(typed_char, typed_text)
 
-				# DEBUG: draw a marker at the middle fingertip's tracked
-				# position (the pointer finger for both Mouse and Keyboard
-				# modes) so it's visible on screen relative to the drawn
-				# keyboard keys / cursor target.
-				finger_px, finger_py = int(abs_landmark_list[c.MIDDLE_IDX][0]), int(abs_landmark_list[c.MIDDLE_IDX][1])
-				cv2.circle(image, (finger_px, finger_py), 10, (0, 255, 255), cv2.FILLED)
+			overlay.draw(event, control_state, typed_text, button_list)
+			overlay.pump()
 
-				x, y, z = rel_landmark_list[c.INDEX_IDX]
-				#print(x, y, z)
-
-				#abs_point_history.append(abs_landmark_list)
-
-				event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
-
-				event_history.append(event)
-
-				if event == 'Keyboard On':
-					control_state = 'Keyboard'
-				elif event == 'Keyboard Off':
-					control_state = 'Mouse'
-
-				
-
-				if control_state == 'Keyboard':
-					button_list, typed_char = k.execute_event_keyboard(event, abs_landmark_list, button_list)
-					image = k.draw(image, button_list, control_state)
-
-					if typed_char is not None:
-
-						if typed_char not in c.SPECIAL_KEYS:
-							typed_text += typed_char
-
-							if play_audio:
-								k.say_key_pressed(typed_char)
-						elif typed_char == '<':
-							typed_text = typed_text[:-1]							
-						elif typed_char == 'Clear':
-							typed_text = ''
-						elif typed_char == 'Space':
-							typed_text += ' '
-						print('In clipboard: ', typed_text)
-						pyperclip.copy(typed_text)
-
-				# Only drive the real OS mouse while in Mouse mode. Previously
-				# this ran unconditionally, so the same pinch/gesture events
-				# that typed a key were *also* moving/clicking the real
-				# cursor elsewhere on the desktop at the same time -- two
-				# independent things reacting to one gesture. Now Keyboard
-				# mode exclusively controls the on-screen keyboard, and
-				# Mouse mode exclusively controls the real cursor.
-				if control_state == 'Mouse':
-					execute_event_fast(event, abs_landmark_list, event_history, frame_width, frame_height)
-		
-		cv2.imshow('Video', image)
-
-	cap.release()
-	cv2.destroyAllWindows()
-	landmarker.close()
+	finally:
+		cap.release()
+		overlay.close()
+		landmarker.close()
 
 
 
 
 if __name__ == '__main__':
 	main()
-
 

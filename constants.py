@@ -29,5 +29,3 @@ MOUSE_Y_SENS = 2.0
 # Raised to track much closer to the fingertip (like the debug dot)
 # while still smoothing out a bit of frame-to-frame hand-tracking jitter.
 MOUSE_SPEED = 0.65
-
-SPECIAL_KEYS = ['<', 'Copy', 'Clear', 'Space']

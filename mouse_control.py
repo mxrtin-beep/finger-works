@@ -48,15 +48,23 @@ def execute_event(event, abs_landmark_list, rel_landmark_list, abs_landmark_velo
 		#print(f'Moving Mouse to {index_x_pos}, {index_y_pos}.')
 
 
-def execute_event_fast(event, abs_landmark_list, event_history, frame_width, frame_height):
+def execute_event_fast(event, abs_landmark_list, event_history, frame_width, frame_height, allow_click):
 
-	### Left click: [Mouse] [LC] [Mouse]
-	### Drag: [LC], [LC], [LC]
-	if event == 'Left-Click':
-		pyautogui.click()
+	# The cursor is always moved (below) so it visually tracks your finger
+	# in both Mouse and Keyboard mode -- e.g. to hover it over the
+	# keyboard overlay's keys. But actually *clicking* the real desktop
+	# (whatever's under the cursor) should only happen in Mouse mode;
+	# in Keyboard mode the same pinch gesture is instead intercepted as a
+	# key press by keyboard.execute_event_keyboard(), so it must not also
+	# fire a real OS click here.
+	if allow_click:
+		### Left click: [Mouse] [LC] [Mouse]
+		### Drag: [LC], [LC], [LC]
+		if event == 'Left-Click':
+			pyautogui.click()
 
-	if event == 'Right-Click':
-		pyautogui.click(button='right')
+		if event == 'Right-Click':
+			pyautogui.click(button='right')
 
 	smooth_window = 16
 

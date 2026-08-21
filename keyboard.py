@@ -1,6 +1,5 @@
 
 
-import cv2
 import os
 
 import constants as c
@@ -10,7 +9,7 @@ class Button():
 		self.pos = pos
 		self.size = size
 		self.text = text
-		self.color = (0, 0, 0)
+		self.color = 'idle'  # 'idle' | 'hover' | 'active' -- overlay.py maps this to a fill color
 
 
 def say_key_pressed(typed_char):
@@ -19,52 +18,33 @@ def say_key_pressed(typed_char):
 	else:
 		os.system(' say ' + str(typed_char).lower())
 
-def draw(img, buttonList, control_state):
 
-	if control_state == 'Keyboard':
-		for button in buttonList:
-			x, y = button.pos
-			w, h = button.size
-			color = button.color
-
-			# Scale font/line thickness to the button's own size so the
-			# keyboard reads correctly at any camera resolution.
-			char_size = h / 22.0
-			thickness = max(1, int(round(h / 25.0)))
-
-			#cvzone.cornerRect(img, (button.pos[0], button.pos[1],
-			#	button.size[0],button.size[0]), 20 ,rt=0)
-			cv2.rectangle(img, button.pos, (int(x + w), int(y + h)), (255, 144, 30), cv2.FILLED)
-			cv2.putText(img, button.text, (int(x + w * 0.2), int(y + h * 0.7)),
-				cv2.FONT_HERSHEY_PLAIN, char_size / len(button.text), color, thickness)
-	return img
-
-
-
-def get_button_list(frame_width, frame_height):
-	"""Build the on-screen keyboard, laid out as a fraction of the actual
-	camera frame size so it fits (and stays legible) regardless of the
-	resolution the connected camera provides."""
+def get_button_list(panel_width, panel_height):
+	"""Build the on-screen keyboard, laid out as a fraction of the overlay
+	panel's (fixed) size -- unlike the old video-frame-based layout, this
+	no longer depends on the camera's resolution at all, since the
+	keyboard is now drawn on its own overlay panel rather than over the
+	webcam feed."""
 
 	keyboard_keys = [
 				['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '<'],
 				["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
 				["A", "S", "D", "F", "G", "H", "J", "K", "L", ";"],
 				["Z", "X", "C", "V", "B", "N", "M", ",", ".", "/"],
-				['Space', 'Clear']
+				['Space', 'Clear', 'Copy', 'Cut', 'Paste'],
 				]
 
 	num_rows = len(keyboard_keys)
 	max_cols = max(len(row) for row in keyboard_keys)
 
 	# Leave room at the top for the event/control-state text and at the
-	# bottom for the typed-text line.
-	margin_x = frame_width * 0.05
-	margin_top = frame_height * 0.20
-	margin_bottom = frame_height * 0.08
+	# bottom for the typed-text preview line.
+	margin_x = panel_width * 0.05
+	margin_top = panel_height * 0.20
+	margin_bottom = panel_height * 0.10
 
-	usable_width = frame_width - 2 * margin_x
-	usable_height = frame_height - margin_top - margin_bottom
+	usable_width = panel_width - 2 * margin_x
+	usable_height = panel_height - margin_top - margin_bottom
 
 	# +0.5 columns of slack so the half-key offset on alternating rows
 	# still fits within usable_width.
@@ -97,19 +77,18 @@ def get_button_list(frame_width, frame_height):
 _was_clicking = False
 
 
-def execute_event_keyboard(event, abs_landmark_list, button_list):
+def execute_event_keyboard(event, mouse_screen_pos, panel_origin, button_list):
 	global _was_clicking
 
-	# Hit-test against the middle fingertip's position in the *video frame*
-	# (the same pixel coordinate space the keyboard is drawn in) rather
-	# than the OS mouse cursor, which lives in a completely different
-	# coordinate space (the screen) and would only ever line up by chance.
-	# The middle finger is used (matching mouse_control's Mouse-mode
-	# pointer) instead of the index finger, since the index finger is the
-	# one that moves as part of the thumb-index pinch used for clicking --
-	# using it to aim would mean the click gesture drags your aim off the
-	# key right as you try to press it.
-	finger_x, finger_y = abs_landmark_list[c.MIDDLE_IDX][0], abs_landmark_list[c.MIDDLE_IDX][1]
+	# Hit-test against the real OS mouse cursor's position, converted into
+	# this panel's local coordinate space (the same space button_list's
+	# positions are in). The cursor is being driven every frame by
+	# mouse_control regardless of Mouse/Keyboard mode, so it visually
+	# tracks your finger across the overlay panel; this just asks "which
+	# key (if any) is it currently over".
+	origin_x, origin_y = panel_origin
+	finger_x = mouse_screen_pos[0] - origin_x
+	finger_y = mouse_screen_pos[1] - origin_y
 
 	is_clicking = (event == 'Left-Click')
 	fire_click = is_clicking and not _was_clicking
@@ -117,7 +96,7 @@ def execute_event_keyboard(event, abs_landmark_list, button_list):
 
 	typed_char = None
 	hit_button = None
-	### Detect if finger is over a key
+	### Detect if the cursor is over a key
 
 	for button in button_list:
 		x, y = button.pos
@@ -129,22 +108,21 @@ def execute_event_keyboard(event, abs_landmark_list, button_list):
 			hit_button = button
 
 			if event == 'Mousing':
-				button.color = (0, 255, 0)
+				button.color = 'hover'
 			elif is_clicking:
-				button.color = (255, 0, 0)
+				button.color = 'active'
 				if fire_click:
 					typed_char = button.text
 					print(button.text)
 		else:
-			button.color = (0, 0, 0)
+			button.color = 'idle'
 
 	# DEBUG: on each new click (not every frame it's held), print the
-	# fingertip position and either the key it landed on, or (if it
-	# missed everything) the nearest key and how far off it was, so a
-	# coordinate mismatch is easy to spot from the console.
+	# cursor position and either the key it landed on, or (if it missed
+	# everything) the nearest key and how far off it was.
 	if fire_click:
 		if hit_button is not None:
-			print(f'[DEBUG] click at finger=({finger_x:.0f},{finger_y:.0f}) '
+			print(f'[DEBUG] click at cursor=({finger_x:.0f},{finger_y:.0f}) '
 				f'hit "{hit_button.text}" pos={hit_button.pos} size={hit_button.size}')
 		else:
 			nearest = min(
@@ -152,9 +130,7 @@ def execute_event_keyboard(event, abs_landmark_list, button_list):
 				key=lambda b: (b.pos[0] + b.size[0] / 2 - finger_x) ** 2
 					+ (b.pos[1] + b.size[1] / 2 - finger_y) ** 2,
 			)
-			print(f'[DEBUG] click at finger=({finger_x:.0f},{finger_y:.0f}) '
+			print(f'[DEBUG] click at cursor=({finger_x:.0f},{finger_y:.0f}) '
 				f'missed all keys; nearest is "{nearest.text}" pos={nearest.pos} size={nearest.size}')
 
 	return button_list, typed_char
-
-
