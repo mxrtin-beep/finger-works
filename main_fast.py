@@ -125,11 +125,29 @@ def main():
 
 	event = ''
 
-	button_list = k.get_button_list()
-
 	control_state = 'Mouse'	# Mouse or Keyboard
 
 	typed_text = '>'
+
+	# The camera may not honor the requested cap_width/cap_height above
+	# (this varies by machine/OS/camera), so read back the actual frame
+	# size and lay out the on-screen keyboard and text relative to that,
+	# instead of assuming a fixed resolution.
+	ret, first_frame = cap.read()
+	if not ret:
+		print('Could not read from camera.')
+		cap.release()
+		landmarker.close()
+		return
+	frame_height, frame_width = first_frame.shape[:2]
+
+	button_list = k.get_button_list(frame_width, frame_height)
+
+	text_font_scale = max(0.5, frame_height / 900.0)
+	text_thickness = max(1, int(round(thickness * text_font_scale)))
+	event_text_pos = (int(frame_width * 0.03), int(frame_height * 0.07))
+	control_text_pos = (int(frame_width * 0.03), int(frame_height * 0.13))
+	typed_text_pos = (int(frame_width * 0.03), int(frame_height * 0.95))
 
 	while event != 'Quit':
 
@@ -151,16 +169,16 @@ def main():
 		image = k.draw(image, button_list, control_state)
 
 		# EVENT TEXT
-		image = cv2.putText(image, event, (50, 50), font, 
-			fontScale, color, thickness, cv2.LINE_AA)
+		image = cv2.putText(image, event, event_text_pos, font,
+			text_font_scale, color, text_thickness, cv2.LINE_AA)
 
 		# CONTROL STATE TEXT
-		image = cv2.putText(image, control_state, (50, 100), font, 
-			fontScale, color, thickness, cv2.LINE_AA)
+		image = cv2.putText(image, control_state, control_text_pos, font,
+			text_font_scale, color, text_thickness, cv2.LINE_AA)
 
 		# TYPED TEXT
-		image = cv2.putText(image, typed_text, (50, 600), font, 
-			fontScale, color, thickness, cv2.LINE_AA)
+		image = cv2.putText(image, typed_text, typed_text_pos, font,
+			text_font_scale, color, text_thickness, cv2.LINE_AA)
 
 		if results.hand_landmarks:
 			for hand_landmarks, handedness in zip(results.hand_landmarks, results.handedness):
