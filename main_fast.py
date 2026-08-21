@@ -71,6 +71,13 @@ def calc_landmark_list(image, landmarks):
 
 def pre_process_landmark(landmark_list):
 
+	# Work on a copy: this function mutates entries in place, and since
+	# Python lists are passed by reference, mutating the caller's list
+	# here would silently corrupt their `abs_landmark_list` (which needs
+	# to stay in true image-pixel coordinates) into these wrist-relative
+	# ones. That aliasing bug is what broke the keyboard's hit-testing.
+	landmark_list = [point[:] for point in landmark_list]
+
 	base_x, base_y = landmark_list[0][0], landmark_list[0][1]
 
 	for i in range(len(landmark_list)):
