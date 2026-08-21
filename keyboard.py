@@ -89,7 +89,16 @@ def get_button_list(frame_width, frame_height):
 	return buttonList
 
 
+# Whether the previous frame was already mid Left-Click (pinch held).
+# Module-level so execute_event_keyboard() can fire a key press once per
+# pinch (on the frame it starts) instead of once per frame the pinch is
+# held -- otherwise a pinch lasting several frames (nearly all of them,
+# at 30fps) types the same letter that many times.
+_was_clicking = False
+
+
 def execute_event_keyboard(event, abs_landmark_list, button_list):
+	global _was_clicking
 
 	# Hit-test against the middle fingertip's position in the *video frame*
 	# (the same pixel coordinate space the keyboard is drawn in) rather
@@ -101,6 +110,10 @@ def execute_event_keyboard(event, abs_landmark_list, button_list):
 	# using it to aim would mean the click gesture drags your aim off the
 	# key right as you try to press it.
 	finger_x, finger_y = abs_landmark_list[c.MIDDLE_IDX][0], abs_landmark_list[c.MIDDLE_IDX][1]
+
+	is_clicking = (event == 'Left-Click')
+	fire_click = is_clicking and not _was_clicking
+	_was_clicking = is_clicking
 
 	typed_char = None
 	hit_button = None
@@ -117,18 +130,19 @@ def execute_event_keyboard(event, abs_landmark_list, button_list):
 
 			if event == 'Mousing':
 				button.color = (0, 255, 0)
-			elif event == 'Left-Click':
+			elif is_clicking:
 				button.color = (255, 0, 0)
-				typed_char = button.text
-				print(button.text)
+				if fire_click:
+					typed_char = button.text
+					print(button.text)
 		else:
 			button.color = (0, 0, 0)
 
-	# DEBUG: on every click attempt, print the fingertip position and
-	# either the key it landed on, or (if it missed everything) the
-	# nearest key and how far off it was, so a coordinate mismatch is
-	# easy to spot from the console.
-	if event == 'Left-Click':
+	# DEBUG: on each new click (not every frame it's held), print the
+	# fingertip position and either the key it landed on, or (if it
+	# missed everything) the nearest key and how far off it was, so a
+	# coordinate mismatch is easy to spot from the console.
+	if fire_click:
 		if hit_button is not None:
 			print(f'[DEBUG] click at finger=({finger_x:.0f},{finger_y:.0f}) '
 				f'hit "{hit_button.text}" pos={hit_button.pos} size={hit_button.size}')

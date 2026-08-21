@@ -39,7 +39,15 @@ def get_direction(x_vel, y_vel, x_cutoff, y_cutoff):
 	return direction
 
 
+# Whether the previous frame's hand pose matched the keyboard-toggle
+# gesture (a closed fist). Module-level so get_event_fast() can detect
+# the *transition* into a fist rather than re-firing every frame the
+# fist is held.
+_was_fist = False
+
+
 def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
+	global _was_fist
 
 	finger_pos = rel_landmark_list[c.FINGER_INDICES]
 
@@ -54,10 +62,28 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 	if np.array_equal(finger_out_arr, np.array([True, False, False, False, True])):
 		return 'Quit'
 
-	if np.array_equal(finger_out_arr, np.array([True, False, False, False, False])):
-		if control_state == 'Keyboard':
-			return 'Keyboard Off'
-		return 'Keyboard On'
+	# Closed fist (no fingers extended): toggle Mouse/Keyboard mode.
+	# Edge-triggered on the fist *starting*, not fired every frame it's
+	# held -- otherwise holding the pose for more than one frame flips
+	# the mode back and forth every frame (Keyboard -> Mouse -> Keyboard
+	# -> ...), and whichever state happens to be active in the exact
+	# frame you release the gesture is the one that "sticks". That race
+	# is what made the toggle feel unreliable, independent of which
+	# specific gesture was used.
+	is_fist = np.array_equal(finger_out_arr, np.array([False, False, False, False, False]))
+	toggle_keyboard = is_fist and not _was_fist
+	_was_fist = is_fist
+
+	if is_fist:
+		if toggle_keyboard:
+			if control_state == 'Keyboard':
+				return 'Keyboard Off'
+			return 'Keyboard On'
+		# Fist held past its first frame: do nothing and wait for release,
+		# rather than falling through to the click-distance checks below,
+		# where a curled thumb pressed against the palm would otherwise
+		# read as a spurious Left/Right-Click.
+		return 'Mousing'
 
 	# Clicking
 	thumb_index_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.INDEX_IDX])
