@@ -1,4 +1,5 @@
 
+import datetime
 import os
 import time
 import urllib.request
@@ -22,6 +23,8 @@ import constants as c
 import keyboard as k
 import overlay as ov
 
+
+__version__ = '0.2.0'
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hand_landmarker.task')
 MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
@@ -91,6 +94,17 @@ def pre_process_landmark(landmark_list):
 	return landmark_list
 
 
+def copy_or_cut_typed_buffer(typed_text, should_clear):
+	"""Copy the keyboard's own typed-text buffer (the text after the '>'
+	on the overlay) to the OS clipboard, and optionally clear it -- this
+	is a separate, smaller scratchpad of what you've typed *here*,
+	distinct from the 'Copy'/'Cut' keys which act on whatever's selected
+	elsewhere on the desktop."""
+	content = typed_text[1:] if typed_text.startswith('>') else typed_text
+	pyperclip.copy(content)
+	return '>' if should_clear else typed_text
+
+
 def type_char(typed_char, typed_text):
 	"""Send a real keystroke (or clipboard hotkey) to whatever window has
 	OS focus, and return the updated local preview-text string shown on
@@ -121,6 +135,12 @@ def type_char(typed_char, typed_text):
 		pyautogui.hotkey('ctrl', 'x')
 		return typed_text
 
+	if typed_char == 'Copy Typed':
+		return copy_or_cut_typed_buffer(typed_text, should_clear=False)
+
+	if typed_char == 'Cut Typed':
+		return copy_or_cut_typed_buffer(typed_text, should_clear=True)
+
 	if typed_char == 'Paste':
 		# Read the clipboard directly and type its contents as real
 		# keystrokes, instead of simulating Ctrl+V -- this doesn't depend
@@ -144,6 +164,12 @@ def type_char(typed_char, typed_text):
 
 
 def main():
+
+	print(
+		f'FingerWorks v{__version__} -- started '
+		f'{datetime.datetime.now():%Y-%m-%d %H:%M:%S} '
+		f'(screen {screenWidth}x{screenHeight})'
+	)
 
 	cap_device = device
 	cap_width = width
@@ -218,6 +244,12 @@ def main():
 						control_state = 'Keyboard'
 					elif event == 'Keyboard Off':
 						control_state = 'Mouse'
+					elif event == 'Cut Typed Gesture':
+						# Gesture shortcut for the 'Cut Typed' key: index +
+						# middle extended ("scissors"), cutting the
+						# keyboard's typed-text buffer without needing to
+						# aim at that specific key.
+						typed_text = copy_or_cut_typed_buffer(typed_text, should_clear=True)
 
 					# Always drive the real OS cursor so it tracks your
 					# finger in both modes (so it visually hovers over the

@@ -31,10 +31,22 @@ def get_button_list(panel_width, panel_height):
 				["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
 				["A", "S", "D", "F", "G", "H", "J", "K", "L", ";"],
 				["Z", "X", "C", "V", "B", "N", "M", ",", ".", "/"],
-				['Space', 'Clear', 'Copy', 'Cut', 'Paste'],
 				]
 
-	num_rows = len(keyboard_keys)
+	# A separate, wider-buttoned row for utility actions -- distinct from
+	# the QWERTY grid above since these have longer labels and there are
+	# fewer of them, so they get more room each rather than being squeezed
+	# into narrow single-character-sized cells.
+	#
+	# 'Copy'/'Cut' act on whatever's currently selected elsewhere on the
+	# desktop (via a real Ctrl+C/Ctrl+X). 'Copy Typed'/'Cut Typed' instead
+	# act on this keyboard's own typed-text buffer (the text shown after
+	# the '>' on the overlay) -- a separate, smaller scratchpad of what
+	# you've typed here, independent of whatever else you've selected on
+	# your desktop.
+	utility_keys = ['Space', 'Clear', 'Copy', 'Cut', 'Copy Typed', 'Cut Typed', 'Paste']
+
+	num_letter_rows = len(keyboard_keys)
 	max_cols = max(len(row) for row in keyboard_keys)
 
 	# Leave room at the top for the event/control-state text and at the
@@ -46,10 +58,13 @@ def get_button_list(panel_width, panel_height):
 	usable_width = panel_width - 2 * margin_x
 	usable_height = panel_height - margin_top - margin_bottom
 
+	# The utility row is given extra height (for its longer, wrapped
+	# labels), counted here as worth 1.3 letter-rows.
+	cell_h = usable_height / (num_letter_rows + 1.3)
+
 	# +0.5 columns of slack so the half-key offset on alternating rows
 	# still fits within usable_width.
 	cell_w = usable_width / (max_cols + 0.5)
-	cell_h = usable_height / num_rows
 
 	button_w = cell_w * 0.85
 	button_h = cell_h * 0.85
@@ -65,6 +80,19 @@ def get_button_list(panel_width, panel_height):
 			b = Button(pos, key, size=[int(button_w), int(button_h)])
 
 			buttonList.append(b)
+
+	# Utility row: spread evenly across the full usable width (not the
+	# QWERTY grid) since it holds fewer, wider buttons.
+	utility_cell_w = usable_width / len(utility_keys)
+	utility_button_w = utility_cell_w * 0.92
+	utility_button_h = cell_h * 1.3 * 0.85
+	utility_row_y = margin_top + cell_h * num_letter_rows
+
+	for col_idx, key in enumerate(utility_keys):
+		pos = [int(margin_x + utility_cell_w * col_idx), int(utility_row_y)]
+		b = Button(pos, key, size=[int(utility_button_w), int(utility_button_h)])
+
+		buttonList.append(b)
 
 	return buttonList
 

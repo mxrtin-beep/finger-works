@@ -45,9 +45,13 @@ def get_direction(x_vel, y_vel, x_cutoff, y_cutoff):
 # fist is held.
 _was_fist = False
 
+# Same idea, for the "scissors" gesture (index + middle extended, like a
+# peace sign / scissors) used to cut the keyboard's typed-text buffer.
+_was_scissors = False
+
 
 def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
-	global _was_fist
+	global _was_fist, _was_scissors
 
 	finger_pos = rel_landmark_list[c.FINGER_INDICES]
 
@@ -83,6 +87,21 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 		# rather than falling through to the click-distance checks below,
 		# where a curled thumb pressed against the palm would otherwise
 		# read as a spurious Left/Right-Click.
+		return 'Mousing'
+
+	# Index + middle extended, other three folded ("scissors" / peace
+	# sign): cut the keyboard's typed-text buffer, as a gesture shortcut
+	# for the on-screen 'Cut Typed' key. Edge-triggered like the fist
+	# toggle, and only meaningful in Keyboard mode -- in Mouse mode it's
+	# just treated as an ordinary hand pose (returns 'Mousing') so it
+	# doesn't do anything unexpected while you're just moving the cursor.
+	is_scissors = np.array_equal(finger_out_arr, np.array([False, True, True, False, False]))
+	cut_typed = is_scissors and not _was_scissors and control_state == 'Keyboard'
+	_was_scissors = is_scissors
+
+	if is_scissors:
+		if cut_typed:
+			return 'Cut Typed Gesture'
 		return 'Mousing'
 
 	# Clicking

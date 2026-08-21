@@ -5,10 +5,6 @@ import numpy as np
 
 screenWidth, screenHeight = pyautogui.size()
 
-print(f'Screen Dimensions: {screenWidth, screenHeight}')
-
-curr_mouse_x, curr_mouse_y = pyautogui.position()
-
 
 # Ideas for dragging mouse
 

@@ -126,9 +126,14 @@ class Overlay:
 				w, h = button.size
 				fill = _STATE_COLORS.get(button.color, _STATE_COLORS['idle'])
 				c.create_rectangle(x, y, x + w, y + h, fill=fill, outline='#555555')
+
+				# Scale the font down for longer labels ('Copy Typed' etc.)
+				# and let create_text wrap onto a second line (via `width`)
+				# rather than overflowing the button.
+				font_size = max(8, min(int(h / 3), int(w * 1.6 / max(1, len(button.text)))))
 				c.create_text(
-					x + w / 2, y + h / 2, fill='white',
-					font=('Segoe UI', max(8, int(h / 3))), text=button.text,
+					x + w / 2, y + h / 2, fill='white', width=w * 0.92,
+					font=('Segoe UI', font_size), text=button.text,
 				)
 
 		c.create_text(
