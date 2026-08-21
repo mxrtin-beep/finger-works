@@ -240,7 +240,7 @@ def main():
 						print('In clipboard: ', typed_text)
 						pyperclip.copy(typed_text)
 
-				execute_event_fast(event, abs_landmark_list, event_history)
+				execute_event_fast(event, abs_landmark_list, event_history, frame_width, frame_height)
 		
 		cv2.imshow('Video', image)
 
