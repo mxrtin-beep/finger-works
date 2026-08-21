@@ -50,8 +50,9 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
 
 
-	#if np.array_equal(finger_out_arr, np.array([False, False, False, False, True])):
-	#	return 'Quit'
+	# Thumb + pinky extended, other three fingers folded: quit gesture.
+	if np.array_equal(finger_out_arr, np.array([True, False, False, False, True])):
+		return 'Quit'
 
 	if np.array_equal(finger_out_arr, np.array([True, False, False, False, False])):
 		if control_state == 'Keyboard':
