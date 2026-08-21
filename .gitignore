@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Downloaded MediaPipe Tasks model (fetched automatically at runtime)
+hand_landmarker.task

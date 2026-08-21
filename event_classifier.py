@@ -39,7 +39,19 @@ def get_direction(x_vel, y_vel, x_cutoff, y_cutoff):
 	return direction
 
 
+# Whether the previous frame's hand pose matched the keyboard-toggle
+# gesture (a closed fist). Module-level so get_event_fast() can detect
+# the *transition* into a fist rather than re-firing every frame the
+# fist is held.
+_was_fist = False
+
+# Same idea, for the "scissors" gesture (index + middle extended, like a
+# peace sign / scissors) used to cut the keyboard's typed-text buffer.
+_was_scissors = False
+
+
 def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
+	global _was_fist, _was_scissors
 
 	finger_pos = rel_landmark_list[c.FINGER_INDICES]
 
@@ -50,13 +62,47 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
 
 
-	#if np.array_equal(finger_out_arr, np.array([False, False, False, False, True])):
-	#	return 'Quit'
+	# Thumb + pinky extended, other three fingers folded: quit gesture.
+	if np.array_equal(finger_out_arr, np.array([True, False, False, False, True])):
+		return 'Quit'
 
-	if np.array_equal(finger_out_arr, np.array([True, False, False, False, False])):
-		if control_state == 'Keyboard':
-			return 'Keyboard Off'
-		return 'Keyboard On'
+	# Closed fist (no fingers extended): toggle Mouse/Keyboard mode.
+	# Edge-triggered on the fist *starting*, not fired every frame it's
+	# held -- otherwise holding the pose for more than one frame flips
+	# the mode back and forth every frame (Keyboard -> Mouse -> Keyboard
+	# -> ...), and whichever state happens to be active in the exact
+	# frame you release the gesture is the one that "sticks". That race
+	# is what made the toggle feel unreliable, independent of which
+	# specific gesture was used.
+	is_fist = np.array_equal(finger_out_arr, np.array([False, False, False, False, False]))
+	toggle_keyboard = is_fist and not _was_fist
+	_was_fist = is_fist
+
+	if is_fist:
+		if toggle_keyboard:
+			if control_state == 'Keyboard':
+				return 'Keyboard Off'
+			return 'Keyboard On'
+		# Fist held past its first frame: do nothing and wait for release,
+		# rather than falling through to the click-distance checks below,
+		# where a curled thumb pressed against the palm would otherwise
+		# read as a spurious Left/Right-Click.
+		return 'Mousing'
+
+	# Index + middle extended, other three folded ("scissors" / peace
+	# sign): cut the keyboard's typed-text buffer, as a gesture shortcut
+	# for the on-screen 'Cut Typed' key. Edge-triggered like the fist
+	# toggle, and only meaningful in Keyboard mode -- in Mouse mode it's
+	# just treated as an ordinary hand pose (returns 'Mousing') so it
+	# doesn't do anything unexpected while you're just moving the cursor.
+	is_scissors = np.array_equal(finger_out_arr, np.array([False, True, True, False, False]))
+	cut_typed = is_scissors and not _was_scissors and control_state == 'Keyboard'
+	_was_scissors = is_scissors
+
+	if is_scissors:
+		if cut_typed:
+			return 'Cut Typed Gesture'
+		return 'Mousing'
 
 	# Clicking
 	thumb_index_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.INDEX_IDX])
