@@ -48,6 +48,39 @@ def execute_event(event, abs_landmark_list, rel_landmark_list, abs_landmark_velo
 		#print(f'Moving Mouse to {index_x_pos}, {index_y_pos}.')
 
 
+# Adaptive smoothing state for the raw fingertip position (camera-frame
+# pixel units), persisted across calls. Small frame-to-frame movement --
+# natural hand tremor plus landmark-estimation noise -- is heavily damped,
+# while large, intentional movements pass through with little smoothing.
+# Without this, tightening MOUSE_SPEED (to fix the earlier sluggishness)
+# also made the cursor amplify that noise, making it hard to hold still
+# over a small key. Jitter big-vs-small is judged relative to the frame
+# width so it holds up across camera resolutions.
+_filtered_x = None
+_filtered_y = None
+
+_JITTER_RADIUS_FRAC = 0.01   # frame-widths; deltas below this count as noise
+_JITTER_ALPHA = 0.15         # smoothing factor applied to jitter-sized movement
+_INTENT_ALPHA = 0.9          # smoothing factor applied to larger, intentional movement
+
+
+def _smooth_fingertip(raw_x, raw_y, frame_width):
+	global _filtered_x, _filtered_y
+
+	if _filtered_x is None:
+		_filtered_x, _filtered_y = raw_x, raw_y
+		return raw_x, raw_y
+
+	jitter_radius = frame_width * _JITTER_RADIUS_FRAC
+	delta = ((raw_x - _filtered_x) ** 2 + (raw_y - _filtered_y) ** 2) ** 0.5
+	alpha = _JITTER_ALPHA if delta < jitter_radius else _INTENT_ALPHA
+
+	_filtered_x += alpha * (raw_x - _filtered_x)
+	_filtered_y += alpha * (raw_y - _filtered_y)
+
+	return _filtered_x, _filtered_y
+
+
 def execute_event_fast(event, abs_landmark_list, event_history, frame_width, frame_height, allow_click):
 
 	# The cursor is always moved (below) so it visually tracks your finger
@@ -66,10 +99,10 @@ def execute_event_fast(event, abs_landmark_list, event_history, frame_width, fra
 		if event == 'Right-Click':
 			pyautogui.click(button='right')
 
-	smooth_window = 16
-
 	raw_x = abs_landmark_list[c.MIDDLE_IDX][0]
 	raw_y = abs_landmark_list[c.MIDDLE_IDX][1]
+
+	raw_x, raw_y = _smooth_fingertip(raw_x, raw_y, frame_width)
 
 	# Normalize the fingertip's position within the actual camera frame
 	# (0..1 on each axis) and map that onto the screen, instead of the old

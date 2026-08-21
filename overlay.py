@@ -1,4 +1,5 @@
 
+import sys
 import tkinter as tk
 
 
@@ -15,6 +16,32 @@ _STATE_COLORS = {
 def _rgb_to_hex(rgb):
 	r, g, b = rgb
 	return f'#{r:02x}{g:02x}{b:02x}'
+
+
+def _make_window_noactivate(hwnd):
+	"""Best-effort, Windows only: mark this window as one that never
+	receives keyboard focus.
+
+	Without this, there's no guarantee our own overlay window can't end up
+	with keyboard focus at some point (e.g. window-manager quirks around
+	topmost/override-redirect windows). If that happened while typing,
+	real keystrokes -- including the Cut/Copy/Paste hotkeys -- would go to
+	this invisible panel instead of whatever app the user is actually
+	using. Setting WS_EX_NOACTIVATE at the OS level rules that out
+	entirely, rather than hoping it never happens.
+	"""
+	if sys.platform != 'win32':
+		return
+	try:
+		import ctypes
+		GWL_EXSTYLE = -20
+		WS_EX_NOACTIVATE = 0x08000000
+		WS_EX_TOOLWINDOW = 0x00000080
+		user32 = ctypes.windll.user32
+		style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+		user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
+	except Exception as exc:
+		print(f'[WARN] Could not set no-activate window style: {exc}')
 
 
 class Overlay:
@@ -48,6 +75,9 @@ class Overlay:
 		self.should_quit = False
 		self.root.bind('<Escape>', lambda _event: self._quit())
 		self.root.protocol('WM_DELETE_WINDOW', self._quit)
+
+		self.root.update_idletasks()  # make sure the real window/HWND exists
+		_make_window_noactivate(self.root.winfo_id())
 
 		self.canvas = tk.Canvas(
 			self.root,

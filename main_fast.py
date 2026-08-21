@@ -6,6 +6,7 @@ import urllib.request
 import cv2
 import mediapipe as mp
 import pyautogui
+import pyperclip
 from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python.vision import (
 	HandLandmarker,
@@ -110,6 +111,9 @@ def type_char(typed_char, typed_text):
 		return ''
 
 	if typed_char == 'Copy':
+		# No way around simulating the real shortcut here -- only the
+		# focused app knows what's currently selected, so it has to do the
+		# actual copying into the OS clipboard itself.
 		pyautogui.hotkey('ctrl', 'c')
 		return typed_text
 
@@ -118,7 +122,14 @@ def type_char(typed_char, typed_text):
 		return typed_text
 
 	if typed_char == 'Paste':
-		pyautogui.hotkey('ctrl', 'v')
+		# Read the clipboard directly and type its contents as real
+		# keystrokes, instead of simulating Ctrl+V -- this doesn't depend
+		# on the focused app correctly intercepting the paste shortcut
+		# (some apps use a different one, or can swallow/mishandle a
+		# synthetic Ctrl+V), so it's more reliable across different apps.
+		clipboard_text = pyperclip.paste()
+		if clipboard_text:
+			pyautogui.typewrite(clipboard_text)
 		return typed_text
 
 	# Regular character key. pyautogui.press() accepts single letters,
