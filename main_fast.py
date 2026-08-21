@@ -198,10 +198,11 @@ def main():
 				abs_landmark_list = np.array(abs_landmark_list)
 				rel_landmark_list = np.array(rel_landmark_list)
 
-				# DEBUG: draw a marker at the index fingertip's tracked
-				# position so it's visible on screen relative to the
-				# drawn keyboard keys.
-				finger_px, finger_py = int(abs_landmark_list[c.INDEX_IDX][0]), int(abs_landmark_list[c.INDEX_IDX][1])
+				# DEBUG: draw a marker at the middle fingertip's tracked
+				# position (the pointer finger for both Mouse and Keyboard
+				# modes) so it's visible on screen relative to the drawn
+				# keyboard keys / cursor target.
+				finger_px, finger_py = int(abs_landmark_list[c.MIDDLE_IDX][0]), int(abs_landmark_list[c.MIDDLE_IDX][1])
 				cv2.circle(image, (finger_px, finger_py), 10, (0, 255, 255), cv2.FILLED)
 
 				x, y, z = rel_landmark_list[c.INDEX_IDX]

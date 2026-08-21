@@ -91,11 +91,16 @@ def get_button_list(frame_width, frame_height):
 
 def execute_event_keyboard(event, abs_landmark_list, button_list):
 
-	# Hit-test against the index fingertip's position in the *video frame*
+	# Hit-test against the middle fingertip's position in the *video frame*
 	# (the same pixel coordinate space the keyboard is drawn in) rather
 	# than the OS mouse cursor, which lives in a completely different
 	# coordinate space (the screen) and would only ever line up by chance.
-	finger_x, finger_y = abs_landmark_list[c.INDEX_IDX][0], abs_landmark_list[c.INDEX_IDX][1]
+	# The middle finger is used (matching mouse_control's Mouse-mode
+	# pointer) instead of the index finger, since the index finger is the
+	# one that moves as part of the thumb-index pinch used for clicking --
+	# using it to aim would mean the click gesture drags your aim off the
+	# key right as you try to press it.
+	finger_x, finger_y = abs_landmark_list[c.MIDDLE_IDX][0], abs_landmark_list[c.MIDDLE_IDX][1]
 
 	typed_char = None
 	hit_button = None
