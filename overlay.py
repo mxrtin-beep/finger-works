@@ -127,13 +127,19 @@ class Overlay:
 				fill = _STATE_COLORS.get(button.color, _STATE_COLORS['idle'])
 				c.create_rectangle(x, y, x + w, y + h, fill=fill, outline='#555555')
 
-				# Scale the font down for longer labels ('Copy Typed' etc.)
-				# and let create_text wrap onto a second line (via `width`)
-				# rather than overflowing the button.
-				font_size = max(8, min(int(h / 3), int(w * 1.6 / max(1, len(button.text)))))
+				# Two-word labels ('Copy Typed', 'Cut Typed') are split onto
+				# their own centered line each, rather than relying on
+				# create_text's auto-wrap -- its default justify is 'left',
+				# which left-aligns wrapped lines within the (centered) text
+				# block instead of centering each line, and auto-wrap's
+				# line breaks depend on a width estimate that doesn't always
+				# land where you'd want it to.
+				display_text = button.text.replace(' ', '\n', 1)
+				font_size = max(8, int(h / 3))
 				c.create_text(
-					x + w / 2, y + h / 2, fill='white', width=w * 0.92,
-					font=('Segoe UI', font_size), text=button.text,
+					x + w / 2, y + h / 2, fill='white',
+					anchor='center', justify='center',
+					font=('Segoe UI', font_size), text=display_text,
 				)
 
 		c.create_text(
