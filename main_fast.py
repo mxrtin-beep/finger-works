@@ -1,6 +1,16 @@
 
+import os
+import time
+import urllib.request
+
 import cv2
 import mediapipe as mp
+from mediapipe.tasks.python import BaseOptions
+from mediapipe.tasks.python.vision import (
+	HandLandmarker,
+	HandLandmarkerOptions,
+	RunningMode,
+)
 import numpy as np
 from collections import deque
 
@@ -10,6 +20,18 @@ import constants as c
 import keyboard as k
 
 import pyperclip
+
+
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hand_landmarker.task')
+MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
+
+
+def ensure_model_downloaded(model_path=MODEL_PATH, model_url=MODEL_URL):
+	"""Download the HandLandmarker task model if it isn't already on disk."""
+	if not os.path.exists(model_path):
+		print(f'Downloading hand landmarker model to {model_path}...')
+		urllib.request.urlretrieve(model_url, model_path)
+	return model_path
 
 
 device = 0
@@ -33,7 +55,10 @@ def calc_landmark_list(image, landmarks):
 	landmark_point = []
 
 	# Keypoint
-	for _, landmark in enumerate(landmarks.landmark):
+	# NOTE: `landmarks` is a plain list of NormalizedLandmark objects, as
+	# returned per-hand by the HandLandmarker Tasks API (no `.landmark`
+	# wrapper like the old `mp.solutions.hands` API used).
+	for landmark in landmarks:
 		landmark_x = min(int(landmark.x * image_width), image_width - 1)
 		landmark_y = min(int(landmark.y * image_height), image_height - 1)
 		landmark_z = landmark.z
@@ -71,7 +96,6 @@ def main():
 	cap_width = width
 	cap_height = height
 
-	use_static_image_mode = True
 	min_detection_confidence = 0.7
 	min_tracking_confidence = 0.5
 
@@ -81,13 +105,21 @@ def main():
 	cap.set(cv2.CAP_PROP_FRAME_WIDTH, cap_width)
 	cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cap_height)
 
-	mp_hands = mp.solutions.hands
-	hands = mp_hands.Hands(
-		static_image_mode=use_static_image_mode,
-		max_num_hands=1,
-		min_detection_confidence=min_detection_confidence,
+	model_path = ensure_model_downloaded()
+
+	base_options = BaseOptions(model_asset_path=model_path)
+	options = HandLandmarkerOptions(
+		base_options=base_options,
+		running_mode=RunningMode.VIDEO,
+		num_hands=1,
+		min_hand_detection_confidence=min_detection_confidence,
+		min_hand_presence_confidence=min_detection_confidence,
 		min_tracking_confidence=min_tracking_confidence,
 	)
+	landmarker = HandLandmarker.create_from_options(options)
+
+	# detect_for_video requires monotonically increasing timestamps.
+	start_time_ms = int(time.time() * 1000)
 
 	mode = 0
 
@@ -112,7 +144,9 @@ def main():
 
 		image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-		results = hands.process(image)
+		mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image)
+		timestamp_ms = int(time.time() * 1000) - start_time_ms
+		results = landmarker.detect_for_video(mp_image, timestamp_ms)
 
 		image = k.draw(image, button_list, control_state)
 
@@ -128,8 +162,8 @@ def main():
 		image = cv2.putText(image, typed_text, (50, 600), font, 
 			fontScale, color, thickness, cv2.LINE_AA)
 
-		if results.multi_hand_landmarks is not None:
-			for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+		if results.hand_landmarks:
+			for hand_landmarks, handedness in zip(results.hand_landmarks, results.handedness):
 
 				abs_landmark_list = calc_landmark_list(image, hand_landmarks)
 				rel_landmark_list = pre_process_landmark(abs_landmark_list)
@@ -179,6 +213,7 @@ def main():
 
 	cap.release()
 	cv2.destroyAllWindows()
+	landmarker.close()
 
 
 
