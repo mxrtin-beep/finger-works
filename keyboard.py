@@ -98,6 +98,7 @@ def execute_event_keyboard(event, abs_landmark_list, button_list):
 	finger_x, finger_y = abs_landmark_list[c.INDEX_IDX][0], abs_landmark_list[c.INDEX_IDX][1]
 
 	typed_char = None
+	hit_button = None
 	### Detect if finger is over a key
 
 	for button in button_list:
@@ -107,17 +108,33 @@ def execute_event_keyboard(event, abs_landmark_list, button_list):
 		if x <= finger_x <= x + w and y <= finger_y <= y + h:
 
 			# Button found
+			hit_button = button
 
 			if event == 'Mousing':
 				button.color = (0, 255, 0)
 			elif event == 'Left-Click':
-				#print(f'Finger Position: {finger_x}, {finger_y}.')
-				#print(f'Key {button.text} Position: {button.pos}.')
 				button.color = (255, 0, 0)
 				typed_char = button.text
 				print(button.text)
 		else:
 			button.color = (0, 0, 0)
+
+	# DEBUG: on every click attempt, print the fingertip position and
+	# either the key it landed on, or (if it missed everything) the
+	# nearest key and how far off it was, so a coordinate mismatch is
+	# easy to spot from the console.
+	if event == 'Left-Click':
+		if hit_button is not None:
+			print(f'[DEBUG] click at finger=({finger_x:.0f},{finger_y:.0f}) '
+				f'hit "{hit_button.text}" pos={hit_button.pos} size={hit_button.size}')
+		else:
+			nearest = min(
+				button_list,
+				key=lambda b: (b.pos[0] + b.size[0] / 2 - finger_x) ** 2
+					+ (b.pos[1] + b.size[1] / 2 - finger_y) ** 2,
+			)
+			print(f'[DEBUG] click at finger=({finger_x:.0f},{finger_y:.0f}) '
+				f'missed all keys; nearest is "{nearest.text}" pos={nearest.pos} size={nearest.size}')
 
 	return button_list, typed_char
 

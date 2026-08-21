@@ -130,24 +130,13 @@ def main():
 	typed_text = '>'
 
 	# The camera may not honor the requested cap_width/cap_height above
-	# (this varies by machine/OS/camera), so read back the actual frame
-	# size and lay out the on-screen keyboard and text relative to that,
-	# instead of assuming a fixed resolution.
-	ret, first_frame = cap.read()
-	if not ret:
-		print('Could not read from camera.')
-		cap.release()
-		landmarker.close()
-		return
-	frame_height, frame_width = first_frame.shape[:2]
-
-	button_list = k.get_button_list(frame_width, frame_height)
-
-	text_font_scale = max(0.5, frame_height / 900.0)
-	text_thickness = max(1, int(round(thickness * text_font_scale)))
-	event_text_pos = (int(frame_width * 0.03), int(frame_height * 0.07))
-	control_text_pos = (int(frame_width * 0.03), int(frame_height * 0.13))
-	typed_text_pos = (int(frame_width * 0.03), int(frame_height * 0.95))
+	# (this varies by machine/OS/camera, and some drivers even report a
+	# different size on their first frame while still negotiating format),
+	# so the keyboard/text layout is (re)computed from each frame's actual
+	# dimensions below, instead of trusting a single reading taken once
+	# before the loop starts.
+	button_list = None
+	last_frame_dims = None
 
 	while event != 'Quit':
 
@@ -159,6 +148,19 @@ def main():
 		if not ret:
 			break
 		image = cv2.flip(image, 1)  # Mirror display
+
+		frame_height, frame_width = image.shape[:2]
+		if (frame_width, frame_height) != last_frame_dims:
+			last_frame_dims = (frame_width, frame_height)
+			print(f'[DEBUG] Camera frame size: {frame_width}x{frame_height}')
+
+			button_list = k.get_button_list(frame_width, frame_height)
+
+			text_font_scale = max(0.5, frame_height / 900.0)
+			text_thickness = max(1, int(round(thickness * text_font_scale)))
+			event_text_pos = (int(frame_width * 0.03), int(frame_height * 0.07))
+			control_text_pos = (int(frame_width * 0.03), int(frame_height * 0.13))
+			typed_text_pos = (int(frame_width * 0.03), int(frame_height * 0.95))
 
 		image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
@@ -188,6 +190,12 @@ def main():
 
 				abs_landmark_list = np.array(abs_landmark_list)
 				rel_landmark_list = np.array(rel_landmark_list)
+
+				# DEBUG: draw a marker at the index fingertip's tracked
+				# position so it's visible on screen relative to the
+				# drawn keyboard keys.
+				finger_px, finger_py = int(abs_landmark_list[c.INDEX_IDX][0]), int(abs_landmark_list[c.INDEX_IDX][1])
+				cv2.circle(image, (finger_px, finger_py), 10, (0, 255, 255), cv2.FILLED)
 
 				x, y, z = rel_landmark_list[c.INDEX_IDX]
 				#print(x, y, z)
