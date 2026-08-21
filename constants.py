@@ -22,6 +22,12 @@ SCROLL_VEL_CUTOFF = 5
 MOUSE_X_SENS = 1.0
 MOUSE_Y_SENS = 2.0
 
-MOUSE_SPEED = 0.1
+# Fraction of the remaining distance to the target the cursor closes
+# each frame (exponential smoothing). 0.1 was very sluggish -- at ~30fps
+# it took roughly 20+ frames (~0.7s) to close 90% of the gap, which is
+# why it felt like it needed repeated swipes to move any real distance.
+# Raised to track much closer to the fingertip (like the debug dot)
+# while still smoothing out a bit of frame-to-frame hand-tracking jitter.
+MOUSE_SPEED = 0.65
 
 SPECIAL_KEYS = ['<', 'Copy', 'Clear', 'Space']

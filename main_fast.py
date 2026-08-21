@@ -241,7 +241,15 @@ def main():
 						print('In clipboard: ', typed_text)
 						pyperclip.copy(typed_text)
 
-				execute_event_fast(event, abs_landmark_list, event_history, frame_width, frame_height)
+				# Only drive the real OS mouse while in Mouse mode. Previously
+				# this ran unconditionally, so the same pinch/gesture events
+				# that typed a key were *also* moving/clicking the real
+				# cursor elsewhere on the desktop at the same time -- two
+				# independent things reacting to one gesture. Now Keyboard
+				# mode exclusively controls the on-screen keyboard, and
+				# Mouse mode exclusively controls the real cursor.
+				if control_state == 'Mouse':
+					execute_event_fast(event, abs_landmark_list, event_history, frame_width, frame_height)
 		
 		cv2.imshow('Video', image)
 
