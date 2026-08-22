@@ -161,11 +161,11 @@ def get_zoom_event(rel_landmark_list):
 
 	Returns (event, debug_text): event is 'Zoom In', 'Zoom Out', or None;
 	debug_text is a short, always-present description of what this frame
-	actually saw (which pose, how many consecutive frames into the
-	arm delay, and the current zoomed on/off state) -- meant to be shown
-	live in the overlay so it's obvious whether a failure to zoom is a
-	detection problem (the pose never registers) or something past that
-	(the pose registers but the OS-level zoom hotkey isn't landing).
+	actually saw (which pose, and the current zoomed on/off state) --
+	meant to be shown live in the overlay so it's obvious whether a
+	failure to zoom is a detection problem (the pose never registers) or
+	something past that (the pose registers but the OS-level zoom hotkey
+	isn't landing).
 	"""
 	global _zoom_in_frames, _zoom_out_frames, _is_zoomed_in
 
@@ -180,9 +180,9 @@ def get_zoom_event(rel_landmark_list):
 	_zoom_out_frames = _zoom_out_frames + 1 if is_fist else 0
 
 	if is_open_hand:
-		pose_text = f'open {_zoom_in_frames}/{_ZOOM_ARM_FRAMES}'
+		pose_text = 'open'
 	elif is_fist:
-		pose_text = f'fist {_zoom_out_frames}/{_ZOOM_ARM_FRAMES}'
+		pose_text = 'fist'
 	else:
 		# Neither pose matched at all -- shows exactly which fingers this
 		# frame read as extended, so a pose that "should" be a fist or an

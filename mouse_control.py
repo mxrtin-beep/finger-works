@@ -18,6 +18,48 @@ pyautogui.PAUSE = 0
 screenWidth, screenHeight = pyautogui.size()
 
 
+# Overall mouse-speed multiplier, on top of constants.MOUSE_SPEED. 1.0
+# (the default) reproduces exactly the speed the program has always had;
+# set via main_fast.py's --sensitivity command-line option, so the base
+# feel is adjustable without editing constants.py.
+_sensitivity_multiplier = 1.0
+
+# Whether the zoom gesture currently has the screen zoomed in -- main.py
+# tells us this whenever that state changes (see event_classifier's zoom
+# toggle), rather than this module importing event_classifier itself just
+# to ask.
+_zoomed_in = False
+
+
+def set_sensitivity_multiplier(multiplier):
+	"""Scale overall mouse speed by `multiplier` (1.0 = default/unchanged,
+	>1 faster, <1 slower). See main_fast.py's --sensitivity option."""
+	global _sensitivity_multiplier
+	_sensitivity_multiplier = multiplier
+
+
+def set_zoomed(is_zoomed_in):
+	"""Told by main.py whenever the zoom gesture's on/off state changes.
+	Cursor speed is automatically reduced while zoomed in (see
+	_effective_mouse_speed()) -- a given hand movement covers much more of
+	the visible, zoomed-in area than it would at normal zoom, so it needs
+	to move the cursor less on screen to still land precisely on the same
+	target. Restored to normal the moment you zoom back out (or the
+	program quits while still zoomed in -- see main.py's shutdown path)."""
+	global _zoomed_in
+	_zoomed_in = is_zoomed_in
+
+
+def _effective_mouse_speed():
+	speed = c.MOUSE_SPEED * _sensitivity_multiplier
+	if _zoomed_in:
+		speed *= c.ZOOMED_MOUSE_SPEED_FACTOR
+	# MOUSE_SPEED is a fraction of the remaining distance closed per
+	# frame; clamping to 1.0 keeps a large --sensitivity value from
+	# pushing it past "snap there immediately" into overshoot territory.
+	return min(speed, 1.0)
+
+
 # Ideas for dragging mouse
 
 ## always be moving mouse, mouse down when fingers touch --> doens't work
@@ -252,8 +294,9 @@ def execute_event_fast(event, abs_landmark_list, event_history, frame_width, fra
 	if event in ('Mousing', 'Left-Click', 'Right-Click'):
 
 		### Move mouse in direction of position
-		move_x = int((scaled_x_pos - curr_mouse_x) * c.MOUSE_SPEED)
-		move_y = int((scaled_y_pos - curr_mouse_y) * c.MOUSE_SPEED)
+		speed = _effective_mouse_speed()
+		move_x = int((scaled_x_pos - curr_mouse_x) * speed)
+		move_y = int((scaled_y_pos - curr_mouse_y) * speed)
 
 		# Clamp the destination too, since we're computing it from the
 		# current position and could otherwise still land past an edge

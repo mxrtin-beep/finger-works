@@ -164,12 +164,14 @@ def type_char(typed_char, typed_text):
 	return typed_text + typed_char
 
 
-def main():
+def main(mouse_sensitivity=1.0):
+
+	mc.set_sensitivity_multiplier(mouse_sensitivity)
 
 	print(
 		f'FingerWorks v{__version__} -- started '
 		f'{datetime.datetime.now():%Y-%m-%d %H:%M:%S} '
-		f'(screen {screenWidth}x{screenHeight})'
+		f'(screen {screenWidth}x{screenHeight}, mouse sensitivity {mouse_sensitivity}x)'
 	)
 
 	cap_device = device
@@ -263,9 +265,11 @@ def main():
 						zoom_event, zoom_debug_text = get_zoom_event(rel_landmark_list)
 						if zoom_event == 'Zoom In':
 							mc.execute_zoom('in')
+							mc.set_zoomed(True)
 							zoom_debug_text += ' -> sent zoom-in'
 						elif zoom_event == 'Zoom Out':
 							mc.execute_zoom('out')
+							mc.set_zoomed(False)
 							zoom_debug_text += ' -> sent zoom-out'
 
 						debug_parts.append(f'Left [Zoom: {zoom_debug_text}]')
@@ -351,6 +355,7 @@ def main():
 			# this program did stays in effect (a zoomed-in desktop) even
 			# after it's no longer running to zoom back out for you.
 			mc.execute_zoom('out')
+			mc.set_zoomed(False)
 		cap.release()
 		overlay.close()
 		landmarker.close()
@@ -359,5 +364,17 @@ def main():
 
 
 if __name__ == '__main__':
-	main()
+	import argparse
+
+	parser = argparse.ArgumentParser(description='FingerWorks -- touchless computer control via webcam.')
+	parser.add_argument(
+		'--sensitivity', type=float, default=1.0, metavar='MULTIPLIER',
+		help=(
+			"Mouse-speed multiplier. 1.0 (default) is today's normal speed "
+			'unchanged; e.g. 1.5 moves the cursor faster, 0.5 slower.'
+		),
+	)
+	args = parser.parse_args()
+
+	main(mouse_sensitivity=args.sensitivity)
 

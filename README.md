@@ -9,6 +9,23 @@ or redistributing it requires the copyright holder's permission. (Its
 open-source dependencies -- OpenCV, MediaPipe, NumPy, PyAutoGUI,
 PyPerClip -- keep their own separate licenses.)
 
+## Running it
+
+    python main_fast.py [--sensitivity MULTIPLIER]
+
+`--sensitivity` scales overall cursor speed. It defaults to `1.0` (the
+program's normal speed, unchanged); `1.5` moves the cursor faster, `0.5`
+slower. It's a multiplier on top of `constants.MOUSE_SPEED`, so you don't
+need to edit that file just to try a faster or slower feel.
+
+Cursor speed is also automatically halved while the zoom gesture has the
+screen zoomed in, and restored the moment you zoom back out (or if the
+program quits while still zoomed in) -- a given hand movement covers much
+more of the now-magnified view, so it needs to move the cursor less on
+screen to still land precisely on a small target. `--sensitivity` still
+applies underneath that: it changes your overall baseline speed, zoomed
+or not.
+
 ## Gestures
 
 The right hand drives the mouse and (optionally) the keyboard:
@@ -86,18 +103,17 @@ left hand mousing instead of your right -- flip `SWAP_LABELED_HANDS` in
 
 For the left/zoom hand specifically, the bracket also shows *live*
 detection state instead of just the static "Zoom" role, e.g.
-`Left [Zoom: open 3/5, normal]` -- which pose it's currently reading
+`Left [Zoom: open, normal]` -- which pose it's currently reading
 (`open`/`fist`/`neither`, plus which fingers it saw as extended if
-neither matched), how many consecutive frames into the hold-before-it-
-fires delay it is, and whether the screen is currently zoomed in or at
+neither matched), and whether the screen is currently zoomed in or at
 normal. When a zoom action actually fires, `-> sent zoom-in` or `-> sent
 zoom-out` is appended. This is meant to answer "why isn't zoom working"
-directly: if the counter never climbs, the pose itself isn't being
-recognized (check lighting/framing, or that `FINGER_OUT_CUTOFF` fits
-your hand/camera); if it reaches the full count and still doesn't zoom,
-the gesture is fine and the problem is downstream, in the OS hotkey
-`execute_zoom()` sends (e.g. the OS magnifier isn't installed/enabled,
-or another app is capturing that shortcut).
+directly: if the pose never reads as `open`/`fist` when you form it,
+detection itself isn't recognizing it (check lighting/framing, or that
+`FINGER_OUT_CUTOFF` fits your hand/camera); if it does and still doesn't
+zoom, the gesture is fine and the problem is downstream, in the OS
+hotkey `execute_zoom()` sends (e.g. the OS magnifier isn't installed/
+enabled, or another app is capturing that shortcut).
 
 ## Using this with gloves on
 

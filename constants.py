@@ -38,6 +38,15 @@ MOUSE_Y_SENS = 2.0
 # while still smoothing out a bit of frame-to-frame hand-tracking jitter.
 MOUSE_SPEED = 0.65
 
+# Cursor speed is scaled by this while the zoom gesture has the screen
+# zoomed in. A fixed-size hand movement covers much more of the visible
+# (zoomed-in) area than it would at normal zoom, so the same movement
+# needs to move the cursor less on screen to still land precisely --
+# without this, zooming in to make a small target easier to hit would
+# make the now-larger target *harder* to land on, since the cursor would
+# fly across it just as fast as before.
+ZOOMED_MOUSE_SPEED_FACTOR = 0.5
+
 
 # How confident the hand-landmark model must be before it'll report a
 # hand/keep tracking it at all. Tuned for bare hands; a gloved hand (matte
