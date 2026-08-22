@@ -11,12 +11,19 @@ PyPerClip -- keep their own separate licenses.)
 
 ## Running it
 
-    python main_fast.py [--sensitivity MULTIPLIER]
+    python main_fast.py [--sensitivity MULTIPLIER] [--debug]
 
 `--sensitivity` scales overall cursor speed. It defaults to `1.0` (the
 program's normal speed, unchanged); `1.5` moves the cursor faster, `0.5`
 slower. It's a multiplier on top of `constants.MOUSE_SPEED`, so you don't
 need to edit that file just to try a faster or slower feel.
+
+`--debug` is off by default. Without it, the overlay panel stays hidden
+except while the on-screen keyboard is toggled on, and no debug text is
+drawn. With it, the panel is always visible and shows the debug text
+(current event, which hand is doing what, live zoom/paste gesture state)
+-- see `INSTRUCTIONS.md` for the full rundown of gestures, parameters, and
+what the debug text means.
 
 Cursor speed is also automatically halved while the zoom gesture has the
 screen zoomed in, and restored the moment you zoom back out (or if the

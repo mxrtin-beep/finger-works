@@ -54,9 +54,17 @@ class Overlay:
 	between two different coordinate spaces.
 	"""
 
-	def __init__(self, screen_width, screen_height, panel_width=None, panel_height=None, margin=20):
+	def __init__(self, screen_width, screen_height, panel_width=None, panel_height=None, margin=20, debug=False):
 		self.screen_width = screen_width
 		self.screen_height = screen_height
+
+		# Off by default: the panel then only appears while the on-screen
+		# keyboard is toggled on (it needs to be visible to aim clicks at
+		# its keys), and no debug text is drawn even then. With debug on,
+		# the panel is up at all times -- including in Mouse mode -- and
+		# shows the debug text (current event, hand routing, zoom/paste
+		# gesture state), same as before this flag existed.
+		self.debug = debug
 
 		self.panel_width = panel_width or int(screen_width * 0.42)
 		self.panel_height = panel_height or int(screen_height * 0.34)
@@ -88,6 +96,15 @@ class Overlay:
 		)
 		self.canvas.pack(fill='both', expand=True)
 
+		# Tracks whether the window is currently mapped, so draw() only
+		# calls withdraw()/deiconify() on an actual change instead of every
+		# frame (redundant, but also deiconify() steals focus back on some
+		# window managers if called needlessly).
+		self._visible = True
+		if not self.debug:
+			self.root.withdraw()
+			self._visible = False
+
 	def _quit(self):
 		self.should_quit = True
 
@@ -108,17 +125,34 @@ class Overlay:
 		self.root.destroy()
 
 	def draw(self, event_text, control_state, typed_preview, button_list):
+		# The panel itself is only up while there's something on it you
+		# actually need (the on-screen keyboard, to aim clicks at its
+		# keys) -- unless debug is on, in which case it's up all the time
+		# so the debug text below is always visible, as it always used to
+		# be before this flag existed.
+		should_show = self.debug or control_state == 'Keyboard'
+		if should_show != self._visible:
+			if should_show:
+				self.root.deiconify()
+			else:
+				self.root.withdraw()
+			self._visible = should_show
+
+		if not should_show:
+			return
+
 		c = self.canvas
 		c.delete('all')
 
-		c.create_text(
-			16, 16, anchor='nw', fill='#ff5555',
-			font=('Segoe UI', 14, 'bold'), text=event_text,
-		)
-		c.create_text(
-			16, 40, anchor='nw', fill='#ff5555',
-			font=('Segoe UI', 14, 'bold'), text=control_state,
-		)
+		if self.debug:
+			c.create_text(
+				16, 16, anchor='nw', fill='#ff5555',
+				font=('Segoe UI', 14, 'bold'), text=event_text,
+			)
+			c.create_text(
+				16, 40, anchor='nw', fill='#ff5555',
+				font=('Segoe UI', 14, 'bold'), text=control_state,
+			)
 
 		if control_state == 'Keyboard':
 			for button in button_list:

@@ -237,7 +237,14 @@ _was_left_scissors = False
 def get_paste_event(rel_landmark_list):
 	"""Edge-triggered like the other pose gestures -- fires once on the
 	frame the scissors pose starts on this (left) hand, not every frame
-	it's held."""
+	it's held.
+
+	Returns (fire, debug_text): fire is True on the exact frame the paste
+	gesture triggers; debug_text is a short, always-present description of
+	what this frame actually saw (mirrors get_zoom_event's debug_text), so
+	the overlay can show *why* paste did or didn't fire, not just that it
+	didn't.
+	"""
 	global _was_left_scissors
 
 	finger_pos = rel_landmark_list[c.FINGER_INDICES]
@@ -248,5 +255,15 @@ def get_paste_event(rel_landmark_list):
 	fire = is_scissors and not _was_left_scissors
 	_was_left_scissors = is_scissors
 
-	return fire
+	if is_scissors:
+		pose_text = 'scissors'
+	else:
+		out_fingers = ','.join(
+			name for name, out in zip(c.FINGER_NAMES, finger_out_arr) if out
+		) or 'none'
+		pose_text = f'neither ({out_fingers} out)'
+
+	debug_text = pose_text + (' -> sent paste' if fire else '')
+
+	return fire, debug_text
 

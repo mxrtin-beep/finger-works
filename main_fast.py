@@ -164,14 +164,15 @@ def type_char(typed_char, typed_text):
 	return typed_text + typed_char
 
 
-def main(mouse_sensitivity=1.0):
+def main(mouse_sensitivity=1.0, debug=False):
 
 	mc.set_sensitivity_multiplier(mouse_sensitivity)
 
 	print(
 		f'FingerWorks v{__version__} -- started '
 		f'{datetime.datetime.now():%Y-%m-%d %H:%M:%S} '
-		f'(screen {screenWidth}x{screenHeight}, mouse sensitivity {mouse_sensitivity}x)'
+		f'(screen {screenWidth}x{screenHeight}, mouse sensitivity {mouse_sensitivity}x, '
+		f'debug {"on" if debug else "off"})'
 	)
 
 	cap_device = device
@@ -212,7 +213,7 @@ def main(mouse_sensitivity=1.0):
 	control_state = 'Mouse'	# Mouse or Keyboard
 	typed_text = '>'
 
-	overlay = ov.Overlay(screenWidth, screenHeight)
+	overlay = ov.Overlay(screenWidth, screenHeight, debug=debug)
 
 	# The keyboard's layout is now sized to the overlay panel (fixed at
 	# startup), not the camera frame, so it only needs to be built once.
@@ -272,15 +273,18 @@ def main(mouse_sensitivity=1.0):
 							mc.set_zoomed(False)
 							zoom_debug_text += ' -> sent zoom-out'
 
-						debug_parts.append(f'Left [Zoom: {zoom_debug_text}]')
-
-						if get_paste_event(rel_landmark_list):
+						paste_fired, paste_debug_text = get_paste_event(rel_landmark_list)
+						if paste_fired:
 							# "Scissors" pose (index + middle extended) --
 							# the same shape as the right hand's Cut-Typed
 							# gesture, but paste on this (left) hand: a
 							# shortcut for the keyboard's 'Paste' key
 							# without needing the keyboard open at all.
 							typed_text = type_char('Paste', typed_text)
+
+						debug_parts.append(
+							f'Left [Zoom: {zoom_debug_text}] [Paste: {paste_debug_text}]'
+						)
 
 						continue
 
@@ -374,7 +378,17 @@ if __name__ == '__main__':
 			'unchanged; e.g. 1.5 moves the cursor faster, 0.5 slower.'
 		),
 	)
+	parser.add_argument(
+		'--debug', action='store_true',
+		help=(
+			'Show the debug overlay text (current event, which hand is doing '
+			'what, zoom/paste gesture state) and keep the overlay panel '
+			"visible at all times. Off by default: with --debug unset, the "
+			'panel only appears while the on-screen keyboard is toggled on, '
+			'and no debug text is drawn.'
+		),
+	)
 	args = parser.parse_args()
 
-	main(mouse_sensitivity=args.sensitivity)
+	main(mouse_sensitivity=args.sensitivity, debug=args.debug)
 
