@@ -28,14 +28,13 @@ cursor isn't over one of the keyboard's own buttons -- so you can type a
 name, then click elsewhere (e.g. to confirm a rename, or click into
 another text field) without having to close the keyboard first.
 
-The left hand is dedicated to zoom and paste, so the right hand isn't
-stuck doing everything. Which hand is which is decided by hand shape
-(thumb vs. pinky position), not by which hand you're used to using for
-mousing -- see "Which hand is which" below if it's ever backwards for
-your setup.
+A second hand, when it's raised alongside your mouse hand, is dedicated
+to zoom and paste, so the right hand isn't stuck doing everything:
 
-- Thumb + index extended, then spread them apart: zoom in. Bring them
-  back together: zoom out.
+- Open hand, all five fingers extended: zoom in. Closed fist: zoom back
+  out. Deliberately simple, maximally-different poses so detection
+  itself is reliable -- these two are about as far apart in "fingers
+  out" terms as two poses can be.
 
   This drives the OS's own screen magnifier (Windows Magnifier / macOS
   Zoom) rather than an in-app zoom, so it zooms *whatever's on screen* --
@@ -47,34 +46,32 @@ your setup.
   Zoom Style: Lens. On Linux this instead falls back to Ctrl+Scroll,
   since screen-magnifier shortcuts vary a lot by desktop environment.
 
-  This gesture only reacts once the pose has been held for a couple
-  frames and thumb-index distance has clearly changed, so an idle left
-  hand held still doesn't start zooming by accident -- but since only
-  your left hand can trigger it at all now, it doesn't need to be as
-  strict as an ordinary "any hand, any pose" gesture would. If it's
-  still too easy (or too hard) to trigger, the thresholds are in
-  `event_classifier.py` (`_ZOOM_ARM_FRAMES`, `_ZOOM_TRIGGER_DELTA`,
-  `_ZOOM_TICK_COOLDOWN`).
+  Zoom only ever holds a single level, on or off -- forming the
+  zoom-in pose while already zoomed in does nothing (close to a fist
+  first), and a fist does nothing unless you're currently zoomed in.
+  Each pose also has to be held for several consecutive frames before it
+  fires. Together that's what keeps one gesture from stacking up several
+  zoom steps at once, and it also zooms back out automatically when you
+  quit the program, so it doesn't leave your screen zoomed in behind it.
+  The hold-time is `_ZOOM_ARM_FRAMES` in `event_classifier.py` if it
+  needs retuning.
 
 - Index + middle extended ("scissors") -- the same shape as the right
   hand's Cut-Typed gesture, but paste on this hand: a shortcut for the
-  keyboard's 'Paste' key without needing the keyboard open at all. (A
-  pinky-alone pose was tried here first, but folding in the thumb along
-  with the other fingers put thumb and index close enough together to
-  read as the right hand's click pinch; the scissors pose keeps them
-  apart.)
+  keyboard's 'Paste' key without needing the keyboard open at all.
 
-### Which hand is which
+### Which hand does what
 
-Left vs. right hand is worked out from finger geometry each frame (which
-side of the wrist the thumb sits relative to the pinky) instead of trusting
-MediaPipe's own handedness label, which turned out to flip unpredictably
-across camera/mirroring setups. The overlay panel shows which hand(s) it
-currently sees in brackets next to the action text (e.g. `Mousing
-[Right]`) -- use that to check it's classifying your hands the way you'd
-expect. If zoom/paste and mouse control ever come out swapped (e.g. you
-have to raise your *right* hand to zoom), flip `MIRROR_HANDEDNESS_ORDER`
-in `constants.py` rather than digging into the classifier itself.
+With only one hand visible, it's unconditionally the mouse/keyboard hand
+-- zoom and paste need a second hand in frame to mean anything, so
+there's no ambiguity to get wrong in the common case of mousing around
+with just one hand up. With two hands visible, MediaPipe's own
+Left/Right handedness label decides which does which (right hand mouses,
+left hand zooms/pastes). The overlay panel shows the current assignment
+in brackets next to the action text (e.g. `Mousing  [Mouse, Zoom]`) so
+you can check it's routing your hands the way you expect. If it ever
+comes out backwards for your camera setup, flip `SWAP_LABELED_HANDS` in
+`constants.py`.
 
 ## Using this with gloves on
 

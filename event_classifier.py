@@ -20,36 +20,6 @@ def dist_twopoints(p1, p2):
 	return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
 
-def classify_hand(abs_landmark_list):
-	"""Left/right hand classification based purely on finger geometry in
-	this frame, rather than MediaPipe's own Left/Right handedness label --
-	that label proved unreliable in practice (a hand could get labeled
-	backwards and silently lose mouse control). This instead looks at
-	which side of the wrist the thumb sits relative to the pinky, which
-	mirrors between hands the same way your left and right hand mirror
-	each other -- so it's a direct read of the same geometry a person
-	would use to tell them apart by eye, not a learned classifier that
-	can be "wrong" in an opaque way.
-
-	If this ever comes out backwards for your camera setup (e.g. an
-	unusual camera orientation), flip constants.MIRROR_HANDEDNESS_ORDER
-	rather than the comparison here.
-	"""
-	thumb_x = abs_landmark_list[c.THUMB_IDX][0]
-	pinky_x = abs_landmark_list[c.PINKY_IDX][0]
-
-	# In the mirrored (selfie-view) image this app displays, a right hand
-	# held up with fingers extended toward the camera has its thumb to
-	# the *left* of its pinky on screen; a left hand has the opposite
-	# ordering. is_right defaults to that assumption and can be flipped
-	# wholesale via the constants flag if it's backwards in practice.
-	is_right = thumb_x < pinky_x
-	if c.MIRROR_HANDEDNESS_ORDER:
-		is_right = not is_right
-
-	return 'Right' if is_right else 'Left'
-
-
 def get_direction(x_vel, y_vel, x_cutoff, y_cutoff):
 
 	direction = ''
@@ -149,88 +119,71 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 	return 'Mousing'
 
 
-# --- Left hand: pinch-to-zoom gesture -----------------------------------
+# --- Left hand: zoom toggle gesture -------------------------------------
 #
-# Thumb + index extended -- the same pose you'd use to pinch-zoom on a
-# touchscreen. Spreading thumb and index apart zooms in; bringing them
-# together zooms out. This only ever runs on the hand main.py has
-# classified as the left hand (see classify_hand()), so it doesn't need to
-# also demand the other three fingers be folded just to avoid colliding
-# with the right hand's mouse/keyboard gestures -- that restriction was
-# there back when hand routing itself was pose-based; now that routing is
-# by hand identity, requiring an exact 5-finger pose match here only made
-# the gesture needlessly fussy to trigger.
-_ZOOM_POSE = np.array([True, True])  # thumb, index
+# All five fingers extended (open hand): zoom in. Closed fist: zoom back
+# out. Deliberately simple, maximally-distinct poses (rather than the
+# earlier thumb/index pinch-and-spread) so detection itself isn't the
+# weak link -- these two poses are about as far apart in finger-out/
+# finger-in terms as two poses can be.
+#
+# This only ever runs on the hand main.py has identified as the left hand
+# (see main.py's per-frame hand routing), so it doesn't collide with the
+# right hand's own fist gesture (Keyboard toggle).
+#
+# Zoom is a single on/off level, not a repeatable "tick" -- forming the
+# open-hand pose while already zoomed in does nothing (you have to close
+# to a fist first), and likewise a fist does nothing unless currently
+# zoomed in. That, plus requiring the pose to be held for a run of
+# consecutive frames before it fires, is what keeps one gesture from
+# stacking up several zoom steps in a row: each pose can only ever
+# produce at most one zoom action until you deliberately reverse it.
+_ZOOM_IN_POSE = np.array([True, True, True, True, True])
+_ZOOM_OUT_POSE = np.array([False, False, False, False, False])
 
-# Frames the pose must be held before we start reacting to it. Without
-# this, a single flickering frame of "thumb+index out" while your hand is
-# mid-transition between other poses (e.g. opening from a fist) could arm
-# zooming by accident.
-_ZOOM_ARM_FRAMES = 2
+# Consecutive frames a pose must be held before it fires -- the "some
+# delay" that keeps a quick, incidental flash of the pose from triggering
+# a zoom.
+_ZOOM_ARM_FRAMES = 5
 
-# Minimum frame-to-frame change in thumb-index pixel distance to count as
-# a deliberate spread/pinch motion rather than hand tremor or landmark
-# jitter. This (plus the arm delay and cooldown below) is what keeps the
-# gesture from triggering accidentally -- it takes a real, sustained
-# widening or narrowing motion, not just holding the pose still.
-_ZOOM_TRIGGER_DELTA = 10
-
-# Minimum frames between two zoom ticks. One continuous spread/pinch
-# motion should produce a steady, controllable rate of ticks, not fire on
-# every single frame of a single motion.
-_ZOOM_TICK_COOLDOWN = 3
-
-_zoom_pose_frames = 0
-_zoom_prev_dist = None
-_zoom_cooldown = 0
+_zoom_in_frames = 0
+_zoom_out_frames = 0
+_is_zoomed_in = False
 
 
-def is_zoom_pose(rel_landmark_list):
-	"""Whether this hand currently shows the zoom pose (thumb + index
-	extended -- the other three fingers aren't checked, see the comment
-	above _ZOOM_POSE)."""
-	finger_pos = rel_landmark_list[c.FINGER_INDICES[:2]]
+def get_zoom_event(rel_landmark_list):
+	"""Left-hand-only zoom toggle. Returns 'Zoom In', 'Zoom Out', or None."""
+	global _zoom_in_frames, _zoom_out_frames, _is_zoomed_in
+
+	finger_pos = rel_landmark_list[c.FINGER_INDICES]
 	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
 	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
-	return np.array_equal(finger_out_arr, _ZOOM_POSE)
 
+	is_open_hand = np.array_equal(finger_out_arr, _ZOOM_IN_POSE)
+	is_fist = np.array_equal(finger_out_arr, _ZOOM_OUT_POSE)
 
-def get_zoom_event(abs_landmark_list, rel_landmark_list):
-	"""Zoom gesture, meant to run on whichever hand is in the zoom pose
-	(see is_zoom_pose()). Returns 'Zoom In', 'Zoom Out', or None."""
-	global _zoom_pose_frames, _zoom_prev_dist, _zoom_cooldown
+	_zoom_in_frames = _zoom_in_frames + 1 if is_open_hand else 0
+	_zoom_out_frames = _zoom_out_frames + 1 if is_fist else 0
 
-	if not is_zoom_pose(rel_landmark_list):
-		# Pose broken (or not yet formed) -- reset all gesture state so
-		# the next time it's formed, it has to be held and moved
-		# deliberately again rather than picking up stale history.
-		_zoom_pose_frames = 0
-		_zoom_prev_dist = None
-		_zoom_cooldown = 0
-		return None
-
-	_zoom_pose_frames += 1
-	thumb_index_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.INDEX_IDX])
-
-	if _zoom_pose_frames < _ZOOM_ARM_FRAMES or _zoom_prev_dist is None:
-		_zoom_prev_dist = thumb_index_dist
-		return None
-
-	delta = thumb_index_dist - _zoom_prev_dist
-	_zoom_prev_dist = thumb_index_dist
-
-	if _zoom_cooldown > 0:
-		_zoom_cooldown -= 1
-		return None
-
-	if delta > _ZOOM_TRIGGER_DELTA:
-		_zoom_cooldown = _ZOOM_TICK_COOLDOWN
+	# ``==`` rather than ``>=`` so this fires exactly once per continuous
+	# hold of the pose, not on every frame past the arm delay.
+	if is_open_hand and _zoom_in_frames == _ZOOM_ARM_FRAMES and not _is_zoomed_in:
+		_is_zoomed_in = True
 		return 'Zoom In'
-	if delta < -_ZOOM_TRIGGER_DELTA:
-		_zoom_cooldown = _ZOOM_TICK_COOLDOWN
+
+	if is_fist and _zoom_out_frames == _ZOOM_ARM_FRAMES and _is_zoomed_in:
+		_is_zoomed_in = False
 		return 'Zoom Out'
 
 	return None
+
+
+def is_zoomed_in():
+	"""Whether the zoom gesture last left the screen zoomed in -- checked
+	at shutdown so main.py can zoom back out to normal before exiting,
+	rather than leaving the OS magnifier engaged after the program quits.
+	"""
+	return _is_zoomed_in
 
 
 # --- Left hand: paste gesture -------------------------------------------

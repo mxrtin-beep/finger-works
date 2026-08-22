@@ -52,11 +52,13 @@ MIN_DETECTION_CONFIDENCE = 0.7
 MIN_TRACKING_CONFIDENCE = 0.5
 
 
-# Left/right hand classification is done by geometry (see
-# event_classifier.classify_hand()) rather than trusting MediaPipe's own
-# handedness label, which proved unreliable in practice. That geometry
-# check assumes a particular thumb/pinky ordering for a right hand held up
-# in this app's mirrored camera view; if zoom and mouse control come out
-# swapped for your camera/setup (e.g. you have to raise your *right* hand
-# to zoom), flip this rather than digging into classify_hand() itself.
-MIRROR_HANDEDNESS_ORDER = True
+# Which hand does what (see main_fast.py) is only ever ambiguous when
+# *two* hands are visible at once -- with only one hand up, it's always
+# the mouse/keyboard hand, no classification needed. With two hands up,
+# MediaPipe's own Left/Right handedness label picks out which is which
+# (trying to reimplement that classification from raw finger geometry
+# turned out to be less reliable than just trusting the model here). If
+# mouse control and zoom ever come out swapped for your camera setup
+# (e.g. you have to raise your *right* hand to zoom while your left hand
+# drives the mouse), flip this rather than digging into main_fast.py.
+SWAP_LABELED_HANDS = False

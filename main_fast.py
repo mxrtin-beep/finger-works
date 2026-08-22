@@ -19,7 +19,7 @@ from collections import deque
 
 import mouse_control as mc
 from mouse_control import execute_event_fast, screenWidth, screenHeight
-from event_classifier import get_event_fast, get_zoom_event, get_paste_event, classify_hand
+from event_classifier import get_event_fast, get_zoom_event, get_paste_event, is_zoomed_in
 import constants as c
 import keyboard as k
 import overlay as ov
@@ -232,29 +232,58 @@ def main():
 			timestamp_ms = int(time.time() * 1000) - start_time_ms
 			results = landmarker.detect_for_video(mp_image, timestamp_ms)
 
-			hand_labels_seen = []
+			hand_debug_text = ''
 
 			if results.hand_landmarks:
 
-				# Which hand does what is decided by hand identity (left
-				# vs. right), classified purely from finger geometry (see
-				# event_classifier.classify_hand()) rather than trusting
-				# MediaPipe's own handedness label -- that label proved
-				# unreliable enough in practice to freeze mouse control
-				# outright when it came out backwards on the one hand in
-				# frame.
+				all_landmarks = []
 				for hand_landmarks in results.hand_landmarks:
 					abs_landmark_list = np.array(calc_landmark_list(image, hand_landmarks))
 					rel_landmark_list = np.array(pre_process_landmark(abs_landmark_list.tolist()))
+					all_landmarks.append((abs_landmark_list, rel_landmark_list))
 
-					hand_label = classify_hand(abs_landmark_list)
-					hand_labels_seen.append(hand_label)
+				num_detected = len(all_landmarks)
 
-					if hand_label == 'Left':
-						# Left hand: zoom and paste only, so it never
-						# competes with the right hand's mouse/keyboard
-						# gestures.
-						zoom_event = get_zoom_event(abs_landmark_list, rel_landmark_list)
+				if num_detected == 1:
+					# Only one hand in frame: it's unconditionally the
+					# mouse/keyboard hand. Zoom needs a *second* hand to
+					# even make sense (it's only ever the hand that isn't
+					# driving the mouse), so with just one hand up it
+					# simply doesn't trigger -- but mouse control can
+					# never be swallowed by a hand-identity mixup, which
+					# is what silently broke it before.
+					mouse_hand_idx, zoom_hand_idx = 0, None
+				else:
+					# Two hands: MediaPipe's own handedness label picks
+					# out which is which -- it has much more to work with
+					# here (both hands actually in frame together) than a
+					# hand-rolled geometry guess does, which is what we
+					# tried previously and it came out unreliable. If it
+					# improbably calls both hands the same label, fall
+					# back to screen position (rightmost hand mouses).
+					labels = [hd[0].category_name for hd in results.handedness]
+					if 'Right' in labels and 'Left' in labels:
+						mouse_hand_idx = labels.index('Right')
+						zoom_hand_idx = labels.index('Left')
+					else:
+						hand_xs = [abs_lm[:, 0].mean() for abs_lm, _ in all_landmarks]
+						mouse_hand_idx = max(range(num_detected), key=lambda i: hand_xs[i])
+						zoom_hand_idx = min(range(num_detected), key=lambda i: hand_xs[i])
+
+					if c.SWAP_LABELED_HANDS:
+						mouse_hand_idx, zoom_hand_idx = zoom_hand_idx, mouse_hand_idx
+
+				debug_labels = [''] * num_detected
+				if mouse_hand_idx is not None:
+					debug_labels[mouse_hand_idx] = 'Mouse'
+				if zoom_hand_idx is not None:
+					debug_labels[zoom_hand_idx] = 'Zoom'
+				hand_debug_text = f'  [{", ".join(l for l in debug_labels if l)}]'
+
+				for hand_idx, (abs_landmark_list, rel_landmark_list) in enumerate(all_landmarks):
+
+					if hand_idx == zoom_hand_idx:
+						zoom_event = get_zoom_event(rel_landmark_list)
 						if zoom_event == 'Zoom In':
 							mc.execute_zoom('in')
 						elif zoom_event == 'Zoom Out':
@@ -263,11 +292,16 @@ def main():
 						if get_paste_event(rel_landmark_list):
 							# "Scissors" pose (index + middle extended) --
 							# the same shape as the right hand's Cut-Typed
-							# gesture, but paste on this (left) hand: a
+							# gesture, but paste on this (zoom) hand: a
 							# shortcut for the keyboard's 'Paste' key
 							# without needing the keyboard open at all.
 							typed_text = type_char('Paste', typed_text)
 
+						continue
+
+					if hand_idx != mouse_hand_idx:
+						# A third hand isn't possible (num_hands=2 below),
+						# but if it were, it'd just be ignored.
 						continue
 
 					event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
@@ -315,15 +349,20 @@ def main():
 						allow_click=allow_click,
 					)
 
-			# Debug aid for tuning classify_hand()/MIRROR_HANDEDNESS_ORDER:
-			# show which hand(s) were detected this frame right next to
-			# the current action, so you can see at a glance whether the
-			# hand you're moving is the one it thinks it is.
-			hands_debug_text = f'  [{", ".join(hand_labels_seen)}]' if hand_labels_seen else ''
-			overlay.draw(event + hands_debug_text, control_state, typed_text, button_list)
+			# Debug aid: show which detected hand is doing what right next
+			# to the current action, so you can see at a glance whether
+			# it's routing your hands the way you expect (see
+			# constants.SWAP_LABELED_HANDS if it isn't).
+			overlay.draw(event + hand_debug_text, control_state, typed_text, button_list)
 			overlay.pump()
 
 	finally:
+		if is_zoomed_in():
+			# Leave the OS screen magnifier back at its normal zoom level
+			# rather than exiting mid-zoom -- otherwise the last thing
+			# this program did stays in effect (a zoomed-in desktop) even
+			# after it's no longer running to zoom back out for you.
+			mc.execute_zoom('out')
 		cap.release()
 		overlay.close()
 		landmarker.close()
