@@ -233,29 +233,37 @@ def get_zoom_event(abs_landmark_list, rel_landmark_list):
 	return None
 
 
-# --- Left hand: pinky-only paste gesture --------------------------------
+# --- Left hand: paste gesture -------------------------------------------
 #
-# Pinky extended, other four fingers folded: a shortcut for the keyboard's
-# 'Paste' key, without having to open the keyboard and aim at that key.
-# Left-hand-only (see main.py), same as zoom, so it doesn't collide with
-# the right hand's own gestures.
-_PASTE_POSE = np.array([False, False, False, False, True])
-
-_was_paste_pose = False
+# Same "scissors" pose (index + middle extended, other three folded) as
+# the right hand's Cut-Typed gesture -- but on the left hand it pastes
+# instead, as a natural cut/paste mirror of the same shape rather than a
+# separate pose to remember. It needs its own edge-trigger state,
+# independent of get_event_fast()'s _was_scissors above, since both hands
+# are processed every frame and must not affect each other's edge
+# detection.
+#
+# (A pinky-alone pose was tried here first, but thumb+index end up close
+# together when the other three fingers -- including the thumb -- are
+# folded in, which is indistinguishable from the right hand's Left-Click
+# pinch. Reusing the scissors pose sidesteps that: index+middle extended
+# keeps thumb and index apart.)
+_was_left_scissors = False
 
 
 def get_paste_event(rel_landmark_list):
-	"""Edge-triggered like the fist/scissors gestures above -- fires once
-	on the frame the pinky-alone pose starts, not every frame it's held."""
-	global _was_paste_pose
+	"""Edge-triggered like the other pose gestures -- fires once on the
+	frame the scissors pose starts on this (left) hand, not every frame
+	it's held."""
+	global _was_left_scissors
 
 	finger_pos = rel_landmark_list[c.FINGER_INDICES]
 	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
 	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
 
-	is_paste_pose = np.array_equal(finger_out_arr, _PASTE_POSE)
-	fire = is_paste_pose and not _was_paste_pose
-	_was_paste_pose = is_paste_pose
+	is_scissors = np.array_equal(finger_out_arr, np.array([False, True, True, False, False]))
+	fire = is_scissors and not _was_left_scissors
+	_was_left_scissors = is_scissors
 
 	return fire
 

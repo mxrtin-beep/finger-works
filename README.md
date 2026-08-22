@@ -56,8 +56,13 @@ your setup.
   `event_classifier.py` (`_ZOOM_ARM_FRAMES`, `_ZOOM_TRIGGER_DELTA`,
   `_ZOOM_TICK_COOLDOWN`).
 
-- Pinky extended alone, other four fingers folded: paste (shortcut for
-  the keyboard's 'Paste' key, without needing the keyboard open at all).
+- Index + middle extended ("scissors") -- the same shape as the right
+  hand's Cut-Typed gesture, but paste on this hand: a shortcut for the
+  keyboard's 'Paste' key without needing the keyboard open at all. (A
+  pinky-alone pose was tried here first, but folding in the thumb along
+  with the other fingers put thumb and index close enough together to
+  read as the right hand's click pinch; the scissors pose keeps them
+  apart.)
 
 ### Which hand is which
 

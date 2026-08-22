@@ -100,19 +100,6 @@ _left_button_down = False
 # pinch for multiple frames would fire a real right-click every frame.
 _was_right_click = False
 
-# Consecutive frames the pinch has read as released, while we're still
-# holding the button down. A glove (thicker, less precise fingertip
-# tracking than bare skin) can make the thumb-index distance briefly spike
-# past LEFT_CLICK_CUTOFF for a frame or two even while you're still
-# physically pinched -- without debouncing that, each such blip released
-# the real mouse button mid-drag and then re-pressed it a frame later,
-# turning one continuous drag-select into several separate ones. Requiring
-# a short run of consecutive "released" frames before actually releasing
-# absorbs that noise; a real release still only costs a couple frames of
-# latency (well under the length of an intentional release).
-_release_grace_count = 0
-_RELEASE_GRACE_FRAMES = 2
-
 
 def execute_click(event):
 	"""Translate the current gesture event into real OS mouse-button state.
@@ -126,21 +113,25 @@ def execute_click(event):
 	moving cursor (a drag). There's no separate timer distinguishing
 	"click" from "hold" -- the OS's own click-vs-drag handling takes care
 	of that once we're just reporting real button-down/button-up state.
+
+	This releases the instant the pinch reads as broken, with no
+	debounce -- a debounced release was tried (to smooth over noisier
+	gloved-hand tracking splitting one drag into several) but the added
+	latency made every release feel laggy, which is worse than the
+	occasional split drag it was meant to fix. Better click/hold
+	recognition itself (tightening LEFT_CLICK_CUTOFF, or smoothing the
+	thumb-index distance signal rather than the button state) is the
+	right way back to that, if it comes up again.
 	"""
-	global _left_button_down, _was_right_click, _release_grace_count
+	global _left_button_down, _was_right_click
 
 	is_left_pinch = (event == 'Left-Click')
-	if is_left_pinch:
-		_release_grace_count = 0
-		if not _left_button_down:
-			pyautogui.mouseDown(button='left')
-			_left_button_down = True
-	elif _left_button_down:
-		_release_grace_count += 1
-		if _release_grace_count >= _RELEASE_GRACE_FRAMES:
-			pyautogui.mouseUp(button='left')
-			_left_button_down = False
-			_release_grace_count = 0
+	if is_left_pinch and not _left_button_down:
+		pyautogui.mouseDown(button='left')
+		_left_button_down = True
+	elif not is_left_pinch and _left_button_down:
+		pyautogui.mouseUp(button='left')
+		_left_button_down = False
 
 	is_right_pinch = (event == 'Right-Click')
 	if is_right_pinch and not _was_right_click:
@@ -156,11 +147,10 @@ def release_all():
 	consumed as a keypress instead) -- so a drag started in Mouse mode
 	can't get stuck "down" forever once control switches away from it.
 	"""
-	global _left_button_down, _release_grace_count
+	global _left_button_down
 	if _left_button_down:
 		pyautogui.mouseUp(button='left')
 		_left_button_down = False
-	_release_grace_count = 0
 
 
 def execute_zoom(direction):

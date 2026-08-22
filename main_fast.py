@@ -261,9 +261,11 @@ def main():
 							mc.execute_zoom('out')
 
 						if get_paste_event(rel_landmark_list):
-							# Pinky raised alone: shortcut for the
-							# keyboard's 'Paste' key, without needing the
-							# keyboard open at all.
+							# "Scissors" pose (index + middle extended) --
+							# the same shape as the right hand's Cut-Typed
+							# gesture, but paste on this (left) hand: a
+							# shortcut for the keyboard's 'Paste' key
+							# without needing the keyboard open at all.
 							typed_text = type_char('Paste', typed_text)
 
 						continue

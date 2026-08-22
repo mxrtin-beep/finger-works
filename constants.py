@@ -59,4 +59,4 @@ MIN_TRACKING_CONFIDENCE = 0.5
 # in this app's mirrored camera view; if zoom and mouse control come out
 # swapped for your camera/setup (e.g. you have to raise your *right* hand
 # to zoom), flip this rather than digging into classify_hand() itself.
-MIRROR_HANDEDNESS_ORDER = False
+MIRROR_HANDEDNESS_ORDER = True
