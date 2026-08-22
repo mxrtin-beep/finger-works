@@ -111,7 +111,7 @@ _was_right_click = False
 # absorbs that noise; a real release still only costs a couple frames of
 # latency (well under the length of an intentional release).
 _release_grace_count = 0
-_RELEASE_GRACE_FRAMES = 3
+_RELEASE_GRACE_FRAMES = 2
 
 
 def execute_click(event):

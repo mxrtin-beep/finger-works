@@ -50,3 +50,13 @@ MOUSE_SPEED = 0.65
 # training data (see the "Using this with gloves on" section of README.md).
 MIN_DETECTION_CONFIDENCE = 0.7
 MIN_TRACKING_CONFIDENCE = 0.5
+
+
+# Left/right hand classification is done by geometry (see
+# event_classifier.classify_hand()) rather than trusting MediaPipe's own
+# handedness label, which proved unreliable in practice. That geometry
+# check assumes a particular thumb/pinky ordering for a right hand held up
+# in this app's mirrored camera view; if zoom and mouse control come out
+# swapped for your camera/setup (e.g. you have to raise your *right* hand
+# to zoom), flip this rather than digging into classify_hand() itself.
+MIRROR_HANDEDNESS_ORDER = False

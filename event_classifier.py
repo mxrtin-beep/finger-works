@@ -20,6 +20,36 @@ def dist_twopoints(p1, p2):
 	return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
 
+def classify_hand(abs_landmark_list):
+	"""Left/right hand classification based purely on finger geometry in
+	this frame, rather than MediaPipe's own Left/Right handedness label --
+	that label proved unreliable in practice (a hand could get labeled
+	backwards and silently lose mouse control). This instead looks at
+	which side of the wrist the thumb sits relative to the pinky, which
+	mirrors between hands the same way your left and right hand mirror
+	each other -- so it's a direct read of the same geometry a person
+	would use to tell them apart by eye, not a learned classifier that
+	can be "wrong" in an opaque way.
+
+	If this ever comes out backwards for your camera setup (e.g. an
+	unusual camera orientation), flip constants.MIRROR_HANDEDNESS_ORDER
+	rather than the comparison here.
+	"""
+	thumb_x = abs_landmark_list[c.THUMB_IDX][0]
+	pinky_x = abs_landmark_list[c.PINKY_IDX][0]
+
+	# In the mirrored (selfie-view) image this app displays, a right hand
+	# held up with fingers extended toward the camera has its thumb to
+	# the *left* of its pinky on screen; a left hand has the opposite
+	# ordering. is_right defaults to that assumption and can be flipped
+	# wholesale via the constants flag if it's backwards in practice.
+	is_right = thumb_x < pinky_x
+	if c.MIRROR_HANDEDNESS_ORDER:
+		is_right = not is_right
+
+	return 'Right' if is_right else 'Left'
+
+
 def get_direction(x_vel, y_vel, x_cutoff, y_cutoff):
 
 	direction = ''
@@ -121,31 +151,34 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 
 # --- Left hand: pinch-to-zoom gesture -----------------------------------
 #
-# Thumb + index extended, other three fingers folded -- the same pose you'd
-# use to pinch-zoom on a touchscreen. Spreading thumb and index apart zooms
-# in; bringing them together zooms out. This runs only on the left hand
-# (see main_fast.py), so it never competes with the right hand's mouse and
-# keyboard gestures above -- which is also why it's kept in its own
-# function with its own state, rather than folded into get_event_fast().
-_ZOOM_POSE = np.array([True, True, False, False, False])
+# Thumb + index extended -- the same pose you'd use to pinch-zoom on a
+# touchscreen. Spreading thumb and index apart zooms in; bringing them
+# together zooms out. This only ever runs on the hand main.py has
+# classified as the left hand (see classify_hand()), so it doesn't need to
+# also demand the other three fingers be folded just to avoid colliding
+# with the right hand's mouse/keyboard gestures -- that restriction was
+# there back when hand routing itself was pose-based; now that routing is
+# by hand identity, requiring an exact 5-finger pose match here only made
+# the gesture needlessly fussy to trigger.
+_ZOOM_POSE = np.array([True, True])  # thumb, index
 
 # Frames the pose must be held before we start reacting to it. Without
 # this, a single flickering frame of "thumb+index out" while your hand is
 # mid-transition between other poses (e.g. opening from a fist) could arm
 # zooming by accident.
-_ZOOM_ARM_FRAMES = 3
+_ZOOM_ARM_FRAMES = 2
 
 # Minimum frame-to-frame change in thumb-index pixel distance to count as
 # a deliberate spread/pinch motion rather than hand tremor or landmark
 # jitter. This (plus the arm delay and cooldown below) is what keeps the
 # gesture from triggering accidentally -- it takes a real, sustained
 # widening or narrowing motion, not just holding the pose still.
-_ZOOM_TRIGGER_DELTA = 18
+_ZOOM_TRIGGER_DELTA = 10
 
 # Minimum frames between two zoom ticks. One continuous spread/pinch
 # motion should produce a steady, controllable rate of ticks, not fire on
 # every single frame of a single motion.
-_ZOOM_TICK_COOLDOWN = 4
+_ZOOM_TICK_COOLDOWN = 3
 
 _zoom_pose_frames = 0
 _zoom_prev_dist = None
@@ -154,16 +187,9 @@ _zoom_cooldown = 0
 
 def is_zoom_pose(rel_landmark_list):
 	"""Whether this hand currently shows the zoom pose (thumb + index
-	extended, other three folded). Used both by get_zoom_event() below and
-	by main.py to decide *which* detected hand gets treated as the zoom
-	hand -- a hand actually forming this pose, rather than MediaPipe's
-	Left/Right label, since the label isn't reliable enough on its own
-	(e.g. under different camera/mirroring setups) to safely gate mouse
-	control on: routing by pose means a hand that's just moving the mouse
-	normally is never mistaken for the zoom hand, regardless of what the
-	model happens to label it.
-	"""
-	finger_pos = rel_landmark_list[c.FINGER_INDICES]
+	extended -- the other three fingers aren't checked, see the comment
+	above _ZOOM_POSE)."""
+	finger_pos = rel_landmark_list[c.FINGER_INDICES[:2]]
 	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
 	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
 	return np.array_equal(finger_out_arr, _ZOOM_POSE)
@@ -205,4 +231,31 @@ def get_zoom_event(abs_landmark_list, rel_landmark_list):
 		return 'Zoom Out'
 
 	return None
+
+
+# --- Left hand: pinky-only paste gesture --------------------------------
+#
+# Pinky extended, other four fingers folded: a shortcut for the keyboard's
+# 'Paste' key, without having to open the keyboard and aim at that key.
+# Left-hand-only (see main.py), same as zoom, so it doesn't collide with
+# the right hand's own gestures.
+_PASTE_POSE = np.array([False, False, False, False, True])
+
+_was_paste_pose = False
+
+
+def get_paste_event(rel_landmark_list):
+	"""Edge-triggered like the fist/scissors gestures above -- fires once
+	on the frame the pinky-alone pose starts, not every frame it's held."""
+	global _was_paste_pose
+
+	finger_pos = rel_landmark_list[c.FINGER_INDICES]
+	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
+	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
+
+	is_paste_pose = np.array_equal(finger_out_arr, _PASTE_POSE)
+	fire = is_paste_pose and not _was_paste_pose
+	_was_paste_pose = is_paste_pose
+
+	return fire
 

@@ -19,7 +19,7 @@ from collections import deque
 
 import mouse_control as mc
 from mouse_control import execute_event_fast, screenWidth, screenHeight
-from event_classifier import get_event_fast, get_zoom_event, is_zoom_pose
+from event_classifier import get_event_fast, get_zoom_event, get_paste_event, classify_hand
 import constants as c
 import keyboard as k
 import overlay as ov
@@ -232,68 +232,40 @@ def main():
 			timestamp_ms = int(time.time() * 1000) - start_time_ms
 			results = landmarker.detect_for_video(mp_image, timestamp_ms)
 
+			hand_labels_seen = []
+
 			if results.hand_landmarks:
 
-				# Decide which detected hand (if any) drives the mouse/
-				# keyboard vs. which does zoom, *before* processing either.
-				# This is decided by pose, not by MediaPipe's Left/Right
-				# handedness label -- the label isn't reliable enough
-				# across different cameras/mirroring setups to gate mouse
-				# control on (getting it backwards on your one visible hand
-				# silently swallowed every gesture as a "zoom" check and
-				# froze the cursor). The zoom pose itself (thumb + index
-				# extended, other three folded) is distinctive enough that
-				# it's a safer signal: whichever hand is actually making
-				# that shape does zoom; every other hand drives the mouse,
-				# same as when only one hand is in frame at all.
-				all_landmarks = []
+				# Which hand does what is decided by hand identity (left
+				# vs. right), classified purely from finger geometry (see
+				# event_classifier.classify_hand()) rather than trusting
+				# MediaPipe's own handedness label -- that label proved
+				# unreliable enough in practice to freeze mouse control
+				# outright when it came out backwards on the one hand in
+				# frame.
 				for hand_landmarks in results.hand_landmarks:
 					abs_landmark_list = np.array(calc_landmark_list(image, hand_landmarks))
 					rel_landmark_list = np.array(pre_process_landmark(abs_landmark_list.tolist()))
-					all_landmarks.append((abs_landmark_list, rel_landmark_list))
 
-				zoom_hand_idx = next(
-					(i for i, (_, rel) in enumerate(all_landmarks) if is_zoom_pose(rel)),
-					None,
-				)
+					hand_label = classify_hand(abs_landmark_list)
+					hand_labels_seen.append(hand_label)
 
-				# Exactly one hand should ever drive the mouse per frame --
-				# if both hands are visible and neither is zoom-posed,
-				# only one of them may act, or gestures from each would
-				# fight over the same cursor. In that (otherwise
-				# ambiguous) case only, fall back to the Left/Right label
-				# to pick one; with a single hand in frame, or one hand
-				# clearly zooming, there's no ambiguity and the label
-				# isn't needed at all.
-				if zoom_hand_idx is not None:
-					mouse_hand_idx = next(
-						(i for i in range(len(all_landmarks)) if i != zoom_hand_idx), None
-					)
-				elif len(all_landmarks) > 1:
-					right_indices = [
-						i for i, hd in enumerate(results.handedness)
-						if hd[0].category_name == 'Right'
-					]
-					mouse_hand_idx = right_indices[0] if right_indices else 0
-				else:
-					mouse_hand_idx = 0
-
-				for hand_idx, (abs_landmark_list, rel_landmark_list) in enumerate(all_landmarks):
-
-					if hand_idx == zoom_hand_idx:
-						# This hand is making the zoom pose: zoom only, so
-						# it never competes with the mouse hand's gestures.
+					if hand_label == 'Left':
+						# Left hand: zoom and paste only, so it never
+						# competes with the right hand's mouse/keyboard
+						# gestures.
 						zoom_event = get_zoom_event(abs_landmark_list, rel_landmark_list)
 						if zoom_event == 'Zoom In':
 							mc.execute_zoom('in')
 						elif zoom_event == 'Zoom Out':
 							mc.execute_zoom('out')
-						continue
 
-					if hand_idx != mouse_hand_idx:
-						# A second, non-zooming hand while another hand
-						# already has mouse control -- ignored, rather
-						# than fighting over the cursor.
+						if get_paste_event(rel_landmark_list):
+							# Pinky raised alone: shortcut for the
+							# keyboard's 'Paste' key, without needing the
+							# keyboard open at all.
+							typed_text = type_char('Paste', typed_text)
+
 						continue
 
 					event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
@@ -341,7 +313,12 @@ def main():
 						allow_click=allow_click,
 					)
 
-			overlay.draw(event, control_state, typed_text, button_list)
+			# Debug aid for tuning classify_hand()/MIRROR_HANDEDNESS_ORDER:
+			# show which hand(s) were detected this frame right next to
+			# the current action, so you can see at a glance whether the
+			# hand you're moving is the one it thinks it is.
+			hands_debug_text = f'  [{", ".join(hand_labels_seen)}]' if hand_labels_seen else ''
+			overlay.draw(event + hands_debug_text, control_state, typed_text, button_list)
 			overlay.pump()
 
 	finally:

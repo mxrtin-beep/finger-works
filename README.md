@@ -2,6 +2,13 @@
 
 A program to allow you to control your computer without touching it. It uses your webcam to track your finger movements and pick up commands.
 
+## License
+
+All rights reserved -- see `LICENSE`. This is proprietary; using, copying,
+or redistributing it requires the copyright holder's permission. (Its
+open-source dependencies -- OpenCV, MediaPipe, NumPy, PyAutoGUI,
+PyPerClip -- keep their own separate licenses.)
+
 ## Gestures
 
 The right hand drives the mouse and (optionally) the keyboard:
@@ -21,11 +28,14 @@ cursor isn't over one of the keyboard's own buttons -- so you can type a
 name, then click elsewhere (e.g. to confirm a rename, or click into
 another text field) without having to close the keyboard first.
 
-The left hand is dedicated to zoom, so the right hand isn't stuck doing
-everything:
+The left hand is dedicated to zoom and paste, so the right hand isn't
+stuck doing everything. Which hand is which is decided by hand shape
+(thumb vs. pinky position), not by which hand you're used to using for
+mousing -- see "Which hand is which" below if it's ever backwards for
+your setup.
 
-- Thumb + index extended, other three fingers folded, then spread the
-  thumb and index apart: zoom in. Bring them back together: zoom out.
+- Thumb + index extended, then spread them apart: zoom in. Bring them
+  back together: zoom out.
 
   This drives the OS's own screen magnifier (Windows Magnifier / macOS
   Zoom) rather than an in-app zoom, so it zooms *whatever's on screen* --
@@ -37,13 +47,29 @@ everything:
   Zoom Style: Lens. On Linux this instead falls back to Ctrl+Scroll,
   since screen-magnifier shortcuts vary a lot by desktop environment.
 
-This gesture is intentionally picky about triggering: it only reacts once
-the pose has been held for a few frames and only once thumb-index
-distance has clearly changed, specifically so that resting your left hand
-in roughly that shape doesn't accidentally start zooming. If it's still
-too easy (or too hard) to trigger for your hand/camera setup, the
-thresholds are in `event_classifier.py` (`_ZOOM_ARM_FRAMES`,
-`_ZOOM_TRIGGER_DELTA`, `_ZOOM_TICK_COOLDOWN`).
+  This gesture only reacts once the pose has been held for a couple
+  frames and thumb-index distance has clearly changed, so an idle left
+  hand held still doesn't start zooming by accident -- but since only
+  your left hand can trigger it at all now, it doesn't need to be as
+  strict as an ordinary "any hand, any pose" gesture would. If it's
+  still too easy (or too hard) to trigger, the thresholds are in
+  `event_classifier.py` (`_ZOOM_ARM_FRAMES`, `_ZOOM_TRIGGER_DELTA`,
+  `_ZOOM_TICK_COOLDOWN`).
+
+- Pinky extended alone, other four fingers folded: paste (shortcut for
+  the keyboard's 'Paste' key, without needing the keyboard open at all).
+
+### Which hand is which
+
+Left vs. right hand is worked out from finger geometry each frame (which
+side of the wrist the thumb sits relative to the pinky) instead of trusting
+MediaPipe's own handedness label, which turned out to flip unpredictably
+across camera/mirroring setups. The overlay panel shows which hand(s) it
+currently sees in brackets next to the action text (e.g. `Mousing
+[Right]`) -- use that to check it's classifying your hands the way you'd
+expect. If zoom/paste and mouse control ever come out swapped (e.g. you
+have to raise your *right* hand to zoom), flip `MIRROR_HANDEDNESS_ORDER`
+in `constants.py` rather than digging into the classifier itself.
 
 ## Using this with gloves on
 
