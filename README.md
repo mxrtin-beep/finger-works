@@ -49,6 +49,11 @@ below):
   Zoom Style: Lens. On Linux this instead falls back to Ctrl+Scroll,
   since screen-magnifier shortcuts vary a lot by desktop environment.
 
+  On Windows, if you hear a system "ding" instead of seeing it zoom,
+  that's Windows itself telling you the shortcut is disabled -- check
+  Settings > Accessibility > Magnifier > "Allow the shortcut key to
+  start this feature".
+
   Zoom only ever holds a single level, on or off -- forming the
   zoom-in pose while already zoomed in does nothing (close to a fist
   first), and a fist does nothing unless you're currently zoomed in.

@@ -1,5 +1,6 @@
 
 import sys
+import time
 
 import pyautogui
 import constants as c
@@ -174,9 +175,31 @@ def execute_zoom(direction):
 	- Anything else (Linux desktops vary a lot in their screen-magnifier
 	  shortcut, if they have one at all): fall back to ctrl+scroll, which
 	  at least zooms inside whatever app has focus, if it supports it.
+
+	A Windows "ding" instead of an actual zoom on Win+Plus/Minus usually
+	means the shortcut key for Magnifier is turned off, not a bug here --
+	that's the sound Windows Ease of Access plays specifically to say "this
+	shortcut is disabled", rather than doing nothing silently. Check
+	Settings > Accessibility > Magnifier > "Allow the shortcut key to
+	start this feature" (and the general Ease of Access keyboard-shortcut
+	toggle) if that happens.
 	"""
 	if sys.platform == 'win32':
-		pyautogui.hotkey('win', '+' if direction == 'in' else '-')
+		# pyautogui.hotkey('win', '+') sends the two keys close together
+		# but without an explicit hold -- Windows' own global-hotkey
+		# handling can be timing-sensitive enough that '+' arrives before
+		# 'win' is registered as held, which reads as two unrelated
+		# keypresses (Start menu, then a stray '+') instead of one
+		# combo. Holding 'win' down explicitly with a short pause before
+		# pressing the zoom key removes that race. 'add'/'subtract' (the
+		# numpad +/-) are used rather than the top-row '+'/'-' keys since
+		# they're the exact keys Magnifier's own documented shortcut
+		# (Win+Numpad Plus/Minus) expects, with no shift-key ambiguity.
+		pyautogui.keyDown('win')
+		time.sleep(0.05)
+		pyautogui.press('add' if direction == 'in' else 'subtract')
+		time.sleep(0.05)
+		pyautogui.keyUp('win')
 	elif sys.platform == 'darwin':
 		pyautogui.hotkey('option', 'command', '=' if direction == 'in' else '-')
 	else:
