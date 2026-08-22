@@ -62,4 +62,4 @@ MIN_TRACKING_CONFIDENCE = 0.5
 # hand to zoom while your left hand drives the mouse), flip this rather
 # than digging into main_fast.py -- it swaps the label for every
 # detected hand, every frame.
-SWAP_LABELED_HANDS = False
+SWAP_LABELED_HANDS = True

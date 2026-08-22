@@ -74,11 +74,24 @@ control; it does zoom/paste or nothing.
 
 The overlay panel shows the resolved role next to each detected hand's
 label in brackets next to the action text (e.g. `Mousing  [Right
-[Mouse]]`, or `Mousing  [Right [Mouse], Left [Zoom]]` with both hands
-up) so you can check it's routing your hands the way you expect. If it
-ever comes out backwards for your camera setup -- your left hand mousing
-instead of your right -- flip `SWAP_LABELED_HANDS` in `constants.py`; it
-swaps the label for every detected hand, every frame.
+[Mouse]]`). If it ever comes out backwards for your camera setup -- your
+left hand mousing instead of your right -- flip `SWAP_LABELED_HANDS` in
+`constants.py`; it swaps the label for every detected hand, every frame.
+
+For the left/zoom hand specifically, the bracket also shows *live*
+detection state instead of just the static "Zoom" role, e.g.
+`Left [Zoom: open 3/5, normal]` -- which pose it's currently reading
+(`open`/`fist`/`neither`, plus which fingers it saw as extended if
+neither matched), how many consecutive frames into the hold-before-it-
+fires delay it is, and whether the screen is currently zoomed in or at
+normal. When a zoom action actually fires, `-> sent zoom-in` or `-> sent
+zoom-out` is appended. This is meant to answer "why isn't zoom working"
+directly: if the counter never climbs, the pose itself isn't being
+recognized (check lighting/framing, or that `FINGER_OUT_CUTOFF` fits
+your hand/camera); if it reaches the full count and still doesn't zoom,
+the gesture is fine and the problem is downstream, in the OS hotkey
+`execute_zoom()` sends (e.g. the OS magnifier isn't installed/enabled,
+or another app is capturing that shortcut).
 
 ## Using this with gloves on
 

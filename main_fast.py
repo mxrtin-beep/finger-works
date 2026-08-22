@@ -260,13 +260,15 @@ def main():
 						raw_label = 'Left' if raw_label == 'Right' else 'Right'
 
 					if raw_label == 'Left':
-						debug_parts.append('Left [Zoom]')
-
-						zoom_event = get_zoom_event(rel_landmark_list)
+						zoom_event, zoom_debug_text = get_zoom_event(rel_landmark_list)
 						if zoom_event == 'Zoom In':
 							mc.execute_zoom('in')
+							zoom_debug_text += ' -> sent zoom-in'
 						elif zoom_event == 'Zoom Out':
 							mc.execute_zoom('out')
+							zoom_debug_text += ' -> sent zoom-out'
+
+						debug_parts.append(f'Left [Zoom: {zoom_debug_text}]')
 
 						if get_paste_event(rel_landmark_list):
 							# "Scissors" pose (index + middle extended) --
