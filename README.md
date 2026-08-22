@@ -57,12 +57,13 @@ below):
   Zoom only ever holds a single level, on or off -- forming the
   zoom-in pose while already zoomed in does nothing (close to a fist
   first), and a fist does nothing unless you're currently zoomed in.
-  Each pose also has to be held for several consecutive frames before it
-  fires. Together that's what keeps one gesture from stacking up several
-  zoom steps at once, and it also zooms back out automatically when you
-  quit the program, so it doesn't leave your screen zoomed in behind it.
-  The hold-time is `_ZOOM_ARM_FRAMES` in `event_classifier.py` if it
-  needs retuning.
+  That's what keeps one gesture from stacking up several zoom steps at
+  once (it fires the instant it sees the pose, with no held-for-a-moment
+  delay), and it also zooms back out automatically when you quit the
+  program, so it doesn't leave your screen zoomed in behind it. If a
+  quick incidental flash of open-hand/fist ever ends up triggering zoom
+  by accident, `_ZOOM_ARM_FRAMES` in `event_classifier.py` adds back a
+  hold delay.
 
 - Index + middle extended ("scissors") -- the same shape as the right
   hand's Cut-Typed gesture, but paste on this hand: a shortcut for the

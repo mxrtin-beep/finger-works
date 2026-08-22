@@ -141,10 +141,15 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 _ZOOM_IN_POSE = np.array([True, True, True, True, True])
 _ZOOM_OUT_POSE = np.array([False, False, False, False, False])
 
-# Consecutive frames a pose must be held before it fires -- the "some
-# delay" that keeps a quick, incidental flash of the pose from triggering
-# a zoom.
-_ZOOM_ARM_FRAMES = 5
+# Consecutive frames a pose must be held before it fires. At 1, it fires
+# on the very first frame the pose is seen -- no held-for-a-moment delay
+# at all. The single-level guard above (open-hand does nothing while
+# already zoomed in, fist does nothing while already zoomed out) is what
+# still keeps one continuous pose from stacking up more than one zoom
+# step, so a fast trigger here doesn't reintroduce that problem; raise
+# this back up if a quick incidental flash of the pose ends up
+# triggering zoom by accident.
+_ZOOM_ARM_FRAMES = 1
 
 _zoom_in_frames = 0
 _zoom_out_frames = 0
