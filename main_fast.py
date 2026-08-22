@@ -17,8 +17,9 @@ from mediapipe.tasks.python.vision import (
 import numpy as np
 from collections import deque
 
+import mouse_control as mc
 from mouse_control import execute_event_fast, screenWidth, screenHeight
-from event_classifier import get_event_fast
+from event_classifier import get_event_fast, get_zoom_event
 import constants as c
 import keyboard as k
 import overlay as ov
@@ -175,8 +176,8 @@ def main():
 	cap_width = width
 	cap_height = height
 
-	min_detection_confidence = 0.7
-	min_tracking_confidence = 0.5
+	min_detection_confidence = c.MIN_DETECTION_CONFIDENCE
+	min_tracking_confidence = c.MIN_TRACKING_CONFIDENCE
 
 	# Camera (used only to feed the hand-tracking model -- no video window
 	# is shown; the overlay panel is the only thing on screen besides
@@ -191,7 +192,11 @@ def main():
 	options = HandLandmarkerOptions(
 		base_options=base_options,
 		running_mode=RunningMode.VIDEO,
-		num_hands=1,
+		# Two hands: the right hand drives the mouse/keyboard as before,
+		# and the left hand is free for the zoom gesture (see below) --
+		# so the right hand isn't overloaded with yet another gesture to
+		# distinguish from clicking/typing.
+		num_hands=2,
 		min_hand_detection_confidence=min_detection_confidence,
 		min_hand_presence_confidence=min_detection_confidence,
 		min_tracking_confidence=min_tracking_confidence,
@@ -228,13 +233,30 @@ def main():
 			results = landmarker.detect_for_video(mp_image, timestamp_ms)
 
 			if results.hand_landmarks:
-				for hand_landmarks, handedness in zip(results.hand_landmarks, results.handedness):
+				for hand_landmarks, hand_handedness in zip(results.hand_landmarks, results.handedness):
 
 					abs_landmark_list = calc_landmark_list(image, hand_landmarks)
 					rel_landmark_list = pre_process_landmark(abs_landmark_list)
 
 					abs_landmark_list = np.array(abs_landmark_list)
 					rel_landmark_list = np.array(rel_landmark_list)
+
+					# The image is mirrored (cv2.flip above) before it's
+					# fed to the model, which is exactly the "selfie view"
+					# MediaPipe's handedness classification assumes, so
+					# category_name here already matches the user's actual
+					# left/right hand rather than the mirrored image's.
+					hand_label = hand_handedness[0].category_name
+
+					if hand_label == 'Left':
+						# Left hand: zoom only, so it never competes with
+						# the right hand's mouse/keyboard gestures.
+						zoom_event = get_zoom_event(abs_landmark_list, rel_landmark_list)
+						if zoom_event == 'Zoom In':
+							mc.execute_zoom('in')
+						elif zoom_event == 'Zoom Out':
+							mc.execute_zoom('out')
+						continue
 
 					event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
 
@@ -253,24 +275,33 @@ def main():
 
 					# Always drive the real OS cursor so it tracks your
 					# finger in both modes (so it visually hovers over the
-					# overlay's keys too) -- but only let it actually click
-					# the real desktop while in Mouse mode. In Keyboard
-					# mode the same pinch is instead intercepted below as a
-					# key press.
-					execute_event_fast(
-						event, abs_landmark_list, event_history,
-						frame_width, frame_height,
-						allow_click=(control_state == 'Mouse'),
-					)
-
+					# overlay's keys too). Whether the pinch also clicks
+					# the real desktop is decided below, per-frame, rather
+					# than solely by Mouse-vs-Keyboard mode -- so you can
+					# still click things while the keyboard is open, as
+					# long as you're not currently aiming at one of its
+					# keys (see hit_button below).
+					hit_button = None
 					if control_state == 'Keyboard':
 						mouse_screen_pos = pyautogui.position()
-						button_list, typed_char = k.execute_event_keyboard(
+						button_list, typed_char, hit_button = k.execute_event_keyboard(
 							event, mouse_screen_pos, overlay.origin(), button_list
 						)
 
 						if typed_char is not None:
 							typed_text = type_char(typed_char, typed_text)
+
+					# Click the real desktop when in Mouse mode, or in
+					# Keyboard mode as long as the cursor isn't over a key
+					# (that pinch was just consumed above as a keypress
+					# instead).
+					allow_click = (control_state == 'Mouse') or (hit_button is None)
+
+					execute_event_fast(
+						event, abs_landmark_list, event_history,
+						frame_width, frame_height,
+						allow_click=allow_click,
+					)
 
 			overlay.draw(event, control_state, typed_text, button_list)
 			overlay.pump()

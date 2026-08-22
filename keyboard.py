@@ -161,4 +161,4 @@ def execute_event_keyboard(event, mouse_screen_pos, panel_origin, button_list):
 			print(f'[DEBUG] click at cursor=({finger_x:.0f},{finger_y:.0f}) '
 				f'missed all keys; nearest is "{nearest.text}" pos={nearest.pos} size={nearest.size}')
 
-	return button_list, typed_char
+	return button_list, typed_char, hit_button

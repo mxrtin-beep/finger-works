@@ -37,3 +37,16 @@ MOUSE_Y_SENS = 2.0
 # Raised to track much closer to the fingertip (like the debug dot)
 # while still smoothing out a bit of frame-to-frame hand-tracking jitter.
 MOUSE_SPEED = 0.65
+
+
+# How confident the hand-landmark model must be before it'll report a
+# hand/keep tracking it at all. Tuned for bare hands; a gloved hand (matte
+# fabric/nitrile texture, no visible knuckle creases or nail/skin contrast)
+# is a harder detection for a model trained mostly on bare-hand images, so
+# it may need these lowered -- try 0.5/0.4 first if tracking drops out or
+# never starts with gloves on. Lowering them trades some false-positive/
+# jittery-tracking risk for a better chance of detecting the hand at all;
+# there's no setting here that gets around the model's underlying
+# training data (see the "Using this with gloves on" section of README.md).
+MIN_DETECTION_CONFIDENCE = 0.7
+MIN_TRACKING_CONFIDENCE = 0.5

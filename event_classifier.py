@@ -119,6 +119,76 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 	return 'Mousing'
 
 
+# --- Left hand: pinch-to-zoom gesture -----------------------------------
+#
+# Thumb + index extended, other three fingers folded -- the same pose you'd
+# use to pinch-zoom on a touchscreen. Spreading thumb and index apart zooms
+# in; bringing them together zooms out. This runs only on the left hand
+# (see main_fast.py), so it never competes with the right hand's mouse and
+# keyboard gestures above -- which is also why it's kept in its own
+# function with its own state, rather than folded into get_event_fast().
+_ZOOM_POSE = np.array([True, True, False, False, False])
+
+# Frames the pose must be held before we start reacting to it. Without
+# this, a single flickering frame of "thumb+index out" while your hand is
+# mid-transition between other poses (e.g. opening from a fist) could arm
+# zooming by accident.
+_ZOOM_ARM_FRAMES = 3
+
+# Minimum frame-to-frame change in thumb-index pixel distance to count as
+# a deliberate spread/pinch motion rather than hand tremor or landmark
+# jitter. This (plus the arm delay and cooldown below) is what keeps the
+# gesture from triggering accidentally -- it takes a real, sustained
+# widening or narrowing motion, not just holding the pose still.
+_ZOOM_TRIGGER_DELTA = 18
+
+# Minimum frames between two zoom ticks. One continuous spread/pinch
+# motion should produce a steady, controllable rate of ticks, not fire on
+# every single frame of a single motion.
+_ZOOM_TICK_COOLDOWN = 4
+
+_zoom_pose_frames = 0
+_zoom_prev_dist = None
+_zoom_cooldown = 0
 
 
+def get_zoom_event(abs_landmark_list, rel_landmark_list):
+	"""Left-hand-only zoom gesture. Returns 'Zoom In', 'Zoom Out', or None."""
+	global _zoom_pose_frames, _zoom_prev_dist, _zoom_cooldown
+
+	finger_pos = rel_landmark_list[c.FINGER_INDICES]
+	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
+	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
+
+	if not np.array_equal(finger_out_arr, _ZOOM_POSE):
+		# Pose broken (or not yet formed) -- reset all gesture state so
+		# the next time it's formed, it has to be held and moved
+		# deliberately again rather than picking up stale history.
+		_zoom_pose_frames = 0
+		_zoom_prev_dist = None
+		_zoom_cooldown = 0
+		return None
+
+	_zoom_pose_frames += 1
+	thumb_index_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.INDEX_IDX])
+
+	if _zoom_pose_frames < _ZOOM_ARM_FRAMES or _zoom_prev_dist is None:
+		_zoom_prev_dist = thumb_index_dist
+		return None
+
+	delta = thumb_index_dist - _zoom_prev_dist
+	_zoom_prev_dist = thumb_index_dist
+
+	if _zoom_cooldown > 0:
+		_zoom_cooldown -= 1
+		return None
+
+	if delta > _ZOOM_TRIGGER_DELTA:
+		_zoom_cooldown = _ZOOM_TICK_COOLDOWN
+		return 'Zoom In'
+	if delta < -_ZOOM_TRIGGER_DELTA:
+		_zoom_cooldown = _ZOOM_TICK_COOLDOWN
+		return 'Zoom Out'
+
+	return None
 
