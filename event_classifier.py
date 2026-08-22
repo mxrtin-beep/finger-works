@@ -119,6 +119,134 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 	return 'Mousing'
 
 
+# --- Left hand: zoom toggle gesture -------------------------------------
+#
+# All five fingers extended (open hand): zoom in. Closed fist: zoom back
+# out. Deliberately simple, maximally-distinct poses (rather than the
+# earlier thumb/index pinch-and-spread) so detection itself isn't the
+# weak link -- these two poses are about as far apart in finger-out/
+# finger-in terms as two poses can be.
+#
+# This only ever runs on the hand main.py has identified as the left hand
+# (see main.py's per-frame hand routing), so it doesn't collide with the
+# right hand's own fist gesture (Keyboard toggle).
+#
+# Zoom is a single on/off level, not a repeatable "tick" -- forming the
+# open-hand pose while already zoomed in does nothing (you have to close
+# to a fist first), and likewise a fist does nothing unless currently
+# zoomed in. That, plus requiring the pose to be held for a run of
+# consecutive frames before it fires, is what keeps one gesture from
+# stacking up several zoom steps in a row: each pose can only ever
+# produce at most one zoom action until you deliberately reverse it.
+_ZOOM_IN_POSE = np.array([True, True, True, True, True])
+_ZOOM_OUT_POSE = np.array([False, False, False, False, False])
+
+# Consecutive frames a pose must be held before it fires. At 1, it fires
+# on the very first frame the pose is seen -- no held-for-a-moment delay
+# at all. The single-level guard above (open-hand does nothing while
+# already zoomed in, fist does nothing while already zoomed out) is what
+# still keeps one continuous pose from stacking up more than one zoom
+# step, so a fast trigger here doesn't reintroduce that problem; raise
+# this back up if a quick incidental flash of the pose ends up
+# triggering zoom by accident.
+_ZOOM_ARM_FRAMES = 1
+
+_zoom_in_frames = 0
+_zoom_out_frames = 0
+_is_zoomed_in = False
 
 
+def get_zoom_event(rel_landmark_list):
+	"""Left-hand-only zoom toggle.
+
+	Returns (event, debug_text): event is 'Zoom In', 'Zoom Out', or None;
+	debug_text is a short, always-present description of what this frame
+	actually saw (which pose, and the current zoomed on/off state) --
+	meant to be shown live in the overlay so it's obvious whether a
+	failure to zoom is a detection problem (the pose never registers) or
+	something past that (the pose registers but the OS-level zoom hotkey
+	isn't landing).
+	"""
+	global _zoom_in_frames, _zoom_out_frames, _is_zoomed_in
+
+	finger_pos = rel_landmark_list[c.FINGER_INDICES]
+	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
+	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
+
+	is_open_hand = np.array_equal(finger_out_arr, _ZOOM_IN_POSE)
+	is_fist = np.array_equal(finger_out_arr, _ZOOM_OUT_POSE)
+
+	_zoom_in_frames = _zoom_in_frames + 1 if is_open_hand else 0
+	_zoom_out_frames = _zoom_out_frames + 1 if is_fist else 0
+
+	if is_open_hand:
+		pose_text = 'open'
+	elif is_fist:
+		pose_text = 'fist'
+	else:
+		# Neither pose matched at all -- shows exactly which fingers this
+		# frame read as extended, so a pose that "should" be a fist or an
+		# open hand but isn't quite hitting FINGER_OUT_CUTOFF on one
+		# finger is visible instead of just silently not triggering.
+		out_fingers = ','.join(
+			name for name, out in zip(c.FINGER_NAMES, finger_out_arr) if out
+		) or 'none'
+		pose_text = f'neither ({out_fingers} out)'
+
+	debug_text = f'{pose_text}, {"zoomed" if _is_zoomed_in else "normal"}'
+
+	# ``==`` rather than ``>=`` so this fires exactly once per continuous
+	# hold of the pose, not on every frame past the arm delay.
+	if is_open_hand and _zoom_in_frames == _ZOOM_ARM_FRAMES and not _is_zoomed_in:
+		_is_zoomed_in = True
+		return 'Zoom In', debug_text
+
+	if is_fist and _zoom_out_frames == _ZOOM_ARM_FRAMES and _is_zoomed_in:
+		_is_zoomed_in = False
+		return 'Zoom Out', debug_text
+
+	return None, debug_text
+
+
+def is_zoomed_in():
+	"""Whether the zoom gesture last left the screen zoomed in -- checked
+	at shutdown so main.py can zoom back out to normal before exiting,
+	rather than leaving the OS magnifier engaged after the program quits.
+	"""
+	return _is_zoomed_in
+
+
+# --- Left hand: paste gesture -------------------------------------------
+#
+# Same "scissors" pose (index + middle extended, other three folded) as
+# the right hand's Cut-Typed gesture -- but on the left hand it pastes
+# instead, as a natural cut/paste mirror of the same shape rather than a
+# separate pose to remember. It needs its own edge-trigger state,
+# independent of get_event_fast()'s _was_scissors above, since both hands
+# are processed every frame and must not affect each other's edge
+# detection.
+#
+# (A pinky-alone pose was tried here first, but thumb+index end up close
+# together when the other three fingers -- including the thumb -- are
+# folded in, which is indistinguishable from the right hand's Left-Click
+# pinch. Reusing the scissors pose sidesteps that: index+middle extended
+# keeps thumb and index apart.)
+_was_left_scissors = False
+
+
+def get_paste_event(rel_landmark_list):
+	"""Edge-triggered like the other pose gestures -- fires once on the
+	frame the scissors pose starts on this (left) hand, not every frame
+	it's held."""
+	global _was_left_scissors
+
+	finger_pos = rel_landmark_list[c.FINGER_INDICES]
+	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
+	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
+
+	is_scissors = np.array_equal(finger_out_arr, np.array([False, True, True, False, False]))
+	fire = is_scissors and not _was_left_scissors
+	_was_left_scissors = is_scissors
+
+	return fire
 

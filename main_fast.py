@@ -17,8 +17,9 @@ from mediapipe.tasks.python.vision import (
 import numpy as np
 from collections import deque
 
+import mouse_control as mc
 from mouse_control import execute_event_fast, screenWidth, screenHeight
-from event_classifier import get_event_fast
+from event_classifier import get_event_fast, get_zoom_event, get_paste_event, is_zoomed_in
 import constants as c
 import keyboard as k
 import overlay as ov
@@ -163,20 +164,22 @@ def type_char(typed_char, typed_text):
 	return typed_text + typed_char
 
 
-def main():
+def main(mouse_sensitivity=1.0):
+
+	mc.set_sensitivity_multiplier(mouse_sensitivity)
 
 	print(
 		f'FingerWorks v{__version__} -- started '
 		f'{datetime.datetime.now():%Y-%m-%d %H:%M:%S} '
-		f'(screen {screenWidth}x{screenHeight})'
+		f'(screen {screenWidth}x{screenHeight}, mouse sensitivity {mouse_sensitivity}x)'
 	)
 
 	cap_device = device
 	cap_width = width
 	cap_height = height
 
-	min_detection_confidence = 0.7
-	min_tracking_confidence = 0.5
+	min_detection_confidence = c.MIN_DETECTION_CONFIDENCE
+	min_tracking_confidence = c.MIN_TRACKING_CONFIDENCE
 
 	# Camera (used only to feed the hand-tracking model -- no video window
 	# is shown; the overlay panel is the only thing on screen besides
@@ -191,7 +194,11 @@ def main():
 	options = HandLandmarkerOptions(
 		base_options=base_options,
 		running_mode=RunningMode.VIDEO,
-		num_hands=1,
+		# Two hands: the right hand drives the mouse/keyboard as before,
+		# and the left hand is free for the zoom gesture (see below) --
+		# so the right hand isn't overloaded with yet another gesture to
+		# distinguish from clicking/typing.
+		num_hands=2,
 		min_hand_detection_confidence=min_detection_confidence,
 		min_hand_presence_confidence=min_detection_confidence,
 		min_tracking_confidence=min_tracking_confidence,
@@ -227,14 +234,65 @@ def main():
 			timestamp_ms = int(time.time() * 1000) - start_time_ms
 			results = landmarker.detect_for_video(mp_image, timestamp_ms)
 
+			hand_debug_text = ''
+
 			if results.hand_landmarks:
-				for hand_landmarks, handedness in zip(results.hand_landmarks, results.handedness):
 
-					abs_landmark_list = calc_landmark_list(image, hand_landmarks)
-					rel_landmark_list = pre_process_landmark(abs_landmark_list)
+				# Which hand does what is strictly by hand identity --
+				# right hand mouses/types, left hand zooms/pastes --
+				# regardless of how many hands are in frame. This is
+				# MediaPipe's own per-hand Left/Right classification
+				# (each hand is classified independently of whether a
+				# second hand is present, so there's no reason a single
+				# visible hand should be treated any differently than
+				# one of a pair); constants.SWAP_LABELED_HANDS flips it
+				# wholesale if it's ever backwards for your camera setup.
+				# A hand-rolled geometry-based classifier was tried
+				# instead of trusting this label, and came out less
+				# reliable, not more, so it's gone.
+				debug_parts = []
+				mouse_assigned = False
 
-					abs_landmark_list = np.array(abs_landmark_list)
-					rel_landmark_list = np.array(rel_landmark_list)
+				for hand_idx, hand_landmarks in enumerate(results.hand_landmarks):
+					abs_landmark_list = np.array(calc_landmark_list(image, hand_landmarks))
+					rel_landmark_list = np.array(pre_process_landmark(abs_landmark_list.tolist()))
+
+					raw_label = results.handedness[hand_idx][0].category_name
+					if c.SWAP_LABELED_HANDS:
+						raw_label = 'Left' if raw_label == 'Right' else 'Right'
+
+					if raw_label == 'Left':
+						zoom_event, zoom_debug_text = get_zoom_event(rel_landmark_list)
+						if zoom_event == 'Zoom In':
+							mc.execute_zoom('in')
+							mc.set_zoomed(True)
+							zoom_debug_text += ' -> sent zoom-in'
+						elif zoom_event == 'Zoom Out':
+							mc.execute_zoom('out')
+							mc.set_zoomed(False)
+							zoom_debug_text += ' -> sent zoom-out'
+
+						debug_parts.append(f'Left [Zoom: {zoom_debug_text}]')
+
+						if get_paste_event(rel_landmark_list):
+							# "Scissors" pose (index + middle extended) --
+							# the same shape as the right hand's Cut-Typed
+							# gesture, but paste on this (left) hand: a
+							# shortcut for the keyboard's 'Paste' key
+							# without needing the keyboard open at all.
+							typed_text = type_char('Paste', typed_text)
+
+						continue
+
+					# raw_label == 'Right'
+					if mouse_assigned:
+						# A second hand also read as 'Right' (shouldn't
+						# normally happen) -- ignored rather than fighting
+						# over the cursor with the hand already driving it.
+						debug_parts.append('Right [ignored]')
+						continue
+					mouse_assigned = True
+					debug_parts.append('Right [Mouse]')
 
 					event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
 
@@ -253,29 +311,51 @@ def main():
 
 					# Always drive the real OS cursor so it tracks your
 					# finger in both modes (so it visually hovers over the
-					# overlay's keys too) -- but only let it actually click
-					# the real desktop while in Mouse mode. In Keyboard
-					# mode the same pinch is instead intercepted below as a
-					# key press.
-					execute_event_fast(
-						event, abs_landmark_list, event_history,
-						frame_width, frame_height,
-						allow_click=(control_state == 'Mouse'),
-					)
-
+					# overlay's keys too). Whether the pinch also clicks
+					# the real desktop is decided below, per-frame, rather
+					# than solely by Mouse-vs-Keyboard mode -- so you can
+					# still click things while the keyboard is open, as
+					# long as you're not currently aiming at one of its
+					# keys (see hit_button below).
+					hit_button = None
 					if control_state == 'Keyboard':
 						mouse_screen_pos = pyautogui.position()
-						button_list, typed_char = k.execute_event_keyboard(
+						button_list, typed_char, hit_button = k.execute_event_keyboard(
 							event, mouse_screen_pos, overlay.origin(), button_list
 						)
 
 						if typed_char is not None:
 							typed_text = type_char(typed_char, typed_text)
 
-			overlay.draw(event, control_state, typed_text, button_list)
+					# Click the real desktop when in Mouse mode, or in
+					# Keyboard mode as long as the cursor isn't over a key
+					# (that pinch was just consumed above as a keypress
+					# instead).
+					allow_click = (control_state == 'Mouse') or (hit_button is None)
+
+					execute_event_fast(
+						event, abs_landmark_list, event_history,
+						frame_width, frame_height,
+						allow_click=allow_click,
+					)
+
+				hand_debug_text = f'  [{", ".join(debug_parts)}]'
+
+			# Debug aid: show which detected hand is doing what right next
+			# to the current action, so you can see at a glance whether
+			# it's routing your hands the way you expect (see
+			# constants.SWAP_LABELED_HANDS if it isn't).
+			overlay.draw(event + hand_debug_text, control_state, typed_text, button_list)
 			overlay.pump()
 
 	finally:
+		if is_zoomed_in():
+			# Leave the OS screen magnifier back at its normal zoom level
+			# rather than exiting mid-zoom -- otherwise the last thing
+			# this program did stays in effect (a zoomed-in desktop) even
+			# after it's no longer running to zoom back out for you.
+			mc.execute_zoom('out')
+			mc.set_zoomed(False)
 		cap.release()
 		overlay.close()
 		landmarker.close()
@@ -284,5 +364,17 @@ def main():
 
 
 if __name__ == '__main__':
-	main()
+	import argparse
+
+	parser = argparse.ArgumentParser(description='FingerWorks -- touchless computer control via webcam.')
+	parser.add_argument(
+		'--sensitivity', type=float, default=1.0, metavar='MULTIPLIER',
+		help=(
+			"Mouse-speed multiplier. 1.0 (default) is today's normal speed "
+			'unchanged; e.g. 1.5 moves the cursor faster, 0.5 slower.'
+		),
+	)
+	args = parser.parse_args()
+
+	main(mouse_sensitivity=args.sensitivity)
 

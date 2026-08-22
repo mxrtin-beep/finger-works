@@ -1,3 +1,155 @@
 # finger-works
 
 A program to allow you to control your computer without touching it. It uses your webcam to track your finger movements and pick up commands.
+
+## License
+
+All rights reserved -- see `LICENSE`. This is proprietary; using, copying,
+or redistributing it requires the copyright holder's permission. (Its
+open-source dependencies -- OpenCV, MediaPipe, NumPy, PyAutoGUI,
+PyPerClip -- keep their own separate licenses.)
+
+## Running it
+
+    python main_fast.py [--sensitivity MULTIPLIER]
+
+`--sensitivity` scales overall cursor speed. It defaults to `1.0` (the
+program's normal speed, unchanged); `1.5` moves the cursor faster, `0.5`
+slower. It's a multiplier on top of `constants.MOUSE_SPEED`, so you don't
+need to edit that file just to try a faster or slower feel.
+
+Cursor speed is also automatically halved while the zoom gesture has the
+screen zoomed in, and restored the moment you zoom back out (or if the
+program quits while still zoomed in) -- a given hand movement covers much
+more of the now-magnified view, so it needs to move the cursor less on
+screen to still land precisely on a small target. `--sensitivity` still
+applies underneath that: it changes your overall baseline speed, zoomed
+or not.
+
+## Gestures
+
+The right hand drives the mouse and (optionally) the keyboard:
+
+- Move your hand: moves the cursor.
+- Pinch thumb + index: left click. Keep it pinched while moving your hand
+  to drag; release quickly for a plain click -- it's the same gesture,
+  distinguished only by how long you hold it, like a real mouse button.
+- Pinch thumb + ring: right click.
+- Closed fist: toggle the on-screen keyboard on/off.
+- Index + middle extended ("scissors"): cut the keyboard's typed-text
+  buffer (shortcut for the 'Cut Typed' key).
+- Thumb + pinky extended, others folded: quit.
+
+While the keyboard is open, clicking still works normally as long as the
+cursor isn't over one of the keyboard's own buttons -- so you can type a
+name, then click elsewhere (e.g. to confirm a rename, or click into
+another text field) without having to close the keyboard first.
+
+The left hand is dedicated to zoom and paste, so the right hand isn't
+stuck doing everything. This is strict, by hand identity, whether or not
+your other hand is in frame at all -- if you raise only your left hand,
+it will only ever zoom/paste, never mouse (see "Which hand does what"
+below):
+
+- Open hand, all five fingers extended: zoom in. Closed fist: zoom back
+  out. Deliberately simple, maximally-different poses so detection
+  itself is reliable -- these two are about as far apart in "fingers
+  out" terms as two poses can be.
+
+  This drives the OS's own screen magnifier (Windows Magnifier / macOS
+  Zoom) rather than an in-app zoom, so it zooms *whatever's on screen* --
+  a menu bar, a dialog, small toolbar icons -- not just apps that
+  implement their own zoom. For it to zoom in around wherever your
+  cursor currently is (rather than the whole screen), set it to "Lens"
+  view once: Windows Settings > Accessibility > Magnifier > Views ->
+  Lens; macOS System Settings > Accessibility > Zoom > Zoom Style ->
+  Zoom Style: Lens. On Linux this instead falls back to Ctrl+Scroll,
+  since screen-magnifier shortcuts vary a lot by desktop environment.
+
+  On Windows, if you hear a system "ding" instead of seeing it zoom,
+  that's Windows itself telling you the shortcut is disabled -- check
+  Settings > Accessibility > Magnifier > "Allow the shortcut key to
+  start this feature".
+
+  Zoom only ever holds a single level, on or off -- forming the
+  zoom-in pose while already zoomed in does nothing (close to a fist
+  first), and a fist does nothing unless you're currently zoomed in.
+  That's what keeps one gesture from stacking up several zoom steps at
+  once (it fires the instant it sees the pose, with no held-for-a-moment
+  delay), and it also zooms back out automatically when you quit the
+  program, so it doesn't leave your screen zoomed in behind it. If a
+  quick incidental flash of open-hand/fist ever ends up triggering zoom
+  by accident, `_ZOOM_ARM_FRAMES` in `event_classifier.py` adds back a
+  hold delay.
+
+- Index + middle extended ("scissors") -- the same shape as the right
+  hand's Cut-Typed gesture, but paste on this hand: a shortcut for the
+  keyboard's 'Paste' key without needing the keyboard open at all.
+
+### Which hand does what
+
+Every detected hand is independently classified Left or Right by
+MediaPipe (this doesn't depend on whether a second hand is also in
+frame), and routed strictly by that: right hand mouses/types, left hand
+zooms/pastes, always -- regardless of whether one or both hands are
+visible. Showing only your left hand does not fall back to mouse
+control; it does zoom/paste or nothing.
+
+The overlay panel shows the resolved role next to each detected hand's
+label in brackets next to the action text (e.g. `Mousing  [Right
+[Mouse]]`). If it ever comes out backwards for your camera setup -- your
+left hand mousing instead of your right -- flip `SWAP_LABELED_HANDS` in
+`constants.py`; it swaps the label for every detected hand, every frame.
+
+For the left/zoom hand specifically, the bracket also shows *live*
+detection state instead of just the static "Zoom" role, e.g.
+`Left [Zoom: open, normal]` -- which pose it's currently reading
+(`open`/`fist`/`neither`, plus which fingers it saw as extended if
+neither matched), and whether the screen is currently zoomed in or at
+normal. When a zoom action actually fires, `-> sent zoom-in` or `-> sent
+zoom-out` is appended. This is meant to answer "why isn't zoom working"
+directly: if the pose never reads as `open`/`fist` when you form it,
+detection itself isn't recognizing it (check lighting/framing, or that
+`FINGER_OUT_CUTOFF` fits your hand/camera); if it does and still doesn't
+zoom, the gesture is fine and the problem is downstream, in the OS
+hotkey `execute_zoom()` sends (e.g. the OS magnifier isn't installed/
+enabled, or another app is capturing that shortcut).
+
+## Using this with gloves on
+
+Hand tracking here is done by MediaPipe's HandLandmarker model, which (like
+essentially every off-the-shelf hand-tracking model) is trained on bare
+hands -- it's learned to find hands by recognizing skin tone, knuckle
+creases, nail outlines, and finger silhouette, all of which a glove
+partially or fully hides. That means:
+
+- **A thin, snug, translucent glove** (the kind labs commonly use) has the
+  best chance of working, since it distorts the hand's outline the least.
+  Detection may still be less reliable than bare-handed, especially for
+  the color-checking done by some vision pipelines -- this project's
+  gesture detection is fully geometry/landmark-based (finger positions and
+  distances), not color-based, so glove color (gray, purple, blue, green,
+  etc.) shouldn't matter to it either way.
+- **A loose, thick, or opaque glove** changes the hand's silhouette enough
+  that the underlying model may lose tracking altogether, especially at
+  the fingertips, where our gestures (pinch distance, extended/folded
+  fingers) matter most.
+- Lowering `MIN_DETECTION_CONFIDENCE` / `MIN_TRACKING_CONFIDENCE` in
+  `constants.py` (try 0.5 / 0.4) can help the model hang on to a gloved
+  hand it would otherwise drop, at the cost of occasional false detections
+  or jitter -- worth trying first since it's a one-line change.
+- Good, even lighting and a plain background behind your hand also help
+  meaningfully, since they're what the model otherwise has to work hardest
+  to see past.
+
+None of the above is a real fix, though -- it's tuning an existing bare-hand
+model, not adapting it to gloves. The actual fix is a hand-landmark model
+fine-tuned (or trained from scratch) on labeled images of gloved hands in
+the colors you actually use. That's realistic to do -- MediaPipe publishes
+a "Model Maker" retraining pipeline for hand landmarks -- but it needs a
+dataset (a few hundred to a few thousand labeled images per glove
+color/lighting condition is a reasonable starting target) that doesn't
+exist yet for this project. If glove support matters enough to invest in,
+the practical path is: collect a small labeled dataset of gloved hands
+(gray/purple/blue/green, your actual lab lighting) and fine-tune the
+landmark model on it, rather than trying to configure our way there.
