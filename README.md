@@ -28,8 +28,11 @@ cursor isn't over one of the keyboard's own buttons -- so you can type a
 name, then click elsewhere (e.g. to confirm a rename, or click into
 another text field) without having to close the keyboard first.
 
-A second hand, when it's raised alongside your mouse hand, is dedicated
-to zoom and paste, so the right hand isn't stuck doing everything:
+The left hand is dedicated to zoom and paste, so the right hand isn't
+stuck doing everything. This is strict, by hand identity, whether or not
+your other hand is in frame at all -- if you raise only your left hand,
+it will only ever zoom/paste, never mouse (see "Which hand does what"
+below):
 
 - Open hand, all five fingers extended: zoom in. Closed fist: zoom back
   out. Deliberately simple, maximally-different poses so detection
@@ -62,16 +65,20 @@ to zoom and paste, so the right hand isn't stuck doing everything:
 
 ### Which hand does what
 
-With only one hand visible, it's unconditionally the mouse/keyboard hand
--- zoom and paste need a second hand in frame to mean anything, so
-there's no ambiguity to get wrong in the common case of mousing around
-with just one hand up. With two hands visible, MediaPipe's own
-Left/Right handedness label decides which does which (right hand mouses,
-left hand zooms/pastes). The overlay panel shows the current assignment
-in brackets next to the action text (e.g. `Mousing  [Mouse, Zoom]`) so
-you can check it's routing your hands the way you expect. If it ever
-comes out backwards for your camera setup, flip `SWAP_LABELED_HANDS` in
-`constants.py`.
+Every detected hand is independently classified Left or Right by
+MediaPipe (this doesn't depend on whether a second hand is also in
+frame), and routed strictly by that: right hand mouses/types, left hand
+zooms/pastes, always -- regardless of whether one or both hands are
+visible. Showing only your left hand does not fall back to mouse
+control; it does zoom/paste or nothing.
+
+The overlay panel shows the resolved role next to each detected hand's
+label in brackets next to the action text (e.g. `Mousing  [Right
+[Mouse]]`, or `Mousing  [Right [Mouse], Left [Zoom]]` with both hands
+up) so you can check it's routing your hands the way you expect. If it
+ever comes out backwards for your camera setup -- your left hand mousing
+instead of your right -- flip `SWAP_LABELED_HANDS` in `constants.py`; it
+swaps the label for every detected hand, every frame.
 
 ## Using this with gloves on
 

@@ -236,53 +236,32 @@ def main():
 
 			if results.hand_landmarks:
 
-				all_landmarks = []
-				for hand_landmarks in results.hand_landmarks:
+				# Which hand does what is strictly by hand identity --
+				# right hand mouses/types, left hand zooms/pastes --
+				# regardless of how many hands are in frame. This is
+				# MediaPipe's own per-hand Left/Right classification
+				# (each hand is classified independently of whether a
+				# second hand is present, so there's no reason a single
+				# visible hand should be treated any differently than
+				# one of a pair); constants.SWAP_LABELED_HANDS flips it
+				# wholesale if it's ever backwards for your camera setup.
+				# A hand-rolled geometry-based classifier was tried
+				# instead of trusting this label, and came out less
+				# reliable, not more, so it's gone.
+				debug_parts = []
+				mouse_assigned = False
+
+				for hand_idx, hand_landmarks in enumerate(results.hand_landmarks):
 					abs_landmark_list = np.array(calc_landmark_list(image, hand_landmarks))
 					rel_landmark_list = np.array(pre_process_landmark(abs_landmark_list.tolist()))
-					all_landmarks.append((abs_landmark_list, rel_landmark_list))
 
-				num_detected = len(all_landmarks)
-
-				if num_detected == 1:
-					# Only one hand in frame: it's unconditionally the
-					# mouse/keyboard hand. Zoom needs a *second* hand to
-					# even make sense (it's only ever the hand that isn't
-					# driving the mouse), so with just one hand up it
-					# simply doesn't trigger -- but mouse control can
-					# never be swallowed by a hand-identity mixup, which
-					# is what silently broke it before.
-					mouse_hand_idx, zoom_hand_idx = 0, None
-				else:
-					# Two hands: MediaPipe's own handedness label picks
-					# out which is which -- it has much more to work with
-					# here (both hands actually in frame together) than a
-					# hand-rolled geometry guess does, which is what we
-					# tried previously and it came out unreliable. If it
-					# improbably calls both hands the same label, fall
-					# back to screen position (rightmost hand mouses).
-					labels = [hd[0].category_name for hd in results.handedness]
-					if 'Right' in labels and 'Left' in labels:
-						mouse_hand_idx = labels.index('Right')
-						zoom_hand_idx = labels.index('Left')
-					else:
-						hand_xs = [abs_lm[:, 0].mean() for abs_lm, _ in all_landmarks]
-						mouse_hand_idx = max(range(num_detected), key=lambda i: hand_xs[i])
-						zoom_hand_idx = min(range(num_detected), key=lambda i: hand_xs[i])
-
+					raw_label = results.handedness[hand_idx][0].category_name
 					if c.SWAP_LABELED_HANDS:
-						mouse_hand_idx, zoom_hand_idx = zoom_hand_idx, mouse_hand_idx
+						raw_label = 'Left' if raw_label == 'Right' else 'Right'
 
-				debug_labels = [''] * num_detected
-				if mouse_hand_idx is not None:
-					debug_labels[mouse_hand_idx] = 'Mouse'
-				if zoom_hand_idx is not None:
-					debug_labels[zoom_hand_idx] = 'Zoom'
-				hand_debug_text = f'  [{", ".join(l for l in debug_labels if l)}]'
+					if raw_label == 'Left':
+						debug_parts.append('Left [Zoom]')
 
-				for hand_idx, (abs_landmark_list, rel_landmark_list) in enumerate(all_landmarks):
-
-					if hand_idx == zoom_hand_idx:
 						zoom_event = get_zoom_event(rel_landmark_list)
 						if zoom_event == 'Zoom In':
 							mc.execute_zoom('in')
@@ -292,17 +271,22 @@ def main():
 						if get_paste_event(rel_landmark_list):
 							# "Scissors" pose (index + middle extended) --
 							# the same shape as the right hand's Cut-Typed
-							# gesture, but paste on this (zoom) hand: a
+							# gesture, but paste on this (left) hand: a
 							# shortcut for the keyboard's 'Paste' key
 							# without needing the keyboard open at all.
 							typed_text = type_char('Paste', typed_text)
 
 						continue
 
-					if hand_idx != mouse_hand_idx:
-						# A third hand isn't possible (num_hands=2 below),
-						# but if it were, it'd just be ignored.
+					# raw_label == 'Right'
+					if mouse_assigned:
+						# A second hand also read as 'Right' (shouldn't
+						# normally happen) -- ignored rather than fighting
+						# over the cursor with the hand already driving it.
+						debug_parts.append('Right [ignored]')
 						continue
+					mouse_assigned = True
+					debug_parts.append('Right [Mouse]')
 
 					event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
 
@@ -348,6 +332,8 @@ def main():
 						frame_width, frame_height,
 						allow_click=allow_click,
 					)
+
+				hand_debug_text = f'  [{", ".join(debug_parts)}]'
 
 			# Debug aid: show which detected hand is doing what right next
 			# to the current action, so you can see at a glance whether

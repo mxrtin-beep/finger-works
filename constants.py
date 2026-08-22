@@ -52,13 +52,14 @@ MIN_DETECTION_CONFIDENCE = 0.7
 MIN_TRACKING_CONFIDENCE = 0.5
 
 
-# Which hand does what (see main_fast.py) is only ever ambiguous when
-# *two* hands are visible at once -- with only one hand up, it's always
-# the mouse/keyboard hand, no classification needed. With two hands up,
-# MediaPipe's own Left/Right handedness label picks out which is which
-# (trying to reimplement that classification from raw finger geometry
-# turned out to be less reliable than just trusting the model here). If
-# mouse control and zoom ever come out swapped for your camera setup
-# (e.g. you have to raise your *right* hand to zoom while your left hand
-# drives the mouse), flip this rather than digging into main_fast.py.
+# Which hand does what (see main_fast.py) is decided strictly by hand
+# identity -- right hand mouses/types, left hand zooms/pastes -- using
+# MediaPipe's own per-hand Left/Right handedness label, whether one or
+# both hands are visible (trying to reimplement that classification from
+# raw finger geometry instead of trusting the model was tried and came
+# out less reliable, not more). If mouse control and zoom ever come out
+# swapped for your camera setup (e.g. you have to raise your *right*
+# hand to zoom while your left hand drives the mouse), flip this rather
+# than digging into main_fast.py -- it swaps the label for every
+# detected hand, every frame.
 SWAP_LABELED_HANDS = False
