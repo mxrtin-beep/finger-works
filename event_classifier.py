@@ -152,15 +152,29 @@ _zoom_prev_dist = None
 _zoom_cooldown = 0
 
 
-def get_zoom_event(abs_landmark_list, rel_landmark_list):
-	"""Left-hand-only zoom gesture. Returns 'Zoom In', 'Zoom Out', or None."""
-	global _zoom_pose_frames, _zoom_prev_dist, _zoom_cooldown
-
+def is_zoom_pose(rel_landmark_list):
+	"""Whether this hand currently shows the zoom pose (thumb + index
+	extended, other three folded). Used both by get_zoom_event() below and
+	by main.py to decide *which* detected hand gets treated as the zoom
+	hand -- a hand actually forming this pose, rather than MediaPipe's
+	Left/Right label, since the label isn't reliable enough on its own
+	(e.g. under different camera/mirroring setups) to safely gate mouse
+	control on: routing by pose means a hand that's just moving the mouse
+	normally is never mistaken for the zoom hand, regardless of what the
+	model happens to label it.
+	"""
 	finger_pos = rel_landmark_list[c.FINGER_INDICES]
 	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
 	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
+	return np.array_equal(finger_out_arr, _ZOOM_POSE)
 
-	if not np.array_equal(finger_out_arr, _ZOOM_POSE):
+
+def get_zoom_event(abs_landmark_list, rel_landmark_list):
+	"""Zoom gesture, meant to run on whichever hand is in the zoom pose
+	(see is_zoom_pose()). Returns 'Zoom In', 'Zoom Out', or None."""
+	global _zoom_pose_frames, _zoom_prev_dist, _zoom_cooldown
+
+	if not is_zoom_pose(rel_landmark_list):
 		# Pose broken (or not yet formed) -- reset all gesture state so
 		# the next time it's formed, it has to be held and moved
 		# deliberately again rather than picking up stale history.

@@ -26,8 +26,16 @@ everything:
 
 - Thumb + index extended, other three fingers folded, then spread the
   thumb and index apart: zoom in. Bring them back together: zoom out.
-  (Sends Ctrl+Scroll, which most zoomable apps -- image viewers, maps,
-  design tools, browsers -- treat as a zoom.)
+
+  This drives the OS's own screen magnifier (Windows Magnifier / macOS
+  Zoom) rather than an in-app zoom, so it zooms *whatever's on screen* --
+  a menu bar, a dialog, small toolbar icons -- not just apps that
+  implement their own zoom. For it to zoom in around wherever your
+  cursor currently is (rather than the whole screen), set it to "Lens"
+  view once: Windows Settings > Accessibility > Magnifier > Views ->
+  Lens; macOS System Settings > Accessibility > Zoom > Zoom Style ->
+  Zoom Style: Lens. On Linux this instead falls back to Ctrl+Scroll,
+  since screen-magnifier shortcuts vary a lot by desktop environment.
 
 This gesture is intentionally picky about triggering: it only reacts once
 the pose has been held for a few frames and only once thumb-index

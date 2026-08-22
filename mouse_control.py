@@ -1,4 +1,6 @@
 
+import sys
+
 import pyautogui
 import constants as c
 import numpy as np
@@ -98,6 +100,19 @@ _left_button_down = False
 # pinch for multiple frames would fire a real right-click every frame.
 _was_right_click = False
 
+# Consecutive frames the pinch has read as released, while we're still
+# holding the button down. A glove (thicker, less precise fingertip
+# tracking than bare skin) can make the thumb-index distance briefly spike
+# past LEFT_CLICK_CUTOFF for a frame or two even while you're still
+# physically pinched -- without debouncing that, each such blip released
+# the real mouse button mid-drag and then re-pressed it a frame later,
+# turning one continuous drag-select into several separate ones. Requiring
+# a short run of consecutive "released" frames before actually releasing
+# absorbs that noise; a real release still only costs a couple frames of
+# latency (well under the length of an intentional release).
+_release_grace_count = 0
+_RELEASE_GRACE_FRAMES = 3
+
 
 def execute_click(event):
 	"""Translate the current gesture event into real OS mouse-button state.
@@ -112,15 +127,20 @@ def execute_click(event):
 	"click" from "hold" -- the OS's own click-vs-drag handling takes care
 	of that once we're just reporting real button-down/button-up state.
 	"""
-	global _left_button_down, _was_right_click
+	global _left_button_down, _was_right_click, _release_grace_count
 
 	is_left_pinch = (event == 'Left-Click')
-	if is_left_pinch and not _left_button_down:
-		pyautogui.mouseDown(button='left')
-		_left_button_down = True
-	elif not is_left_pinch and _left_button_down:
-		pyautogui.mouseUp(button='left')
-		_left_button_down = False
+	if is_left_pinch:
+		_release_grace_count = 0
+		if not _left_button_down:
+			pyautogui.mouseDown(button='left')
+			_left_button_down = True
+	elif _left_button_down:
+		_release_grace_count += 1
+		if _release_grace_count >= _RELEASE_GRACE_FRAMES:
+			pyautogui.mouseUp(button='left')
+			_left_button_down = False
+			_release_grace_count = 0
 
 	is_right_pinch = (event == 'Right-Click')
 	if is_right_pinch and not _was_right_click:
@@ -136,23 +156,45 @@ def release_all():
 	consumed as a keypress instead) -- so a drag started in Mouse mode
 	can't get stuck "down" forever once control switches away from it.
 	"""
-	global _left_button_down
+	global _left_button_down, _release_grace_count
 	if _left_button_down:
 		pyautogui.mouseUp(button='left')
 		_left_button_down = False
+	_release_grace_count = 0
 
 
 def execute_zoom(direction):
-	"""Send a single ctrl+scroll zoom tick. Ctrl+scroll (rather than the
-	browser-specific ctrl+/-) is honored by most zoomable apps (image
-	viewers, maps, design tools, browsers), and reads naturally as one
-	"tick" per detected spread/pinch step of the left-hand zoom gesture.
+	"""Send a single zoom tick to the OS's own screen magnifier, so zoom
+	works on *whatever's on screen* (a menu bar, a dialog, small toolbar
+	icons) instead of only inside apps that implement their own zoom.
+
+	- Windows: Win+Plus / Win+Minus drives Magnifier (Ease of Access),
+	  which starts it automatically on first use. For zoom that actually
+	  follows the mouse around like a loupe (which is the point here --
+	  making small on-screen targets easier to click precisely), set
+	  Magnifier's view to "Lens" once (Settings > Accessibility >
+	  Magnifier) -- the default "Full screen" view zooms the whole
+	  desktop instead of just the area around the cursor.
+	- macOS: Option+Command+Equal / Option+Command+Minus drives the
+	  built-in Zoom accessibility feature (System Settings >
+	  Accessibility > Zoom; enable "Use scroll gesture with modifier
+	  keys" or just the keyboard shortcuts, which are on by default).
+	  Set its zoom style to "Lens" there for the same cursor-follow
+	  behavior as Windows Magnifier's Lens mode.
+	- Anything else (Linux desktops vary a lot in their screen-magnifier
+	  shortcut, if they have one at all): fall back to ctrl+scroll, which
+	  at least zooms inside whatever app has focus, if it supports it.
 	"""
-	pyautogui.keyDown('ctrl')
-	try:
-		pyautogui.scroll(200 if direction == 'in' else -200)
-	finally:
-		pyautogui.keyUp('ctrl')
+	if sys.platform == 'win32':
+		pyautogui.hotkey('win', '+' if direction == 'in' else '-')
+	elif sys.platform == 'darwin':
+		pyautogui.hotkey('option', 'command', '=' if direction == 'in' else '-')
+	else:
+		pyautogui.keyDown('ctrl')
+		try:
+			pyautogui.scroll(200 if direction == 'in' else -200)
+		finally:
+			pyautogui.keyUp('ctrl')
 
 
 def execute_event_fast(event, abs_landmark_list, event_history, frame_width, frame_height, allow_click):

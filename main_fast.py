@@ -19,7 +19,7 @@ from collections import deque
 
 import mouse_control as mc
 from mouse_control import execute_event_fast, screenWidth, screenHeight
-from event_classifier import get_event_fast, get_zoom_event
+from event_classifier import get_event_fast, get_zoom_event, is_zoom_pose
 import constants as c
 import keyboard as k
 import overlay as ov
@@ -236,44 +236,64 @@ def main():
 
 				# Decide which detected hand (if any) drives the mouse/
 				# keyboard vs. which does zoom, *before* processing either.
-				# We can't fully trust MediaPipe's Left/Right label alone
-				# for this -- getting it backwards on the one hand you have
-				# in frame would silently swallow every gesture as a "zoom"
-				# check and never move the mouse at all, no matter how the
-				# cursor-freeze symptom looked. So: with only one hand
-				# visible, it's unconditionally the mouse/keyboard hand
-				# (zoom requires a second hand to mean anything anyway);
-				# the label is only used to tell two simultaneously-visible
-				# hands apart, and even then we fall back to "first hand"
-				# rather than dropping mouse control if neither is labeled
-				# 'Right'.
-				num_detected = len(results.hand_landmarks)
-				mouse_hand_idx = 0
-				if num_detected > 1:
+				# This is decided by pose, not by MediaPipe's Left/Right
+				# handedness label -- the label isn't reliable enough
+				# across different cameras/mirroring setups to gate mouse
+				# control on (getting it backwards on your one visible hand
+				# silently swallowed every gesture as a "zoom" check and
+				# froze the cursor). The zoom pose itself (thumb + index
+				# extended, other three folded) is distinctive enough that
+				# it's a safer signal: whichever hand is actually making
+				# that shape does zoom; every other hand drives the mouse,
+				# same as when only one hand is in frame at all.
+				all_landmarks = []
+				for hand_landmarks in results.hand_landmarks:
+					abs_landmark_list = np.array(calc_landmark_list(image, hand_landmarks))
+					rel_landmark_list = np.array(pre_process_landmark(abs_landmark_list.tolist()))
+					all_landmarks.append((abs_landmark_list, rel_landmark_list))
+
+				zoom_hand_idx = next(
+					(i for i, (_, rel) in enumerate(all_landmarks) if is_zoom_pose(rel)),
+					None,
+				)
+
+				# Exactly one hand should ever drive the mouse per frame --
+				# if both hands are visible and neither is zoom-posed,
+				# only one of them may act, or gestures from each would
+				# fight over the same cursor. In that (otherwise
+				# ambiguous) case only, fall back to the Left/Right label
+				# to pick one; with a single hand in frame, or one hand
+				# clearly zooming, there's no ambiguity and the label
+				# isn't needed at all.
+				if zoom_hand_idx is not None:
+					mouse_hand_idx = next(
+						(i for i in range(len(all_landmarks)) if i != zoom_hand_idx), None
+					)
+				elif len(all_landmarks) > 1:
 					right_indices = [
 						i for i, hd in enumerate(results.handedness)
 						if hd[0].category_name == 'Right'
 					]
-					if right_indices:
-						mouse_hand_idx = right_indices[0]
+					mouse_hand_idx = right_indices[0] if right_indices else 0
+				else:
+					mouse_hand_idx = 0
 
-				for hand_idx, hand_landmarks in enumerate(results.hand_landmarks):
+				for hand_idx, (abs_landmark_list, rel_landmark_list) in enumerate(all_landmarks):
 
-					abs_landmark_list = calc_landmark_list(image, hand_landmarks)
-					rel_landmark_list = pre_process_landmark(abs_landmark_list)
-
-					abs_landmark_list = np.array(abs_landmark_list)
-					rel_landmark_list = np.array(rel_landmark_list)
-
-					if num_detected > 1 and hand_idx != mouse_hand_idx:
-						# The other hand, only when two are visible: zoom
-						# only, so it never competes with the mouse hand's
-						# gestures.
+					if hand_idx == zoom_hand_idx:
+						# This hand is making the zoom pose: zoom only, so
+						# it never competes with the mouse hand's gestures.
 						zoom_event = get_zoom_event(abs_landmark_list, rel_landmark_list)
 						if zoom_event == 'Zoom In':
 							mc.execute_zoom('in')
 						elif zoom_event == 'Zoom Out':
 							mc.execute_zoom('out')
+						continue
+
+					if hand_idx != mouse_hand_idx:
+						# A second, non-zooming hand while another hand
+						# already has mouse control -- ignored, rather
+						# than fighting over the cursor.
 						continue
 
 					event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
