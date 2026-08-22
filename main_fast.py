@@ -233,7 +233,31 @@ def main():
 			results = landmarker.detect_for_video(mp_image, timestamp_ms)
 
 			if results.hand_landmarks:
-				for hand_landmarks, hand_handedness in zip(results.hand_landmarks, results.handedness):
+
+				# Decide which detected hand (if any) drives the mouse/
+				# keyboard vs. which does zoom, *before* processing either.
+				# We can't fully trust MediaPipe's Left/Right label alone
+				# for this -- getting it backwards on the one hand you have
+				# in frame would silently swallow every gesture as a "zoom"
+				# check and never move the mouse at all, no matter how the
+				# cursor-freeze symptom looked. So: with only one hand
+				# visible, it's unconditionally the mouse/keyboard hand
+				# (zoom requires a second hand to mean anything anyway);
+				# the label is only used to tell two simultaneously-visible
+				# hands apart, and even then we fall back to "first hand"
+				# rather than dropping mouse control if neither is labeled
+				# 'Right'.
+				num_detected = len(results.hand_landmarks)
+				mouse_hand_idx = 0
+				if num_detected > 1:
+					right_indices = [
+						i for i, hd in enumerate(results.handedness)
+						if hd[0].category_name == 'Right'
+					]
+					if right_indices:
+						mouse_hand_idx = right_indices[0]
+
+				for hand_idx, hand_landmarks in enumerate(results.hand_landmarks):
 
 					abs_landmark_list = calc_landmark_list(image, hand_landmarks)
 					rel_landmark_list = pre_process_landmark(abs_landmark_list)
@@ -241,16 +265,10 @@ def main():
 					abs_landmark_list = np.array(abs_landmark_list)
 					rel_landmark_list = np.array(rel_landmark_list)
 
-					# The image is mirrored (cv2.flip above) before it's
-					# fed to the model, which is exactly the "selfie view"
-					# MediaPipe's handedness classification assumes, so
-					# category_name here already matches the user's actual
-					# left/right hand rather than the mirrored image's.
-					hand_label = hand_handedness[0].category_name
-
-					if hand_label == 'Left':
-						# Left hand: zoom only, so it never competes with
-						# the right hand's mouse/keyboard gestures.
+					if num_detected > 1 and hand_idx != mouse_hand_idx:
+						# The other hand, only when two are visible: zoom
+						# only, so it never competes with the mouse hand's
+						# gestures.
 						zoom_event = get_zoom_event(abs_landmark_list, rel_landmark_list)
 						if zoom_event == 'Zoom In':
 							mc.execute_zoom('in')
