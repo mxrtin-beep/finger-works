@@ -29,10 +29,19 @@ With `--debug`:
 - The overlay panel is **always visible**, in both Mouse and Keyboard mode.
 - The debug text is drawn at the top of the panel: the current event
   (`Mousing`, `Left-Click`, ...), the active control state (`Mouse` or
-  `Keyboard`), and -- next to the action text -- which detected hand is
-  doing what, e.g. `Mousing  [Right [Mouse]]`, or with a left hand also in
-  frame, `Mousing  [Right [Mouse], Left [Zoom: open, normal] [Paste:
-  neither (none out)]]`.
+  `Keyboard`), the current mouse-sensitivity multiplier (`Sensitivity:
+  1.0x`, from `--sensitivity`), and -- next to the action text -- which
+  detected hand is doing what, e.g. `Mousing  [Right [Mouse]]`, or with a
+  left hand also in frame, `Mousing  [Right [Mouse], Left [Zoom: open,
+  normal] [Paste: neither (none out)]]`.
+- A second always-on-top window (top-left corner) shows the **live camera
+  feed**, with each detected hand's skeleton traced over it in real time
+  and its current gesture labeled right next to it (cyan for the right/
+  mouse hand, magenta for the left/zoom-paste hand). This is purely
+  cosmetic -- it doesn't change how any gesture is recognized or acted on
+  -- but it's the fastest way to see at a glance exactly what the tracker
+  sees and how it's reading your hand, live, rather than only reading the
+  text description of it.
   - The `Right [...]` bracket shows which hand is driving the mouse/
     keyboard, or `Right [ignored]` if a second hand also read as "Right".
   - The `Left [Zoom: ...]` bracket shows the zoom gesture's live pose

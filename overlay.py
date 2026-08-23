@@ -54,7 +54,8 @@ class Overlay:
 	between two different coordinate spaces.
 	"""
 
-	def __init__(self, screen_width, screen_height, panel_width=None, panel_height=None, margin=20, debug=False):
+	def __init__(self, screen_width, screen_height, panel_width=None, panel_height=None, margin=20,
+				debug=False, mouse_sensitivity=1.0):
 		self.screen_width = screen_width
 		self.screen_height = screen_height
 
@@ -65,6 +66,11 @@ class Overlay:
 		# shows the debug text (current event, hand routing, zoom/paste
 		# gesture state), same as before this flag existed.
 		self.debug = debug
+
+		# Fixed for the whole run (set via --sensitivity), just echoed on
+		# the debug panel so it's visible without having to check how the
+		# program was launched.
+		self.mouse_sensitivity = mouse_sensitivity
 
 		self.panel_width = panel_width or int(screen_width * 0.42)
 		self.panel_height = panel_height or int(screen_height * 0.34)
@@ -104,6 +110,60 @@ class Overlay:
 		if not self.debug:
 			self.root.withdraw()
 			self._visible = False
+
+		# The live camera feed (hand skeleton traced over the raw video,
+		# gestures labeled as they happen) is purely a "look impressive"
+		# debug aid -- it doesn't affect how the mouse/keyboard is driven
+		# at all -- so it only exists when --debug is on, as a separate
+		# always-on-top window rather than fighting the main panel's fixed
+		# layout for space.
+		self.video_canvas = None
+		self.video_width = None
+		self.video_height = None
+		self._video_photo = None  # keep a reference so Tk doesn't GC the image
+		if self.debug:
+			self._create_video_window(margin)
+
+	def _create_video_window(self, margin):
+		self.video_width = 480
+		self.video_height = 360
+
+		self.video_window = tk.Toplevel(self.root)
+		self.video_window.title('finger-works -- camera')
+		self.video_window.overrideredirect(True)
+		self.video_window.attributes('-topmost', True)
+		self.video_window.geometry(
+			f'{self.video_width}x{self.video_height}+{margin}+{margin}'
+		)
+		self.video_window.protocol('WM_DELETE_WINDOW', self._quit)
+
+		self.video_window.update_idletasks()
+		_make_window_noactivate(self.video_window.winfo_id())
+
+		self.video_canvas = tk.Canvas(
+			self.video_window,
+			width=self.video_width,
+			height=self.video_height,
+			bg='#000000',
+			highlightthickness=0,
+		)
+		self.video_canvas.pack(fill='both', expand=True)
+
+	def draw_video(self, frame_rgb):
+		"""Show one camera frame (an RGB numpy array, already annotated with
+		hand skeleton/gesture labels by the caller) in the debug video
+		window. No-op when --debug is off."""
+		if self.video_canvas is None:
+			return
+
+		# Imported lazily so Pillow is only required when --debug is
+		# actually used, not for normal (non-debug) runs.
+		from PIL import Image, ImageTk
+
+		image = Image.fromarray(frame_rgb).resize((self.video_width, self.video_height))
+		self._video_photo = ImageTk.PhotoImage(image)
+		self.video_canvas.delete('all')
+		self.video_canvas.create_image(0, 0, anchor='nw', image=self._video_photo)
 
 	def _quit(self):
 		self.should_quit = True
@@ -152,6 +212,11 @@ class Overlay:
 			c.create_text(
 				16, 40, anchor='nw', fill='#ff5555',
 				font=('Segoe UI', 14, 'bold'), text=control_state,
+			)
+			c.create_text(
+				16, 64, anchor='nw', fill='#ff5555',
+				font=('Segoe UI', 14, 'bold'),
+				text=f'Sensitivity: {self.mouse_sensitivity}x',
 			)
 
 		if control_state == 'Keyboard':

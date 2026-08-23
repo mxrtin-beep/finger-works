@@ -21,9 +21,11 @@ need to edit that file just to try a faster or slower feel.
 `--debug` is off by default. Without it, the overlay panel stays hidden
 except while the on-screen keyboard is toggled on, and no debug text is
 drawn. With it, the panel is always visible and shows the debug text
-(current event, which hand is doing what, live zoom/paste gesture state)
--- see `INSTRUCTIONS.md` for the full rundown of gestures, parameters, and
-what the debug text means.
+(current event, mouse sensitivity, which hand is doing what, live
+zoom/paste gesture state), and a second window shows the live camera feed
+with each hand's skeleton traced and its current gesture labeled in real
+time -- see `INSTRUCTIONS.md` for the full rundown of gestures, parameters,
+and what the debug output means.
 
 Cursor speed is also automatically halved while the zoom gesture has the
 screen zoomed in, and restored the moment you zoom back out (or if the

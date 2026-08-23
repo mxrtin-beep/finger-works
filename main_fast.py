@@ -48,6 +48,50 @@ history_length = 8
 event_history = deque(maxlen=history_length)
 
 
+# The 21 hand-landmark connections drawn for the debug video's hand
+# skeleton -- the same topology mediapipe's own drawing_utils.HAND_CONNECTIONS
+# uses (thumb/index/middle/ring/pinky chains off the wrist, plus the palm
+# connections tying the finger bases together), just hardcoded here since
+# we're drawing over plain landmark lists (the Tasks API's HandLandmarker
+# output) rather than the legacy mp.solutions.hands proto type that
+# draw_landmarks() expects.
+_HAND_CONNECTIONS = [
+	(0, 1), (1, 2), (2, 3), (3, 4),          # thumb
+	(0, 5), (5, 6), (6, 7), (7, 8),          # index
+	(5, 9), (9, 10), (10, 11), (11, 12),     # middle
+	(9, 13), (13, 14), (14, 15), (15, 16),   # ring
+	(13, 17), (17, 18), (18, 19), (19, 20),  # pinky
+	(0, 17),                                 # palm base
+]
+
+# Debug-only: BGR-ish colors (fine either way round, both channels equal or
+# distinct enough to read) used to trace each hand's skeleton and label its
+# current gesture in the live debug video -- purely cosmetic, doesn't affect
+# mouse/keyboard control at all.
+_RIGHT_HAND_COLOR = (255, 210, 0)   # cyan-ish -- the mouse/keyboard hand
+_LEFT_HAND_COLOR = (255, 0, 220)    # magenta-ish -- the zoom/paste hand
+
+
+def draw_hand_debug_overlay(image, abs_landmark_list, label, color):
+	"""Trace a hand's skeleton and label its current gesture directly onto
+	`image` (mutated in place) -- shown in the --debug live camera window.
+	Purely cosmetic: it has no effect on how gestures are recognized or
+	acted on, only on what the debug window shows while they happen."""
+	points = [(int(p[0]), int(p[1])) for p in abs_landmark_list]
+
+	for start, end in _HAND_CONNECTIONS:
+		cv2.line(image, points[start], points[end], color, 2)
+	for x, y in points:
+		cv2.circle(image, (x, y), 4, color, -1)
+
+	if label:
+		wrist_x, wrist_y = points[0]
+		cv2.putText(
+			image, label, (max(0, wrist_x - 40), wrist_y + 30),
+			cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA,
+		)
+
+
 def calc_landmark_list(image, landmarks):
 	image_width, image_height = image.shape[1], image.shape[0]
 
@@ -213,7 +257,9 @@ def main(mouse_sensitivity=1.0, debug=False):
 	control_state = 'Mouse'	# Mouse or Keyboard
 	typed_text = '>'
 
-	overlay = ov.Overlay(screenWidth, screenHeight, debug=debug)
+	overlay = ov.Overlay(
+		screenWidth, screenHeight, debug=debug, mouse_sensitivity=mouse_sensitivity,
+	)
 
 	# The keyboard's layout is now sized to the overlay panel (fixed at
 	# startup), not the camera frame, so it only needs to be built once.
@@ -286,6 +332,13 @@ def main(mouse_sensitivity=1.0, debug=False):
 							f'Left [Zoom: {zoom_debug_text}] [Paste: {paste_debug_text}]'
 						)
 
+						if debug:
+							draw_hand_debug_overlay(
+								image, abs_landmark_list,
+								f'Zoom: {zoom_debug_text.split(" -> ")[0]}  Paste: {paste_debug_text.split(" -> ")[0]}',
+								_LEFT_HAND_COLOR,
+							)
+
 						continue
 
 					# raw_label == 'Right'
@@ -343,6 +396,11 @@ def main(mouse_sensitivity=1.0, debug=False):
 						allow_click=allow_click,
 					)
 
+					if debug:
+						draw_hand_debug_overlay(
+							image, abs_landmark_list, event, _RIGHT_HAND_COLOR,
+						)
+
 				hand_debug_text = f'  [{", ".join(debug_parts)}]'
 
 			# Debug aid: show which detected hand is doing what right next
@@ -350,6 +408,14 @@ def main(mouse_sensitivity=1.0, debug=False):
 			# it's routing your hands the way you expect (see
 			# constants.SWAP_LABELED_HANDS if it isn't).
 			overlay.draw(event + hand_debug_text, control_state, typed_text, button_list)
+
+			if debug:
+				# Purely cosmetic: the live camera feed with each hand's
+				# skeleton traced and its current gesture labeled, shown in
+				# its own always-on-top debug window. `image` is already
+				# RGB (converted above for MediaPipe) and now also carries
+				# whatever skeleton/labels were drawn onto it above.
+				overlay.draw_video(image)
 			overlay.pump()
 
 	finally:
