@@ -8,10 +8,51 @@ and more narrative detail; this file is meant as a flat lookup.
 
     python main_fast.py [--sensitivity MULTIPLIER] [--debug]
 
-- `--sensitivity MULTIPLIER` -- mouse-speed multiplier. Default `1.0`
-  (today's normal speed, unchanged). `1.5` moves the cursor faster, `0.5`
-  slower. A multiplier on top of `constants.MOUSE_SPEED`.
-- `--debug` -- off by default. See "Debug mode" below.
+- `--sensitivity MULTIPLIER` -- mouse-speed multiplier. Defaults to
+  whatever's saved in settings (`1.0` the first time you run it). `1.5`
+  moves the cursor faster, `0.5` slower. A multiplier on top of
+  `constants.MOUSE_SPEED`. Passing it here overrides (and re-saves) the
+  settings value; it's also changeable at runtime from the Settings window.
+- `--debug` -- defaults to whatever's saved in settings (off the first
+  time you run it). See "Debug mode" below. Also toggleable at runtime
+  from the Settings window.
+
+## The control bar
+
+A small always-visible bar sits in the very bottom-right corner of the
+screen, regardless of Mouse/Keyboard mode or debug state -- so there's
+always a way to pause, get help, or quit without needing a free hand to
+gesture with, or to already know a gesture at all:
+
+- A status dot + label -- green **FingerWorks** when active, orange
+  **Paused** when paused.
+- **Pause / Resume** -- stops all hand tracking and gesture processing
+  (the camera keeps running, just isn't acted on) until you resume. Useful
+  for stepping away or using your physical mouse/keyboard for a bit
+  without quitting the program outright.
+- **Help** -- opens a quick gesture cheat sheet (see "Gestures" below).
+- **Settings** -- opens the Settings window (see "Settings" below).
+- **Quit** -- quits the program. Same effect as the thumb+pinky quit
+  gesture or Escape.
+
+## Settings
+
+Click **Settings** in the control bar to open a small settings window:
+
+- **Camera** -- a dropdown of detected cameras, plus **Auto
+  (recommended)**, which is the default: it picks the first camera that
+  opens, same as always. Pick a specific camera to pin it explicitly
+  (e.g. if you have more than one webcam and auto-pick chooses the wrong
+  one) -- it stays pinned across restarts until you set it back to Auto.
+  Changing it applies immediately, no restart needed.
+- **Mouse sensitivity** -- same multiplier as `--sensitivity`, as a
+  slider.
+- **Debug mode** -- same as `--debug`, as a checkbox; applies immediately.
+
+Hit **Apply** to save and apply, or **Cancel**/close the window to discard.
+Settings are saved to `~/.finger_works_settings.json` and persist across
+restarts; a `--sensitivity`/`--debug` command-line flag overrides the
+saved value for that run (and re-saves it).
 
 ## Debug mode
 

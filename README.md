@@ -27,6 +27,15 @@ with each hand's skeleton traced and its current gesture labeled in real
 time -- see `INSTRUCTIONS.md` for the full rundown of gestures, parameters,
 and what the debug output means.
 
+A small control bar always sits in the bottom-right corner of the screen
+with **Pause**/**Resume**, **Help**, **Settings**, and **Quit** -- so you
+can pause tracking, look up the gestures, change your camera/sensitivity/
+debug mode, or quit, without needing a gesture or the command line. Camera
+picking defaults to auto (the first camera that opens, same as always),
+overridable in Settings if you have more than one webcam. Settings persist
+across restarts (`~/.finger_works_settings.json`); see `INSTRUCTIONS.md`
+for details.
+
 Cursor speed is also automatically halved while the zoom gesture has the
 screen zoomed in, and restored the moment you zoom back out (or if the
 program quits while still zoomed in) -- a given hand movement covers much

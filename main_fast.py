@@ -23,6 +23,7 @@ from event_classifier import get_event_fast, get_zoom_event, get_paste_event, is
 import constants as c
 import keyboard as k
 import overlay as ov
+import settings as fw_settings
 
 
 __version__ = '0.2.0'
@@ -39,7 +40,6 @@ def ensure_model_downloaded(model_path=MODEL_PATH, model_url=MODEL_URL):
 	return model_path
 
 
-device = 0
 width = 1440
 height = 900
 
@@ -208,30 +208,84 @@ def type_char(typed_char, typed_text):
 	return typed_text + typed_char
 
 
-def main(mouse_sensitivity=1.0, debug=False):
+def main(settings):
+
+	mouse_sensitivity = settings['sensitivity']
+	debug = settings['debug']
 
 	mc.set_sensitivity_multiplier(mouse_sensitivity)
+
+	cap_width = width
+	cap_height = height
+
+	# camera_device resolution: an explicit setting always wins; otherwise
+	# auto-pick the first camera that actually opens (today's original
+	# behavior, device=0, made robust against a camera that isn't there).
+	available_cameras = fw_settings.list_cameras()
+	cap_device = fw_settings.pick_camera_device(settings, available=available_cameras)
+	# The raw setting (None means "Auto"), kept separate from `cap_device`
+	# (the actual resolved index currently in use) so the Settings window
+	# shows "Auto" rather than whichever index auto-pick happened to land
+	# on, unless the user explicitly chose one.
+	camera_device_setting = settings.get('camera_device')
 
 	print(
 		f'FingerWorks v{__version__} -- started '
 		f'{datetime.datetime.now():%Y-%m-%d %H:%M:%S} '
-		f'(screen {screenWidth}x{screenHeight}, mouse sensitivity {mouse_sensitivity}x, '
-		f'debug {"on" if debug else "off"})'
+		f'(screen {screenWidth}x{screenHeight}, camera {cap_device}, '
+		f'mouse sensitivity {mouse_sensitivity}x, debug {"on" if debug else "off"})'
 	)
-
-	cap_device = device
-	cap_width = width
-	cap_height = height
 
 	min_detection_confidence = c.MIN_DETECTION_CONFIDENCE
 	min_tracking_confidence = c.MIN_TRACKING_CONFIDENCE
 
 	# Camera (used only to feed the hand-tracking model -- no video window
-	# is shown; the overlay panel is the only thing on screen besides
-	# whatever else you're using your computer for).
+	# is shown by default; the overlay panel and, in debug mode, the live
+	# camera-feed window are the only things on screen besides whatever
+	# else you're using your computer for).
 	cap = cv2.VideoCapture(cap_device)
 	cap.set(cv2.CAP_PROP_FRAME_WIDTH, cap_width)
 	cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cap_height)
+
+	def reopen_camera(new_device):
+		"""Swap the live camera device at runtime (Settings window ->
+		Apply), without restarting the program. Keeps the old camera
+		running if the new one fails to open, rather than leaving `cap`
+		pointing at a dead device."""
+		nonlocal cap
+		new_cap = cv2.VideoCapture(new_device)
+		new_cap.set(cv2.CAP_PROP_FRAME_WIDTH, cap_width)
+		new_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cap_height)
+		if not new_cap.isOpened():
+			print(f'[WARN] Could not open camera {new_device}; keeping current camera.')
+			new_cap.release()
+			return False
+		cap.release()
+		cap = new_cap
+		return True
+
+	def handle_settings_changed(new_settings):
+		nonlocal cap_device, camera_device_setting
+		fw_settings.save_settings(new_settings)
+
+		mc.set_sensitivity_multiplier(new_settings['sensitivity'])
+		overlay.set_sensitivity(new_settings['sensitivity'])
+		overlay.set_debug(new_settings['debug'])
+
+		resolved_device = fw_settings.pick_camera_device(new_settings)
+		if resolved_device != cap_device:
+			if reopen_camera(resolved_device):
+				cap_device = resolved_device
+				camera_device_setting = new_settings['camera_device']
+		else:
+			camera_device_setting = new_settings['camera_device']
+
+	def get_current_settings():
+		return {
+			'camera_device': camera_device_setting,
+			'sensitivity': overlay.mouse_sensitivity,
+			'debug': overlay.debug,
+		}
 
 	model_path = ensure_model_downloaded()
 
@@ -259,6 +313,9 @@ def main(mouse_sensitivity=1.0, debug=False):
 
 	overlay = ov.Overlay(
 		screenWidth, screenHeight, debug=debug, mouse_sensitivity=mouse_sensitivity,
+		on_settings_changed=handle_settings_changed,
+		get_settings=get_current_settings,
+		get_available_cameras=fw_settings.list_cameras,
 	)
 
 	# The keyboard's layout is now sized to the overlay panel (fixed at
@@ -276,6 +333,18 @@ def main(mouse_sensitivity=1.0, debug=False):
 			frame_height, frame_width = image.shape[:2]
 
 			image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+			if overlay.paused:
+				# Skip hand detection/gesture processing entirely while
+				# paused (saves the model's per-frame cost too) -- just
+				# keep the UI responsive and, in debug mode, still show the
+				# raw camera feed so it's clear the camera itself is still
+				# working.
+				overlay.draw(event, control_state, typed_text, button_list)
+				if overlay.debug:
+					overlay.draw_video(image)
+				overlay.pump()
+				continue
 
 			mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image)
 			timestamp_ms = int(time.time() * 1000) - start_time_ms
@@ -332,7 +401,7 @@ def main(mouse_sensitivity=1.0, debug=False):
 							f'Left [Zoom: {zoom_debug_text}] [Paste: {paste_debug_text}]'
 						)
 
-						if debug:
+						if overlay.debug:
 							draw_hand_debug_overlay(
 								image, abs_landmark_list,
 								f'Zoom: {zoom_debug_text.split(" -> ")[0]}  Paste: {paste_debug_text.split(" -> ")[0]}',
@@ -396,7 +465,7 @@ def main(mouse_sensitivity=1.0, debug=False):
 						allow_click=allow_click,
 					)
 
-					if debug:
+					if overlay.debug:
 						draw_hand_debug_overlay(
 							image, abs_landmark_list, event, _RIGHT_HAND_COLOR,
 						)
@@ -409,7 +478,7 @@ def main(mouse_sensitivity=1.0, debug=False):
 			# constants.SWAP_LABELED_HANDS if it isn't).
 			overlay.draw(event + hand_debug_text, control_state, typed_text, button_list)
 
-			if debug:
+			if overlay.debug:
 				# Purely cosmetic: the live camera feed with each hand's
 				# skeleton traced and its current gesture labeled, shown in
 				# its own always-on-top debug window. `image` is already
@@ -438,23 +507,35 @@ if __name__ == '__main__':
 
 	parser = argparse.ArgumentParser(description='FingerWorks -- touchless computer control via webcam.')
 	parser.add_argument(
-		'--sensitivity', type=float, default=1.0, metavar='MULTIPLIER',
+		'--sensitivity', type=float, default=None, metavar='MULTIPLIER',
 		help=(
-			"Mouse-speed multiplier. 1.0 (default) is today's normal speed "
-			'unchanged; e.g. 1.5 moves the cursor faster, 0.5 slower.'
+			'Mouse-speed multiplier. Defaults to whatever is saved in '
+			'settings (1.0 the first time this is run); e.g. 1.5 moves the '
+			'cursor faster, 0.5 slower. Overrides (and is then saved as) '
+			'the settings-file value; also changeable at runtime from the '
+			'Settings window.'
 		),
 	)
 	parser.add_argument(
-		'--debug', action='store_true',
+		'--debug', action='store_true', default=None,
 		help=(
-			'Show the debug overlay text (current event, which hand is doing '
-			'what, zoom/paste gesture state) and keep the overlay panel '
-			"visible at all times. Off by default: with --debug unset, the "
-			'panel only appears while the on-screen keyboard is toggled on, '
-			'and no debug text is drawn.'
+			'Show the debug overlay text (current event, mouse sensitivity, '
+			'which hand is doing what, zoom/paste gesture state) plus a '
+			'live camera window with each hand\'s skeleton traced and its '
+			'gesture labeled, and keep the overlay panel visible at all '
+			"times. Defaults to whatever is saved in settings (off the "
+			'first time this is run). Overrides (and is then saved as) the '
+			'settings-file value; also toggleable at runtime from the '
+			'Settings window.'
 		),
 	)
 	args = parser.parse_args()
 
-	main(mouse_sensitivity=args.sensitivity, debug=args.debug)
+	settings = fw_settings.load_settings()
+	if args.sensitivity is not None:
+		settings['sensitivity'] = args.sensitivity
+	if args.debug is not None:
+		settings['debug'] = args.debug
+
+	main(settings)
 

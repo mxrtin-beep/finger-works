@@ -12,6 +12,35 @@ _STATE_COLORS = {
 	'active': '#e74c3c',
 }
 
+# Simple text-and-emoji cheat sheet shown in the Help window -- a quick
+# visual reminder of the gestures, not a replacement for the full reference
+# in INSTRUCTIONS.md (which also covers every tunable parameter).
+_INSTRUCTIONS_TEXT = """RIGHT HAND -- mouse & keyboard
+
+ ✋  Move your hand -- moves the cursor
+ \U0001F90F  Pinch thumb + index -- left click
+     (hold + move = drag, release quickly = click)
+ \U0001F90F  Pinch thumb + ring -- right click
+ ✊  Closed fist -- toggle on-screen keyboard
+ ✌  Index + middle out ("scissors") -- cut typed text
+     (keyboard mode only)
+ \U0001F919  Thumb + pinky out, others folded -- quit
+
+
+LEFT HAND -- zoom & paste
+
+ ✋  Open hand, all 5 fingers out -- zoom in
+ ✊  Closed fist -- zoom out
+ ✌  Index + middle out ("scissors") -- paste
+
+
+While the keyboard is open, clicking still works as long as
+the cursor isn't over one of its keys.
+
+See INSTRUCTIONS.md in the project folder for the full
+gesture and parameter reference.
+"""
+
 
 def _rgb_to_hex(rgb):
 	r, g, b = rgb
@@ -44,6 +73,15 @@ def _make_window_noactivate(hwnd):
 		print(f'[WARN] Could not set no-activate window style: {exc}')
 
 
+def _make_flat_button(parent, text, command, bg='#3a3a3a'):
+	return tk.Button(
+		parent, text=text, command=command, bg=bg, fg='white',
+		activebackground='#555555', activeforeground='white',
+		relief='flat', font=('Segoe UI', 9), padx=8, pady=3,
+		highlightthickness=0, bd=0,
+	)
+
+
 class Overlay:
 	"""A fixed, always-on-top panel docked in the corner of the screen.
 
@@ -52,12 +90,20 @@ class Overlay:
 	the OS mouse cursor lives in, so hit-testing a key against the real
 	cursor position is a plain coordinate comparison, not a translation
 	between two different coordinate spaces.
+
+	Also owns a small always-visible control bar (status indicator,
+	Pause/Resume, Help, Settings, Quit) docked in the very corner of the
+	screen, independent of Mouse/Keyboard/debug state -- so there's always
+	a way to pause, get help, or quit without needing to already know a
+	gesture for it.
 	"""
 
 	def __init__(self, screen_width, screen_height, panel_width=None, panel_height=None, margin=20,
-				debug=False, mouse_sensitivity=1.0):
+				debug=False, mouse_sensitivity=1.0,
+				on_settings_changed=None, get_settings=None, get_available_cameras=None):
 		self.screen_width = screen_width
 		self.screen_height = screen_height
+		self._margin = margin
 
 		# Off by default: the panel then only appears while the on-screen
 		# keyboard is toggled on (it needs to be visible to aim clicks at
@@ -67,16 +113,37 @@ class Overlay:
 		# gesture state), same as before this flag existed.
 		self.debug = debug
 
-		# Fixed for the whole run (set via --sensitivity), just echoed on
-		# the debug panel so it's visible without having to check how the
-		# program was launched.
+		# Echoed on the debug panel and prefilled into the Settings window;
+		# kept in sync with the real value (mouse_control's own sensitivity
+		# multiplier) by whoever calls set_sensitivity() after a settings
+		# change, rather than this class owning that value itself.
 		self.mouse_sensitivity = mouse_sensitivity
+
+		# Callbacks into main_fast.py, since this class shouldn't need to
+		# know how to reopen a camera or write settings.json itself:
+		# - on_settings_changed(new_settings_dict): called when the user
+		#   hits Apply in the Settings window.
+		# - get_settings() -> dict: current effective settings, used to
+		#   prefill the Settings window each time it's opened.
+		# - get_available_cameras() -> list[int]: probed lazily, only when
+		#   the Settings window is opened (probing is a bit slow).
+		self.on_settings_changed = on_settings_changed
+		self.get_settings = get_settings
+		self.get_available_cameras = get_available_cameras
+
+		self.paused = False
 
 		self.panel_width = panel_width or int(screen_width * 0.42)
 		self.panel_height = panel_height or int(screen_height * 0.34)
 
+		# The control bar sits in the actual bottom-right corner; the main
+		# panel (keyboard/debug text) sits directly above it, so the two
+		# never overlap regardless of which is currently visible.
+		self.control_width = 260
+		self.control_height = 40
+
 		self.origin_x = screen_width - self.panel_width - margin
-		self.origin_y = screen_height - self.panel_height - margin
+		self.origin_y = screen_height - self.panel_height - self.control_height - 2 * margin
 
 		self.root = tk.Tk()
 		self.root.title('finger-works')
@@ -102,7 +169,7 @@ class Overlay:
 		)
 		self.canvas.pack(fill='both', expand=True)
 
-		# Tracks whether the window is currently mapped, so draw() only
+		# Tracks whether the main panel is currently mapped, so draw() only
 		# calls withdraw()/deiconify() on an actual change instead of every
 		# frame (redundant, but also deiconify() steals focus back on some
 		# window managers if called needlessly).
@@ -114,17 +181,198 @@ class Overlay:
 		# The live camera feed (hand skeleton traced over the raw video,
 		# gestures labeled as they happen) is purely a "look impressive"
 		# debug aid -- it doesn't affect how the mouse/keyboard is driven
-		# at all -- so it only exists when --debug is on, as a separate
+		# at all -- so it only exists when debug is on, as a separate
 		# always-on-top window rather than fighting the main panel's fixed
-		# layout for space.
+		# layout for space. set_debug() can create/destroy it later too, so
+		# toggling debug in the Settings window takes effect immediately.
 		self.video_canvas = None
 		self.video_width = None
 		self.video_height = None
 		self._video_photo = None  # keep a reference so Tk doesn't GC the image
 		if self.debug:
-			self._create_video_window(margin)
+			self._create_video_window()
 
-	def _create_video_window(self, margin):
+		self._settings_win = None
+		self._instructions_win = None
+		self._build_control_bar()
+
+	# --- Control bar --------------------------------------------------
+
+	def _build_control_bar(self):
+		cx = self.screen_width - self.control_width - self._margin
+		cy = self.screen_height - self.control_height - self._margin
+
+		self.control_window = tk.Toplevel(self.root)
+		self.control_window.title('finger-works -- controls')
+		self.control_window.overrideredirect(True)
+		self.control_window.attributes('-topmost', True)
+		self.control_window.geometry(
+			f'{self.control_width}x{self.control_height}+{cx}+{cy}'
+		)
+		self.control_window.configure(bg='#1e1e1e')
+		self.control_window.bind('<Escape>', lambda _event: self._quit())
+		self.control_window.protocol('WM_DELETE_WINDOW', self._quit)
+
+		frame = tk.Frame(self.control_window, bg='#1e1e1e')
+		frame.pack(fill='both', expand=True, padx=4, pady=4)
+
+		self.status_canvas = tk.Canvas(
+			frame, width=14, height=14, bg='#1e1e1e', highlightthickness=0,
+		)
+		self.status_dot = self.status_canvas.create_oval(2, 2, 12, 12, fill='#2ecc71', outline='')
+		self.status_canvas.pack(side='left', padx=(4, 6))
+
+		self.status_label = tk.Label(
+			frame, text='FingerWorks', fg='#dddddd', bg='#1e1e1e',
+			font=('Segoe UI', 9, 'bold'),
+		)
+		self.status_label.pack(side='left', padx=(0, 6))
+
+		self.pause_button = _make_flat_button(frame, 'Pause', self._toggle_pause)
+		self.pause_button.pack(side='left', padx=2)
+		_make_flat_button(frame, 'Help', self._open_instructions).pack(side='left', padx=2)
+		_make_flat_button(frame, 'Settings', self._open_settings).pack(side='left', padx=2)
+		_make_flat_button(frame, 'Quit', self._quit, bg='#7a2e2e').pack(side='left', padx=2)
+
+		self.control_window.update_idletasks()
+		_make_window_noactivate(self.control_window.winfo_id())
+
+		self._refresh_pause_ui()
+
+	def _toggle_pause(self):
+		self.paused = not self.paused
+		self._refresh_pause_ui()
+
+	def _refresh_pause_ui(self):
+		if self.paused:
+			self.status_canvas.itemconfig(self.status_dot, fill='#e67e22')
+			self.status_label.config(text='Paused')
+			self.pause_button.config(text='Resume')
+		else:
+			self.status_canvas.itemconfig(self.status_dot, fill='#2ecc71')
+			self.status_label.config(text='FingerWorks')
+			self.pause_button.config(text='Pause')
+
+	# --- Settings window ------------------------------------------------
+
+	def _open_settings(self):
+		if self._settings_win is not None and self._settings_win.winfo_exists():
+			self._settings_win.lift()
+			return
+
+		current = self.get_settings() if self.get_settings else {}
+		cameras = self.get_available_cameras() if self.get_available_cameras else []
+
+		win = tk.Toplevel(self.root)
+		self._settings_win = win
+		win.title('FingerWorks Settings')
+		win.attributes('-topmost', True)
+		win.configure(bg='#1e1e1e')
+		win.resizable(False, False)
+
+		def close():
+			win.destroy()
+			self._settings_win = None
+
+		win.protocol('WM_DELETE_WINDOW', close)
+		win.bind('<Escape>', lambda _event: close())
+
+		label_opts = dict(fg='#dddddd', bg='#1e1e1e', font=('Segoe UI', 10))
+
+		tk.Label(win, text='Camera', **label_opts).grid(
+			row=0, column=0, sticky='w', padx=10, pady=(12, 4))
+
+		camera_labels = ['Auto (recommended)'] + [f'Camera {i}' for i in cameras]
+		current_device = current.get('camera_device')
+		current_label = 'Auto (recommended)' if current_device is None else f'Camera {current_device}'
+		if current_label not in camera_labels:
+			# The previously-chosen camera isn't detected right now (e.g.
+			# unplugged) -- still offer it so Apply doesn't silently
+			# discard the user's choice, but it'll fail over to auto-pick
+			# at runtime if it really isn't there (see main_fast.py).
+			camera_labels.append(current_label)
+		camera_var = tk.StringVar(value=current_label)
+		tk.OptionMenu(win, camera_var, *camera_labels).grid(
+			row=0, column=1, sticky='ew', padx=10, pady=(12, 4))
+
+		tk.Label(win, text='Mouse sensitivity', **label_opts).grid(
+			row=1, column=0, sticky='w', padx=10, pady=4)
+		sens_var = tk.DoubleVar(value=current.get('sensitivity', 1.0))
+		tk.Scale(
+			win, from_=0.25, to=3.0, resolution=0.05, orient='horizontal',
+			variable=sens_var, bg='#1e1e1e', fg='#dddddd', troughcolor='#3a3a3a',
+			highlightthickness=0, length=180, showvalue=True,
+		).grid(row=1, column=1, sticky='ew', padx=10, pady=4)
+
+		debug_var = tk.BooleanVar(value=current.get('debug', False))
+		tk.Checkbutton(
+			win, text='Debug mode (event text + live camera view)', variable=debug_var,
+			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
+			activebackground='#1e1e1e', activeforeground='#dddddd',
+		).grid(row=2, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+
+		tk.Label(
+			win, text='Camera and debug changes apply immediately.\nAll settings are remembered for next time.',
+			fg='#999999', bg='#1e1e1e', font=('Segoe UI', 8), justify='left',
+		).grid(row=3, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
+
+		def apply_and_close():
+			chosen = camera_var.get()
+			camera_device = None if chosen.startswith('Auto') else int(chosen.split(' ')[1])
+			new_settings = {
+				'camera_device': camera_device,
+				'sensitivity': round(sens_var.get(), 2),
+				'debug': debug_var.get(),
+			}
+			if self.on_settings_changed:
+				self.on_settings_changed(new_settings)
+			close()
+
+		btn_frame = tk.Frame(win, bg='#1e1e1e')
+		btn_frame.grid(row=4, column=0, columnspan=2, pady=(0, 10))
+		_make_flat_button(btn_frame, 'Apply', apply_and_close, bg='#2ecc71').pack(side='left', padx=4)
+		_make_flat_button(btn_frame, 'Cancel', close).pack(side='left', padx=4)
+
+		win.update_idletasks()
+		_make_window_noactivate(win.winfo_id())
+
+	# --- Instructions/help window ---------------------------------------
+
+	def _open_instructions(self):
+		if self._instructions_win is not None and self._instructions_win.winfo_exists():
+			self._instructions_win.lift()
+			return
+
+		win = tk.Toplevel(self.root)
+		self._instructions_win = win
+		win.title('FingerWorks -- Gestures')
+		win.attributes('-topmost', True)
+		win.configure(bg='#1e1e1e')
+
+		def close():
+			win.destroy()
+			self._instructions_win = None
+
+		win.protocol('WM_DELETE_WINDOW', close)
+		win.bind('<Escape>', lambda _event: close())
+
+		text = tk.Text(
+			win, width=44, height=22, bg='#1e1e1e', fg='#eeeeee', relief='flat',
+			font=('Segoe UI', 11), wrap='word', padx=14, pady=12,
+			highlightthickness=0, bd=0,
+		)
+		text.insert('1.0', _INSTRUCTIONS_TEXT)
+		text.config(state='disabled')
+		text.pack(fill='both', expand=True)
+
+		_make_flat_button(win, 'Close', close).pack(pady=(0, 10))
+
+		win.update_idletasks()
+		_make_window_noactivate(win.winfo_id())
+
+	# --- Debug video window ----------------------------------------------
+
+	def _create_video_window(self):
 		self.video_width = 480
 		self.video_height = 360
 
@@ -133,8 +381,9 @@ class Overlay:
 		self.video_window.overrideredirect(True)
 		self.video_window.attributes('-topmost', True)
 		self.video_window.geometry(
-			f'{self.video_width}x{self.video_height}+{margin}+{margin}'
+			f'{self.video_width}x{self.video_height}+{self._margin}+{self._margin}'
 		)
+		self.video_window.bind('<Escape>', lambda _event: self._quit())
 		self.video_window.protocol('WM_DELETE_WINDOW', self._quit)
 
 		self.video_window.update_idletasks()
@@ -149,14 +398,39 @@ class Overlay:
 		)
 		self.video_canvas.pack(fill='both', expand=True)
 
+	def _destroy_video_window(self):
+		self.video_window.destroy()
+		self.video_canvas = None
+		self.video_width = None
+		self.video_height = None
+		self._video_photo = None
+
+	def set_debug(self, debug):
+		"""Turn the debug text + live camera window on/off at runtime (e.g.
+		from the Settings window), without needing to restart the
+		program."""
+		if debug == self.debug:
+			return
+		self.debug = debug
+		if debug:
+			self._create_video_window()
+		else:
+			self._destroy_video_window()
+
+	def set_sensitivity(self, sensitivity):
+		"""Update the sensitivity value shown on the debug panel. Doesn't
+		itself change cursor speed -- that's mouse_control's own
+		multiplier, set separately by whoever calls this (main_fast.py)."""
+		self.mouse_sensitivity = sensitivity
+
 	def draw_video(self, frame_rgb):
 		"""Show one camera frame (an RGB numpy array, already annotated with
 		hand skeleton/gesture labels by the caller) in the debug video
-		window. No-op when --debug is off."""
+		window. No-op when debug is off."""
 		if self.video_canvas is None:
 			return
 
-		# Imported lazily so Pillow is only required when --debug is
+		# Imported lazily so Pillow is only required when debug is
 		# actually used, not for normal (non-debug) runs.
 		from PIL import Image, ImageTk
 
@@ -189,7 +463,8 @@ class Overlay:
 		# actually need (the on-screen keyboard, to aim clicks at its
 		# keys) -- unless debug is on, in which case it's up all the time
 		# so the debug text below is always visible, as it always used to
-		# be before this flag existed.
+		# be before this flag existed. The control bar (status/Pause/Help/
+		# Settings/Quit) is separate and always visible regardless.
 		should_show = self.debug or control_state == 'Keyboard'
 		if should_show != self._visible:
 			if should_show:
