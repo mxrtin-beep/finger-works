@@ -26,11 +26,6 @@ gesture with, or to already know a gesture at all:
 
 - A status dot + label -- green **FingerWorks** when active, orange
   **Paused** when paused.
-- Its own border flashes on every left/right click -- green for left,
-  yellow for right -- for about 150ms, regardless of the Click sounds
-  setting. See `overlay.flash_click_feedback()`; this exists as click
-  confirmation that doesn't depend on your OS/audio setup working, unlike
-  the (optional) click sound.
 - **Pause / Resume** -- stops all hand tracking and gesture processing
   (the camera keeps running, just isn't acted on) until you resume. Useful
   for stepping away or using your physical mouse/keyboard for a bit
@@ -81,6 +76,13 @@ Click **Settings** in the control bar to open a small settings window:
   (`winsound`/`afplay`/`aplay`), which is what keeps fast repeated
   triggers (e.g. quickly switching keys) from ever racing each other and
   dropping a sound.
+- **Click indicator** -- on by default, unlike the two sound settings
+  above. A brief (~150ms) colored ring at the cursor on every left/right
+  click -- green for left, yellow for right -- see
+  `overlay.show_click_indicator()`. This is click confirmation that
+  doesn't depend on your OS/audio setup actually cooperating, unlike the
+  (optional) click sound; it's on by default since it replaces what used
+  to be an always-on control-bar border flash.
 - **Debug mode** -- same as `--debug`, as a checkbox. Session-only,
   unlike every other setting here: it's never saved to
   `~/.finger_works_settings.json`, so it's always back off the next time

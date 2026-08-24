@@ -53,8 +53,8 @@ def write_wav(path, freq, duration_s, amplitude, sample_rate=44100, attack_s=0.0
 
 
 def write_click(
-	path, sample_rate=44100, duration_s=0.045, noise_decay_s=0.013,
-	pop_freq=1500, pop_decay_s=0.006, amplitude=0.42, seed=7,
+	path, sample_rate=44100, duration_s=0.07, noise_decay_s=0.032,
+	pop_freq=1500, pop_decay_s=0.006, amplitude=0.62, seed=7,
 ):
 	"""A short "pop" built from two layers, neither of them a held tone:
 
@@ -71,19 +71,27 @@ def write_click(
 	  as a thump regardless of level, where a brief, high, fast-decaying
 	  one doesn't.
 
-	Kept safely away from the too-short-to-render range that key.wav ran
-	into (see the comment where it's generated below) despite being
-	perceptually snappier now: duration_s is still ~45ms, only the
-	*audible/energetic* part of it (the first ~15ms or so) is short.
+	An earlier version of this (noise_decay_s 13ms, amplitude 0.42) went
+	the other way -- essentially inaudible on real hardware, despite a
+	peak sample amplitude similar to key.wav's. Peak level isn't what
+	makes something audible over time; *energy* (RMS, integrated over the
+	sound's duration) is, and 13ms of noise decay carries much less of it
+	than key.wav's 60ms tone even at the same peak. noise_decay_s and
+	amplitude are both raised here to bring the RMS level back up close to
+	key.wav's, while keeping the "pop" character (no held tone) that fixed
+	the original harsh/"thud" version.
 	"""
 	rnd = random.Random(seed)
 	n = int(sample_rate * duration_s)
 	attack_s = 0.001
 	frames = []
 	lp_state = 0.0
-	lp_alpha = 0.55  # brighter/crisper than a duller "thock" -- this is
+	lp_alpha = 0.45  # brighter/crisper than a duller "thock" -- this is
 	                 # the actual click/pop character now that there's no
-	                 # thud layer underneath it to clash with
+	                 # thud layer underneath it to clash with. Slightly
+	                 # duller than the inaudible version's 0.55 since the
+	                 # louder/longer noise burst below would otherwise
+	                 # start sounding harsh again at this volume.
 
 	for i in range(n):
 		t = i / sample_rate

@@ -88,6 +88,37 @@ def _make_window_noactivate(hwnd):
 		print(f'[WARN] Could not set no-activate window style: {exc}')
 
 
+def _make_window_clickthrough(hwnd):
+	"""Best-effort, Windows only: make this window transparent to mouse
+	input, so clicks pass straight through it to whatever's underneath
+	instead of landing on the window itself.
+
+	Used only for the click indicator (see Overlay.show_click_indicator())
+	-- that window is deliberately drawn right on top of the cursor, so
+	without this a fast follow-up click landing in the same spot while the
+	indicator is still showing would hit this window instead of the real
+	target beneath it. WS_EX_TRANSPARENT (combined with WS_EX_LAYERED,
+	which it requires) is the standard way to do this on Windows.
+
+	There's no equivalent public, portable way to do this from plain Tk on
+	macOS or Linux -- both would need real platform-native window-server
+	APIs (e.g. Cocoa's ignoresMouseEvents on macOS) that aren't reachable
+	from stdlib Tkinter, so this is a no-op there and the indicator is
+	just a very brief (~150ms) real window instead."""
+	if sys.platform != 'win32':
+		return
+	try:
+		import ctypes
+		GWL_EXSTYLE = -20
+		WS_EX_LAYERED = 0x00080000
+		WS_EX_TRANSPARENT = 0x00000020
+		user32 = ctypes.windll.user32
+		style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+		user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+	except Exception as exc:
+		print(f'[WARN] Could not set click-through window style: {exc}')
+
+
 def _make_flat_button(parent, text, command, bg='#3a3a3a'):
 	return tk.Button(
 		parent, text=text, command=command, bg=bg, fg='white',
@@ -114,7 +145,7 @@ class Overlay:
 	"""
 
 	def __init__(self, screen_width, screen_height, panel_width=None, panel_height=None, margin=None,
-				debug=False, mouse_sensitivity=1.0, keyboard_scale=1.0,
+				debug=False, mouse_sensitivity=1.0, keyboard_scale=1.0, click_indicator_enabled=True,
 				on_settings_changed=None, get_settings=None, get_available_cameras=None):
 		self.screen_width = screen_width
 		self.screen_height = screen_height
@@ -251,13 +282,13 @@ class Overlay:
 
 		self._settings_win = None
 		self._instructions_win = None
-		# Pending Tk `after()` id for flash_click_feedback()'s revert-the-
-		# border callback, so a second click arriving before the first
-		# flash finishes can cancel and restart the timer instead of the
-		# two racing (which could otherwise revert the border early, right
-		# out from under the second flash).
-		self._flash_after_id = None
 		self._build_control_bar()
+
+		# On (opt-out) by default -- see set_click_indicator_enabled() and
+		# show_click_indicator(). Toggle: Settings -> "Click indicator".
+		self.click_indicator_enabled = click_indicator_enabled
+		self._click_indicator_after_id = None
+		self._create_click_indicator_window()
 
 	# --- Control bar --------------------------------------------------
 
@@ -278,11 +309,6 @@ class Overlay:
 			highlightthickness=2, highlightbackground='#4a4a4a', highlightcolor='#4a4a4a',
 		)
 		frame.pack(fill='both', expand=True)
-		# Kept around so flash_click_feedback() can briefly recolor this
-		# specific border (see that method) -- this is the outermost
-		# bordered frame, not `inner` below, which only exists to add
-		# padding inside it.
-		self._control_border = frame
 
 		inner = tk.Frame(frame, bg='#1e1e1e')
 		inner.pack(fill='both', expand=True, padx=6, pady=4)
@@ -344,38 +370,107 @@ class Overlay:
 			self.status_label.config(text='FingerWorks')
 			self.pause_button.config(text='Pause')
 
-	_FLASH_COLORS = {'left': '#2ecc71', 'right': '#f1c40f'}  # green / yellow
+	# --- Click indicator (a ring drawn at the cursor on every click) ----
 
-	def flash_click_feedback(self, kind):
-		"""Briefly recolor the control bar's border -- green for a left
-		click, yellow for a right click -- as a visual confirmation that a
-		click actually registered, independent of (and more reliable than)
-		the optional click sound. Wired up as mouse_control's
-		click-feedback callback by main_fast.py; `kind` is 'left' or
-		'right', matching what mouse_control.execute_click() passes.
+	_CLICK_INDICATOR_SIZE = 40
+	_CLICK_INDICATOR_COLORS = {'left': '#2ecc71', 'right': '#f1c40f'}  # green / yellow
 
-		Deliberately doesn't move anything to the cursor's position (a
-		"ripple" right where you clicked, closer to what was asked for) --
-		a small always-on-top window there risks swallowing a fast
-		follow-up click aimed at the same spot, and reliably making a
-		Tk window click-through the cursor is itself platform-specific,
-		fragile territory (see _make_window_noactivate's own Windows-only
-		ctypes workaround for a taste of that). The control bar is fixed,
-		already always-on-top, and never has anything else worth clicking
-		on it, so flashing its border is a free, safe way to give the same
-		kind of confirmation.
+	def _create_click_indicator_window(self):
+		"""Build the (initially hidden) small ring window show_click_
+		indicator() repositions and reveals on every click. Built once and
+		reused rather than created fresh per click, since click can fire
+		every camera frame during a drag-then-release and a fresh Toplevel
+		per click would be needless window-creation overhead on top of
+		that."""
+		size = self._CLICK_INDICATOR_SIZE
+		self._indicator_window = tk.Toplevel(self.root)
+		self._indicator_window.overrideredirect(True)
+		self._indicator_window.attributes('-topmost', True)
+		try:
+			# Best-effort translucency (Tk's whole-window alpha, supported
+			# on Windows/macOS, not universally on Linux) -- softens the
+			# indicator a little since, unlike the old control-bar flash,
+			# this is drawn directly over your cursor. A TclError here
+			# just means this platform's Tk doesn't support it; the
+			# indicator still works, just fully opaque.
+			self._indicator_window.attributes('-alpha', 0.8)
+		except tk.TclError:
+			pass
+		self._indicator_window.geometry(f'{size}x{size}+0+0')
+
+		canvas = tk.Canvas(
+			self._indicator_window, width=size, height=size,
+			bg='#1e1e1e', highlightthickness=0,
+		)
+		canvas.pack(fill='both', expand=True)
+		self._indicator_canvas = canvas
+		margin = 4
+		self._indicator_ring = canvas.create_oval(
+			margin, margin, size - margin, size - margin,
+			outline='#2ecc71', width=4,
+		)
+
+		self._indicator_window.update_idletasks()
+		_make_window_noactivate(self._indicator_window.winfo_id())
+		# Best-effort, Windows only -- see _make_window_clickthrough()'s
+		# own docstring for why this matters here specifically (it's the
+		# thing that stops the indicator from ever swallowing a real
+		# click) and why there's no equivalent on macOS/Linux.
+		_make_window_clickthrough(self._indicator_window.winfo_id())
+		self._indicator_window.withdraw()
+
+	def set_click_indicator_enabled(self, enabled):
+		"""Settings -> "Click indicator" checkbox. Hides it immediately
+		(and cancels any pending auto-hide) if turned off mid-flash,
+		rather than leaving one last indicator stuck on screen."""
+		self.click_indicator_enabled = enabled
+		if not enabled:
+			if self._click_indicator_after_id is not None:
+				self._indicator_window.after_cancel(self._click_indicator_after_id)
+				self._click_indicator_after_id = None
+			self._indicator_window.withdraw()
+
+	def show_click_indicator(self, kind, x, y):
+		"""Briefly show a colored ring centered on (x, y) -- the OS cursor
+		position at the moment of a left/right click -- green for left,
+		yellow for right. Wired up as mouse_control's click-feedback
+		callback by main_fast.py; `kind`/`x`/`y` match what
+		mouse_control.execute_click() passes.
+
+		This exists as a click confirmation that doesn't depend on your
+		OS/audio setup the way the (optional, still off by default) click
+		sound does, and -- unlike an earlier version of this that flashed
+		the control bar's border instead -- it's drawn right where you're
+		actually looking, at the cursor itself, since that's where
+		attention already is when you click.
+
+		On Windows this window is also made click-through (see
+		_make_window_clickthrough()), so it can never itself swallow a
+		fast follow-up click landing in the same spot. There's no
+		portable, non-fragile way to do the same from plain Tk on macOS/
+		Linux, so there it's a real (if very brief, ~150ms) window sitting
+		on top of the cursor -- a real but small tradeoff for a
+		reliable, in-your-face confirmation.
 		"""
-		color = self._FLASH_COLORS.get(kind)
+		if not self.click_indicator_enabled:
+			return
+		color = self._CLICK_INDICATOR_COLORS.get(kind)
 		if color is None:
 			return
-		self._control_border.config(highlightbackground=color, highlightcolor=color)
-		if self._flash_after_id is not None:
-			self.control_window.after_cancel(self._flash_after_id)
-		self._flash_after_id = self.control_window.after(150, self._revert_control_border)
+		size = self._CLICK_INDICATOR_SIZE
+		self._indicator_canvas.itemconfig(self._indicator_ring, outline=color)
+		self._indicator_window.geometry(
+			f'{size}x{size}+{int(x - size / 2)}+{int(y - size / 2)}'
+		)
+		self._indicator_window.deiconify()
+		self._indicator_window.lift()
+		if self._click_indicator_after_id is not None:
+			self._indicator_window.after_cancel(self._click_indicator_after_id)
+		self._click_indicator_after_id = self._indicator_window.after(150, self._hide_click_indicator)
 
-	def _revert_control_border(self):
-		self._flash_after_id = None
-		self._control_border.config(highlightbackground='#4a4a4a', highlightcolor='#4a4a4a')
+	def _hide_click_indicator(self):
+		self._click_indicator_after_id = None
+		self._indicator_window.withdraw()
 
 	# --- Settings window ------------------------------------------------
 
@@ -477,6 +572,17 @@ class Overlay:
 			activebackground='#1e1e1e', activeforeground='#dddddd',
 		).grid(row=6, column=0, columnspan=2, sticky='w', padx=10, pady=4)
 
+		# On by default, unlike the two sound settings above -- it's the
+		# direct replacement for what used to be an always-on control-bar
+		# flash, not a new opt-in extra. A brief green/yellow ring at the
+		# cursor on every left/right click.
+		click_indicator_var = tk.BooleanVar(value=current.get('click_indicator', True))
+		tk.Checkbutton(
+			win, text='Click indicator (ring at cursor on click)', variable=click_indicator_var,
+			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
+			activebackground='#1e1e1e', activeforeground='#dddddd',
+		).grid(row=7, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+
 		# Debug mode is deliberately excluded from "remembered for next
 		# time" (see settings.py's _PERSISTED_KEYS) -- it only ever applies
 		# to the run you turn it on for.
@@ -485,7 +591,7 @@ class Overlay:
 			win, text='Debug mode (event text + live camera view)', variable=debug_var,
 			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
 			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=7, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
+		).grid(row=8, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
 
 		def apply_and_close():
 			chosen = camera_var.get()
@@ -499,6 +605,7 @@ class Overlay:
 				'keyboard_scale': round(keyboard_scale_var.get(), 2),
 				'click_sounds': click_sounds_var.get(),
 				'keyboard_sounds': keyboard_sounds_var.get(),
+				'click_indicator': click_indicator_var.get(),
 			}
 			if self.on_settings_changed:
 				self.on_settings_changed(new_settings)
@@ -516,10 +623,11 @@ class Overlay:
 			keyboard_scale_var.set(d['keyboard_scale'])
 			click_sounds_var.set(d['click_sounds'])
 			keyboard_sounds_var.set(d['keyboard_sounds'])
+			click_indicator_var.set(d['click_indicator'])
 			debug_var.set(d['debug'])
 
 		btn_frame = tk.Frame(win, bg='#1e1e1e')
-		btn_frame.grid(row=8, column=0, columnspan=2, pady=(0, 10))
+		btn_frame.grid(row=9, column=0, columnspan=2, pady=(0, 10))
 		_make_flat_button(btn_frame, 'Apply', apply_and_close, bg='#2ecc71').pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Cancel', close).pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Reset to Defaults', reset_to_defaults).pack(side='left', padx=4)
