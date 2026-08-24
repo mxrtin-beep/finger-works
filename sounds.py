@@ -1,7 +1,9 @@
 
 import os
+import queue
 import subprocess
 import sys
+import threading
 
 # Two short, soft WAV files (sounds/click.wav, sounds/key.wav) -- see
 # generate_sounds.py for how they were made and why they're shaped the way
@@ -35,70 +37,71 @@ def get_keyboard_sounds_enabled():
 	return _keyboard_sounds_enabled
 
 
-# Preferred playback path: simpleaudio, which plays through the platform's
-# actual audio API (mixing overlapping sounds properly) rather than
-# spawning a whole new OS process per play. That per-process approach
-# (still kept below as a fallback) is what caused keyboard sounds to
-# regularly go missing on fast typing: firing a new `afplay`/`aplay`
-# process for every keystroke means back-to-back keys can end up with two
-# processes racing to open the same audio device at once, and on `aplay`
-# (ALSA) specifically the loser of that race fails to open the device at
-# all -- silently, since stderr is suppressed. simpleaudio's mixing avoids
-# that entirely. Typed letters didn't share this problem because each
-# press already goes through a full pinch-release-repinch cycle, which is
-# almost always slower than the window where two afplay/aplay launches
-# actually overlap.
-try:
-	import simpleaudio
-	_HAVE_SIMPLEAUDIO = True
-except ImportError:
-	simpleaudio = None
-	_HAVE_SIMPLEAUDIO = False
-
-# WaveObjects are cached per path (decoded once, not once per play) since
-# simpleaudio.WaveObject.from_wave_file() reads and parses the whole file
-# each time it's called -- this is instead done at most once, and then
-# reused for every future play_click()/play_key() call.
-_wave_object_cache = {}
+# Playback is a system player process per sound (winsound/afplay/aplay --
+# no extra dependency needed, every platform already ships one of these).
+# An earlier version tried simpleaudio instead (proper audio-API mixing,
+# no per-play process spawn) specifically to dodge the problem this module
+# now solves a different way -- but simpleaudio is a C extension that
+# needs to compile on install, and it failed to build in practice (no
+# prebuilt wheel for some platform/Python combos, and it's a fairly
+# unmaintained package), so it's not a dependency here anymore.
+#
+# The actual problem simpleaudio was meant to fix: firing a brand new
+# player process per sound means two sounds close together in time (e.g.
+# switching keys quickly) can end up as two processes racing to open the
+# same audio device -- and the loser of that race can fail silently
+# (stderr suppressed) rather than queue up, especially on Linux's ALSA
+# (`aplay`). The fix here doesn't need a new dependency: every sound is
+# queued and played one at a time from a single dedicated background
+# thread, using subprocess.run() (which *waits* for that one player to
+# finish) instead of Popen-and-forget. That serializes every play through
+# one process at a time, so there's never a second one to race against --
+# and since these sounds are only 25-60ms long, queuing rather than
+# overlapping is inaudible even when keys are pressed quickly.
+_sound_queue = queue.Queue()
 
 
-def _play_via_simpleaudio(path):
-	if path not in _wave_object_cache:
-		_wave_object_cache[path] = simpleaudio.WaveObject.from_wave_file(path)
-	_wave_object_cache[path].play()
-
-
-def _play_via_subprocess(path):
-	"""Fallback used only when simpleaudio isn't installed. Spawns a new
-	OS process per play -- see the _HAVE_SIMPLEAUDIO comment above for why
-	that's the less reliable option under rapid repeated triggers."""
+def _play_blocking(path):
 	if sys.platform == 'win32':
 		import winsound
-		winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+		# No SND_ASYNC here (unlike the old approach) -- this call is
+		# already on the dedicated background thread below, so blocking
+		# it until playback finishes is exactly what serializes plays
+		# through one at a time, the same as subprocess.run() does for
+		# the other two platforms.
+		winsound.PlaySound(path, winsound.SND_FILENAME)
 	elif sys.platform == 'darwin':
-		subprocess.Popen(
+		subprocess.run(
 			['afplay', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 		)
 	else:
-		subprocess.Popen(
+		subprocess.run(
 			['aplay', '-q', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 		)
 
 
+def _sound_worker():
+	while True:
+		path = _sound_queue.get()
+		try:
+			_play_blocking(path)
+		except Exception as exc:
+			print(f'[WARN] Could not play sound {path}: {exc}')
+		finally:
+			_sound_queue.task_done()
+
+
+# Daemon thread: never blocks program exit, even mid-playback.
+threading.Thread(target=_sound_worker, daemon=True).start()
+
+
 def _play(path):
-	"""Best-effort, non-blocking playback -- a missing sound file, missing
-	player/library, or any other hiccup here should never interrupt
-	gesture control, so every failure mode is swallowed (with a one-line
-	warning) rather than raised."""
+	"""Queue `path` to play on the background sound thread -- a missing
+	sound file is checked for here (not on the worker thread) so it's a
+	silent, immediate no-op rather than a queued failure."""
 	if not os.path.exists(path):
 		return
-	try:
-		if _HAVE_SIMPLEAUDIO:
-			_play_via_simpleaudio(path)
-		else:
-			_play_via_subprocess(path)
-	except Exception as exc:
-		print(f'[WARN] Could not play sound {path}: {exc}')
+	_sound_queue.put(path)
 
 
 def play_click():

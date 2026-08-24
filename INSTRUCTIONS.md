@@ -71,11 +71,11 @@ Click **Settings** in the control bar to open a small settings window:
   press, respectively -- see `sounds.py`. Deliberately light rather than
   an obvious "beep"; if you want them louder/different, `generate_sounds.py`
   regenerates `sounds/click.wav`/`sounds/key.wav` from adjustable
-  parameters. Playback prefers the `simpleaudio` package (in
-  `requirements.txt` -- run `pip install -r requirements.txt` again if
-  you installed before it was added) for reliable overlapping playback;
-  without it, sounds fall back to spawning a system player process per
-  play, which can occasionally drop a sound under fast repeated triggers.
+  parameters. Playback needs no extra dependency: a background thread
+  plays sounds one at a time via a per-platform system player
+  (`winsound`/`afplay`/`aplay`), which is what keeps fast repeated
+  triggers (e.g. quickly switching keys) from ever racing each other and
+  dropping a sound.
 - **Debug mode** -- same as `--debug`, as a checkbox. Session-only,
   unlike every other setting here: it's never saved to
   `~/.finger_works_settings.json`, so it's always back off the next time

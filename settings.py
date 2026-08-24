@@ -26,8 +26,9 @@ DEFAULTS = {
 	# this default unless --debug is passed again.
 	'debug': False,
 	# Multiplies constants.SCROLL_AMOUNT -- see mouse_control's
-	# set_scroll_speed_multiplier(). 1.0 = default speed.
-	'scroll_speed': 1.0,
+	# set_scroll_speed_multiplier(). 1.0 would be constants.SCROLL_AMOUNT
+	# as tuned/committed; 2.3 confirmed to feel better once adjustable.
+	'scroll_speed': 2.3,
 	# Multiplies the overlay panel's (and so the on-screen keyboard's) base
 	# size -- see overlay.Overlay.set_keyboard_scale(). 1.0 = default size.
 	'keyboard_scale': 1.0,

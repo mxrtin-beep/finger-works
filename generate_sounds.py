@@ -49,7 +49,7 @@ def write_wav(path, freq, duration_s, amplitude, sample_rate=44100, attack_s=0.0
 
 def write_click(
 	path, sample_rate=44100, duration_s=0.05, noise_decay_s=0.010,
-	thud_freq=190, amplitude=0.38, seed=7,
+	thud_freq=210, amplitude=0.4, seed=7,
 ):
 	"""A short, soft "tap" built from two layers rather than one tone:
 
@@ -62,14 +62,19 @@ def write_click(
 	  like pure static.
 
 	Neither layer holds a clear pitch long enough to read as a "beep" or
-	alert tone the way the click sound's first version did.
+	alert tone the way the click sound's first version did. The thud layer
+	(originally weighted 0.5, at overall amplitude 0.38) came out sounding
+	too heavy/harsh -- it's now a quieter, more background layer (weighted
+	0.28) under a duller noise burst (a gentler low-pass, lp_alpha 0.25
+	instead of 0.35, plus a softer 2ms attack instead of 1ms), and the
+	overall amplitude is down too, so the whole sound sits further back.
 	"""
 	rnd = random.Random(seed)
 	n = int(sample_rate * duration_s)
-	attack_s = 0.001
+	attack_s = 0.002
 	frames = []
 	lp_state = 0.0
-	lp_alpha = 0.35  # how much of each new noise sample bleeds through
+	lp_alpha = 0.25  # how much of each new noise sample bleeds through
 
 	for i in range(n):
 		t = i / sample_rate
@@ -82,7 +87,7 @@ def write_click(
 		thud_env = max(0.0, 1.0 - t / duration_s) ** 2
 		thud = math.sin(2 * math.pi * thud_freq * t) * thud_env
 
-		sample = 0.6 * noise + 0.5 * thud
+		sample = 0.55 * noise + 0.28 * thud
 		sample = max(-1.0, min(1.0, sample)) * amplitude
 		if t < attack_s:
 			sample *= t / attack_s

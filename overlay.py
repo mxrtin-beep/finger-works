@@ -400,7 +400,7 @@ class Overlay:
 
 		tk.Label(win, text='Scroll speed', **label_opts).grid(
 			row=3, column=0, sticky='w', padx=10, pady=4)
-		scroll_speed_var = tk.DoubleVar(value=current.get('scroll_speed', 1.0))
+		scroll_speed_var = tk.DoubleVar(value=current.get('scroll_speed', 2.3))
 		tk.Scale(
 			win, from_=0.25, to=3.0, resolution=0.05, orient='horizontal',
 			variable=scroll_speed_var, bg='#1e1e1e', fg='#dddddd', troughcolor='#3a3a3a',

@@ -450,7 +450,7 @@ def main(settings):
 	debug = settings['debug']
 
 	mc.set_sensitivity_multiplier(mouse_sensitivity)
-	mc.set_scroll_speed_multiplier(settings.get('scroll_speed', 1.0))
+	mc.set_scroll_speed_multiplier(settings.get('scroll_speed', 2.3))
 	mc.set_cursor_snappiness(settings.get('cursor_snappiness', 0.65))
 	sounds.set_click_sounds_enabled(settings.get('click_sounds', False))
 	sounds.set_keyboard_sounds_enabled(settings.get('keyboard_sounds', False))
@@ -531,7 +531,7 @@ def main(settings):
 		mc.set_sensitivity_multiplier(new_settings['sensitivity'])
 		overlay.set_sensitivity(new_settings['sensitivity'])
 		overlay.set_debug(new_settings['debug'])
-		mc.set_scroll_speed_multiplier(new_settings.get('scroll_speed', 1.0))
+		mc.set_scroll_speed_multiplier(new_settings.get('scroll_speed', 2.3))
 		mc.set_cursor_snappiness(new_settings.get('cursor_snappiness', 0.65))
 		sounds.set_click_sounds_enabled(new_settings.get('click_sounds', False))
 		sounds.set_keyboard_sounds_enabled(new_settings.get('keyboard_sounds', False))
