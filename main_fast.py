@@ -693,7 +693,16 @@ def main(settings):
 							debug_parts.append('Right [ignored]')
 							continue
 						mouse_assigned = True
-						debug_parts.append('Right [Mouse]')
+						# scale=NNN is the live wrist-to-knuckle pixel size
+						# gesture cutoffs are normalized against this frame
+						# (see mouse_control.hand_scale()) -- shown so
+						# HAND_SCALE_TUNING_REFERENCE in constants.py can be
+						# calibrated by reading this number off while your
+						# hand is where things register reliably, instead of
+						# guessing at it.
+						debug_parts.append(
+							f'Right [Mouse, scale={mc.hand_scale(abs_landmark_list):.0f}]'
+						)
 
 						event = get_event_fast(rel_landmark_list, control_state)
 

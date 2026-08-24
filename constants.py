@@ -20,11 +20,11 @@ FINGER_INDICES = [4, 8, 12, 16, 20]
 # still clear the extended-finger cutoff.
 #
 # Fix: every landmark position gesture detection looks at is first divided
-# by HAND_SCALE_UNIT -- the hand's own live wrist-to-middle-knuckle pixel
-# distance (landmarks 0 and 9; stable across hand poses, unlike a
-# fingertip-based measurement) -- before being compared to a cutoff. A
+# by the hand's own live wrist-to-middle-knuckle pixel distance (landmarks
+# 0 and 9; stable across hand poses, unlike a fingertip-based measurement,
+# see mouse_control.hand_scale()) -- before being compared to a cutoff. A
 # bigger hand on screen (closer to the camera) has both a bigger raw
-# fingertip distance *and* a bigger HAND_SCALE_UNIT, so the ratio between
+# fingertip distance *and* a bigger live hand-scale, so the ratio between
 # them stays the same regardless of distance. The cutoffs below are
 # therefore unitless ratios, not pixel counts, and (in principle) don't
 # need retuning if you sit closer/farther from the camera, or if someone
@@ -32,12 +32,22 @@ FINGER_INDICES = [4, 8, 12, 16, 20]
 # and main_fast.py, where every hand's landmarks are normalized by it once
 # per frame, before any gesture is read off them.
 #
-# Each ratio below is simply the old pixel cutoff divided by 150 -- the
-# wrist-to-middle-knuckle pixel distance a hand happened to measure at
-# under the distance this project was originally tuned/used at -- so the
-# *feel* at that distance is unchanged; only the "you have to be at
-# roughly that one distance" requirement is gone.
-FINGER_OUT_CUTOFF = 280 / 150   # extended-finger cutoff, was 280px
+# HAND_SCALE_TUNING_REFERENCE is the wrist-to-middle-knuckle pixel distance
+# each ratio below is calibrated against: cutoff_ratio = old_pixel_cutoff /
+# HAND_SCALE_TUNING_REFERENCE. Getting this one number right is what makes
+# the *feel* of clicking/posing match the old pixel-tuned cutoffs; getting
+# it wrong shifts every cutoff by the same wrong factor at once, which
+# reads as gestures generally misbehaving (fingers popping "extended" too
+# easily and breaking fist detection, or the reverse) even right back at
+# the distance that always used to work. If that happens: run with
+# --debug, hold your hand exactly where clicks/poses used to register
+# reliably, read the "scale=NNN" value shown next to `Right [Mouse` in the
+# debug text/overlay, and set this to that number -- every ratio below
+# rescales together, so this is the one thing to retune, not each cutoff
+# individually.
+HAND_SCALE_TUNING_REFERENCE = 150
+
+FINGER_OUT_CUTOFF = 280 / HAND_SCALE_TUNING_REFERENCE   # extended-finger cutoff, was 280px
 
 # Max thumb-to-fingertip distance (relative to hand size) that counts as a
 # pinch/click. Was raised from 50px to 70px -- at 50, registering a click
@@ -47,8 +57,8 @@ FINGER_OUT_CUTOFF = 280 / 150   # extended-finger cutoff, was 280px
 # but too high risks false clicks from your hand's normal resting pose
 # while just aiming/hovering. This is a fine line and worth retuning for
 # your own hand/camera setup if it still feels off in either direction.
-LEFT_CLICK_CUTOFF = 70 / 150    # was 70px
-RIGHT_CLICK_CUTOFF = 60 / 150   # was 60px
+LEFT_CLICK_CUTOFF = 70 / HAND_SCALE_TUNING_REFERENCE    # was 70px
+RIGHT_CLICK_CUTOFF = 60 / HAND_SCALE_TUNING_REFERENCE   # was 60px
 
 SCROLL_VEL_CUTOFF = 5
 
