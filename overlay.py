@@ -22,6 +22,12 @@ _EMPHASIZED_LABELS = {
 	'Tab', 'Caps', 'Shift', 'Enter', 'Undo', 'Redo', 'Space', 'Select All', '123', 'ABC',
 }
 
+# Two-word labels narrow enough relative to their text that splitting them
+# onto two lines is what makes them fit their button (see draw()) --
+# 'Select All' isn't: its button is wide enough for the whole label on one
+# line, so splitting it just made the two lines overlap instead of helping.
+_TWO_LINE_LABELS = {'Copy Typed', 'Cut Typed'}
+
 # Simple text-and-emoji cheat sheet shown in the Help window -- a quick
 # visual reminder of the gestures, not a replacement for the full reference
 # in INSTRUCTIONS.md (which also covers every tunable parameter).
@@ -579,14 +585,26 @@ class Overlay:
 				if len(label) == 1 and label.isalpha():
 					label = label.upper() if shift_active else label.lower()
 
-				# Two-word labels ('Copy Typed', 'Cut Typed') are split onto
-				# their own centered line each, rather than relying on
-				# create_text's auto-wrap -- its default justify is 'left',
-				# which left-aligns wrapped lines within the (centered) text
+				# Two-word labels that are narrow relative to their text
+				# ('Copy Typed', 'Cut Typed') are split onto their own
+				# centered line each, rather than relying on create_text's
+				# auto-wrap -- its default justify is 'left', which
+				# left-aligns wrapped lines within the (centered) text
 				# block instead of centering each line, and auto-wrap's
-				# line breaks depend on a width estimate that doesn't always
-				# land where you'd want it to.
-				display_text = label.replace(' ', '\n', 1)
+				# line breaks depend on a width estimate that doesn't
+				# always land where you'd want it to. 'Select All' is wide
+				# enough to just fit on one line, so it's left alone rather
+				# than force-split into two cramped, overlapping lines.
+				if button.text in _TWO_LINE_LABELS:
+					display_text = label.replace(' ', '\n', 1)
+				else:
+					display_text = label
+
+				# Space's button is wide/obvious enough on its own not to
+				# need a label at all.
+				if button.text == 'Space':
+					continue
+
 				# Only a true single character (a letter, digit, or symbol)
 				# gets the larger size -- it's the only case with just one
 				# glyph and tons of spare room in the button. Every label
