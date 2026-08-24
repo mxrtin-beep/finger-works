@@ -28,15 +28,25 @@ def say_key_pressed(typed_char):
 # rather than moving it behind the symbols page like most phone keyboards
 # do) -- the 'symbols' page swaps in punctuation/math symbols for the
 # QWERTY rows underneath it instead.
+#
+# Backspace is labeled '⌫' (a dedicated "erase" glyph), not the
+# literal character '<' -- it used to be '<', which collided with the
+# symbols page's actual less-than key: type_char() special-cases whatever
+# string means "backspace", so pressing a literal '<' meant to type the
+# character was instead always erasing, no matter which page it came from.
+# A sentinel that's never a real typable character rules that out for any
+# future page too.
+BACKSPACE = '⌫'
+
 _LETTER_PAGE = [
-	['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '<'],
+	['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', BACKSPACE],
 	['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
 	['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';'],
 	['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/'],
 ]
 
 _SYMBOLS_PAGE = [
-	['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '<'],
+	['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', BACKSPACE],
 	['!', '@', '#', '$', '%', '^', '&', '*', '(', ')'],
 	['-', '_', '=', '+', '[', ']', '{', '}', '\\', '|'],
 	['~', '`', ':', '"', "'", '<', '>', '?', '/', ','],

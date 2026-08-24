@@ -47,11 +47,25 @@ symbols page (common punctuation and math symbols) and back -- the digit
 row on top stays put either way.
 
 On window managers with "focus follows mouse", aiming the cursor at the
-next on-screen key used to be enough to silently steal keyboard focus away
-from the text box you were typing into, forcing you to click back and
-forth between the two. Typing now remembers the last real window you
-clicked into and restores it to the foreground right before every
-keystroke (Windows only for now).
+next on-screen key can otherwise silently steal keyboard focus away from
+the text box you were typing into. Typing now remembers the last real
+window you clicked into and force-restores it to the foreground (via
+Windows' AttachThreadInput trick, since a plain focus-switch request is
+usually blocked by Windows' own anti-focus-stealing protection) right
+before every keystroke. Windows only for now -- if you're on macOS/Linux
+and still see this, let us know.
+
+Startup now opens the camera and loads the hand-tracking model at the same
+time instead of one after the other, and prints how long each step took --
+if startup still feels slow, those two timings (and how long it took
+`ensure_model_downloaded()` to run, on a first run before the model file
+exists locally) point to which part to look at next.
+
+The control bar, its margins, and the debug camera window are all sized as
+a fraction of your screen resolution (clamped to a sane min/max) rather
+than fixed pixel counts, so they look proportionally similar on a small
+laptop screen and a large or 4K monitor instead of tiny on one and
+oversized on the other.
 
 Cursor speed is also automatically halved while the zoom gesture has the
 screen zoomed in, and restored the moment you zoom back out (or if the

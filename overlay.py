@@ -93,12 +93,24 @@ class Overlay:
 	gesture for it.
 	"""
 
-	def __init__(self, screen_width, screen_height, panel_width=None, panel_height=None, margin=20,
+	def __init__(self, screen_width, screen_height, panel_width=None, panel_height=None, margin=None,
 				debug=False, mouse_sensitivity=1.0,
 				on_settings_changed=None, get_settings=None, get_available_cameras=None):
 		self.screen_width = screen_width
 		self.screen_height = screen_height
-		self._margin = margin
+
+		# Everything below is sized as a fraction of *this* screen
+		# (clamped to a sane min/max) rather than a fixed pixel count, so
+		# the control bar, panel margins, and debug video window look like
+		# the same proportion of the screen on a small laptop panel and a
+		# large 4K monitor alike, instead of a fixed-pixel size that would
+		# look tiny on one and oversized on the other. `margin`/
+		# `panel_width`/`panel_height` can still be passed explicitly
+		# (e.g. by a test) to override any of this.
+		def scaled(fraction_of, frac, lo, hi):
+			return max(lo, min(hi, round(fraction_of * frac)))
+
+		self._margin = margin if margin is not None else scaled(screen_width, 0.014, 14, 30)
 
 		# Off by default: the panel then only appears while the on-screen
 		# keyboard is toggled on (it needs to be visible to aim clicks at
@@ -135,9 +147,9 @@ class Overlay:
 		# panel (keyboard/debug text) sits directly above it, so the two
 		# never overlap regardless of which is currently visible. Wide
 		# enough that "Settings" (the longest button label) doesn't get
-		# clipped.
-		self.control_width = 340
-		self.control_height = 44
+		# clipped, at any of the clamped sizes below.
+		self.control_width = scaled(screen_width, 0.18, 260, 420)
+		self.control_height = scaled(screen_height, 0.032, 36, 56)
 
 		# pyautogui.size() (screen_width/height here) reports the full
 		# display resolution, not the desktop work area -- it doesn't know
@@ -145,9 +157,10 @@ class Overlay:
 		# edge lands partly underneath a normal-height Windows/macOS/Linux
 		# taskbar or dock, which is what clipped the control bar. This
 		# floors the bottom clearance well above any of those (taskbars
-		# commonly run 40-56px) so the bar clears it and hovers just above,
-		# while `margin` still governs the right-edge gap as before.
-		self._bottom_clearance = max(margin, 64)
+		# commonly run 40-56px, a bit more on a high-DPI/large monitor) so
+		# the bar clears it and hovers just above, while `margin` still
+		# governs the right-edge gap as before.
+		self._bottom_clearance = scaled(screen_height, 0.06, 64, 110)
 
 		self.origin_x = screen_width - self.panel_width - margin
 		self.origin_y = (
@@ -413,8 +426,11 @@ class Overlay:
 	# --- Debug video window ----------------------------------------------
 
 	def _create_video_window(self):
-		self.video_width = 480
-		self.video_height = 360
+		# Scaled off screen width (clamped) rather than a fixed 480x360,
+		# same reasoning as the control bar/margins above; kept at a 4:3
+		# aspect ratio regardless of screen size.
+		self.video_width = max(360, min(640, round(self.screen_width * 0.28)))
+		self.video_height = round(self.video_width * 0.75)
 
 		self.video_window = tk.Toplevel(self.root)
 		self.video_window.title('finger-works -- camera')
@@ -561,12 +577,20 @@ class Overlay:
 				# line breaks depend on a width estimate that doesn't always
 				# land where you'd want it to.
 				display_text = label.replace(' ', '\n', 1)
-				# Capped well below h/3 (its old size) -- at h/3 a
-				# two-word label's two lines together were taller than the
-				# button itself and spilled past its edges; h/4.5 with a
-				# hard cap keeps every label (including "Copy Typed") fully
-				# inside its own rectangle.
-				font_size = max(7, min(13, int(h / 4.5)))
+				# Two-line labels ('Copy Typed', 'Cut Typed') need a much
+				# smaller size to fit both lines inside the button -- at
+				# h/3 their two lines together were taller than the button
+				# itself and spilled past its edges. Everything else (a
+				# single letter/digit/symbol, or a single-word label like
+				# 'Shift'/'Clear') is only ever one line, so it can go
+				# noticeably larger without overflowing -- the old shared
+				# h/4.5 size made ordinary lowercase letters and symbols
+				# look too small once case-flipping made lowercase the
+				# common case.
+				if '\n' in display_text:
+					font_size = max(7, min(13, int(h / 4.5)))
+				else:
+					font_size = max(10, min(20, int(h / 2.2)))
 				c.create_text(
 					x + w / 2, y + h / 2, fill='white',
 					anchor='center', justify='center',

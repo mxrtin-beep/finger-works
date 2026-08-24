@@ -2,6 +2,7 @@
 import datetime
 import os
 import sys
+import threading
 import time
 import urllib.request
 
@@ -85,14 +86,73 @@ def capture_focused_window():
 		_target_hwnd = ctypes.windll.user32.GetForegroundWindow()
 
 
+def _open_camera(device, cap_width, cap_height):
+	"""Open one camera device, sized and (on Windows) backended for speed.
+
+	cv2.VideoCapture's default backend on Windows (MSMF) can take a couple
+	of seconds just to enumerate/open a device; DirectShow (CAP_DSHOW) is
+	usually noticeably faster to open, so it's worth requesting explicitly
+	rather than leaving OpenCV to auto-pick. Other platforms don't have
+	this particular slow-default problem, so they're left on the default
+	backend (passing a Windows-only backend constant elsewhere would just
+	error out)."""
+	if sys.platform == 'win32':
+		cap = cv2.VideoCapture(device, cv2.CAP_DSHOW)
+	else:
+		cap = cv2.VideoCapture(device)
+	cap.set(cv2.CAP_PROP_FRAME_WIDTH, cap_width)
+	cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cap_height)
+	return cap
+
+
 def restore_focus():
 	"""Best-effort: put the remembered target window back in the OS
-	foreground immediately before sending a real keystroke."""
-	if sys.platform == 'win32' and _target_hwnd:
+	foreground immediately before sending a real keystroke.
+
+	A plain SetForegroundWindow() call here mostly didn't work: Windows
+	deliberately restricts which processes are allowed to steal the
+	foreground (its own anti-focus-stealing heuristic), and normally only
+	lets the *current* foreground process hand focus to someone else --
+	which we aren't, since our own windows are all NOACTIVATE and never
+	become foreground themselves. The standard workaround is
+	AttachThreadInput: temporarily joining our thread's input queue to the
+	current foreground window's (and the target window's, if that's a
+	different thread) makes Windows treat the SetForegroundWindow call as
+	if it came from an already-foreground thread, which is what actually
+	lets it take effect instead of silently no-op'ing (or just flashing
+	the target's taskbar icon)."""
+	if sys.platform != 'win32' or not _target_hwnd:
+		return
+	try:
+		user32 = ctypes.windll.user32
+		kernel32 = ctypes.windll.kernel32
+
+		if user32.GetForegroundWindow() == _target_hwnd:
+			return  # already the foreground window -- nothing to do
+
+		current_thread_id = kernel32.GetCurrentThreadId()
+		fg_hwnd = user32.GetForegroundWindow()
+		fg_thread_id = user32.GetWindowThreadProcessId(fg_hwnd, None) if fg_hwnd else 0
+		target_thread_id = user32.GetWindowThreadProcessId(_target_hwnd, None)
+
+		attached_fg = False
+		attached_target = False
+		if fg_thread_id and fg_thread_id != current_thread_id:
+			attached_fg = bool(user32.AttachThreadInput(current_thread_id, fg_thread_id, True))
+		if target_thread_id and target_thread_id not in (current_thread_id, fg_thread_id):
+			attached_target = bool(user32.AttachThreadInput(current_thread_id, target_thread_id, True))
+
 		try:
-			ctypes.windll.user32.SetForegroundWindow(_target_hwnd)
-		except Exception:
-			pass
+			user32.ShowWindow(_target_hwnd, 9)  # SW_RESTORE, in case it's minimized
+			user32.SetForegroundWindow(_target_hwnd)
+			user32.BringWindowToTop(_target_hwnd)
+		finally:
+			if attached_fg:
+				user32.AttachThreadInput(current_thread_id, fg_thread_id, False)
+			if attached_target:
+				user32.AttachThreadInput(current_thread_id, target_thread_id, False)
+	except Exception as exc:
+		print(f'[WARN] restore_focus() failed: {exc}')
 
 
 # The 21 hand-landmark connections drawn for the debug video's hand
@@ -230,7 +290,7 @@ def type_char(typed_char, typed_text, type_in_keyboard_area=False, shift_active=
 	it's put back immediately before the keystroke goes out.
 	"""
 
-	if typed_char == '<':
+	if typed_char == k.BACKSPACE:
 		if not type_in_keyboard_area:
 			restore_focus()
 			pyautogui.press('backspace')
@@ -357,9 +417,22 @@ def main(settings):
 	# is shown by default; the overlay panel and, in debug mode, the live
 	# camera-feed window are the only things on screen besides whatever
 	# else you're using your computer for).
-	cap = cv2.VideoCapture(cap_device)
-	cap.set(cv2.CAP_PROP_FRAME_WIDTH, cap_width)
-	cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cap_height)
+	#
+	# Opened on a background thread so it overlaps with loading the
+	# hand-tracking model below instead of happening after it -- the two
+	# are independent (one's a camera driver call, the other's reading a
+	# model file off disk into memory), and each can take a couple of
+	# seconds on its own, so doing them one after another was adding their
+	# times together for no reason.
+	_camera_result = {}
+
+	def _open_camera_in_background():
+		t0 = time.time()
+		_camera_result['cap'] = _open_camera(cap_device, cap_width, cap_height)
+		print(f'Camera opened in {time.time() - t0:.1f}s')
+
+	camera_thread = threading.Thread(target=_open_camera_in_background, daemon=True)
+	camera_thread.start()
 
 	def reopen_camera(new_device):
 		"""Swap the live camera device at runtime (Settings window ->
@@ -367,9 +440,7 @@ def main(settings):
 		running if the new one fails to open, rather than leaving `cap`
 		pointing at a dead device."""
 		nonlocal cap
-		new_cap = cv2.VideoCapture(new_device)
-		new_cap.set(cv2.CAP_PROP_FRAME_WIDTH, cap_width)
-		new_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cap_height)
+		new_cap = _open_camera(new_device, cap_width, cap_height)
 		if not new_cap.isOpened():
 			print(f'[WARN] Could not open camera {new_device}; keeping current camera.')
 			new_cap.release()
@@ -403,6 +474,7 @@ def main(settings):
 			'type_in_keyboard_area': type_in_keyboard_area,
 		}
 
+	_startup_t0 = time.time()
 	model_path = ensure_model_downloaded()
 
 	base_options = BaseOptions(model_asset_path=model_path)
@@ -419,6 +491,13 @@ def main(settings):
 		min_tracking_confidence=min_tracking_confidence,
 	)
 	landmarker = HandLandmarker.create_from_options(options)
+	print(f'Hand-tracking model loaded in {time.time() - _startup_t0:.1f}s')
+
+	# Now wait for the camera thread started above, if it hasn't already
+	# finished (it usually has, since model loading above tends to take
+	# longer than opening a camera).
+	camera_thread.join()
+	cap = _camera_result['cap']
 
 	# detect_for_video requires monotonically increasing timestamps.
 	start_time_ms = int(time.time() * 1000)

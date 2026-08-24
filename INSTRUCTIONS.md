@@ -163,7 +163,7 @@ keys across its two bottom rows, beyond the regular QWERTY letters/digits:
 | Key | Action |
 |---|---|
 | `Space` | Types a space. |
-| `<` | Backspace. |
+| `⌫` | Backspace. (Deliberately not the literal character `<` -- the symbols page has an actual `<` key, and reusing it for backspace would make that key erase instead of typing a less-than sign.) |
 | `Clear` | Clears this keyboard's own typed-text preview line only (not anything on your desktop). |
 | `Copy` | Sends a real Ctrl+C -- copies whatever's currently selected elsewhere on your desktop. |
 | `Cut` | Sends a real Ctrl+X. |
