@@ -83,13 +83,15 @@ def get_button_list(panel_width, panel_height, page='letters'):
 	# the '>' on the overlay) -- a separate, smaller scratchpad of what
 	# you've typed here, independent of whatever else you've selected on
 	# your desktop.
-	utility_keys_row1 = ['Space', 'Enter', 'Clear', 'Copy', 'Cut', 'Copy Typed', 'Cut Typed', 'Paste']
+	utility_keys_row1 = [
+		'Space', 'Enter', 'Tab', 'Clear', 'Copy', 'Cut', 'Copy Typed', 'Cut Typed', 'Paste',
+	]
 
 	# Second utility row: case/edit controls, plus the page toggle. Its
 	# label flips between '123' and 'ABC' depending on which page is
 	# currently showing, like a phone keyboard's mode-switch key.
 	page_toggle_label = 'ABC' if page == 'symbols' else '123'
-	utility_keys_row2 = ['Shift', 'Caps', 'Undo', 'Redo', page_toggle_label]
+	utility_keys_row2 = ['Shift', 'Caps', 'Undo', 'Redo', 'Select All', page_toggle_label]
 
 	num_letter_rows = len(keyboard_keys)
 	max_cols = max(len(row) for row in keyboard_keys)

@@ -75,15 +75,45 @@ _target_hwnd = None
 
 if sys.platform == 'win32':
 	import ctypes
+	from ctypes import wintypes
+
+	_user32 = ctypes.windll.user32
+	_kernel32 = ctypes.windll.kernel32
+
+	# Explicit argtypes/restype for every WinAPI call used below. Without
+	# these, ctypes assumes plain 32-bit ints for anything it isn't told
+	# about -- which silently truncates HWNDs (real pointers, 64-bit on
+	# 64-bit Windows) down to 32 bits. That can turn GetForegroundWindow()
+	# into flat-out the wrong handle on a 64-bit process, which is exactly
+	# the kind of thing that would make restore_focus() below flaky or
+	# target the wrong window without ever raising a visible error.
+	_user32.GetForegroundWindow.restype = wintypes.HWND
+	_user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+	_user32.SetForegroundWindow.restype = wintypes.BOOL
+	_user32.BringWindowToTop.argtypes = [wintypes.HWND]
+	_user32.BringWindowToTop.restype = wintypes.BOOL
+	_user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+	_user32.ShowWindow.restype = wintypes.BOOL
+	_user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+	_user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+	_user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+	_user32.AttachThreadInput.restype = wintypes.BOOL
+	_kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 
 
 def capture_focused_window():
 	"""Call whenever the cursor is *not* over a keyboard key (see
 	main_fast.py's main loop) -- remembers the real window you're actually
-	typing into before it can get silently stolen."""
+	typing into before it can get silently stolen. Best-effort: swallows
+	any WinAPI oddity rather than ever letting it become an unhandled
+	exception that kills the whole per-frame loop."""
 	global _target_hwnd
-	if sys.platform == 'win32':
-		_target_hwnd = ctypes.windll.user32.GetForegroundWindow()
+	if sys.platform != 'win32':
+		return
+	try:
+		_target_hwnd = _user32.GetForegroundWindow()
+	except Exception as exc:
+		print(f'[WARN] capture_focused_window() failed: {exc}')
 
 
 def _open_camera(device, cap_width, cap_height):
@@ -124,33 +154,30 @@ def restore_focus():
 	if sys.platform != 'win32' or not _target_hwnd:
 		return
 	try:
-		user32 = ctypes.windll.user32
-		kernel32 = ctypes.windll.kernel32
-
-		if user32.GetForegroundWindow() == _target_hwnd:
+		if _user32.GetForegroundWindow() == _target_hwnd:
 			return  # already the foreground window -- nothing to do
 
-		current_thread_id = kernel32.GetCurrentThreadId()
-		fg_hwnd = user32.GetForegroundWindow()
-		fg_thread_id = user32.GetWindowThreadProcessId(fg_hwnd, None) if fg_hwnd else 0
-		target_thread_id = user32.GetWindowThreadProcessId(_target_hwnd, None)
+		current_thread_id = _kernel32.GetCurrentThreadId()
+		fg_hwnd = _user32.GetForegroundWindow()
+		fg_thread_id = _user32.GetWindowThreadProcessId(fg_hwnd, None) if fg_hwnd else 0
+		target_thread_id = _user32.GetWindowThreadProcessId(_target_hwnd, None)
 
 		attached_fg = False
 		attached_target = False
 		if fg_thread_id and fg_thread_id != current_thread_id:
-			attached_fg = bool(user32.AttachThreadInput(current_thread_id, fg_thread_id, True))
+			attached_fg = bool(_user32.AttachThreadInput(current_thread_id, fg_thread_id, True))
 		if target_thread_id and target_thread_id not in (current_thread_id, fg_thread_id):
-			attached_target = bool(user32.AttachThreadInput(current_thread_id, target_thread_id, True))
+			attached_target = bool(_user32.AttachThreadInput(current_thread_id, target_thread_id, True))
 
 		try:
-			user32.ShowWindow(_target_hwnd, 9)  # SW_RESTORE, in case it's minimized
-			user32.SetForegroundWindow(_target_hwnd)
-			user32.BringWindowToTop(_target_hwnd)
+			_user32.ShowWindow(_target_hwnd, 9)  # SW_RESTORE, in case it's minimized
+			_user32.SetForegroundWindow(_target_hwnd)
+			_user32.BringWindowToTop(_target_hwnd)
 		finally:
 			if attached_fg:
-				user32.AttachThreadInput(current_thread_id, fg_thread_id, False)
+				_user32.AttachThreadInput(current_thread_id, fg_thread_id, False)
 			if attached_target:
-				user32.AttachThreadInput(current_thread_id, target_thread_id, False)
+				_user32.AttachThreadInput(current_thread_id, target_thread_id, False)
 	except Exception as exc:
 		print(f'[WARN] restore_focus() failed: {exc}')
 
@@ -307,6 +334,24 @@ def type_char(typed_char, typed_text, type_in_keyboard_area=False, shift_active=
 			restore_focus()
 			pyautogui.press('enter')
 		return typed_text + '\n'
+
+	if typed_char == 'Tab':
+		if not type_in_keyboard_area:
+			restore_focus()
+			pyautogui.press('tab')
+		return typed_text + '\t'
+
+	if typed_char == 'Select All':
+		# Acts on the focused app's current content, same as Copy/Cut --
+		# there's no "keyboard area" equivalent for it (nothing here has a
+		# concept of "everything" to select), so it always sends the real
+		# hotkey regardless of type_in_keyboard_area.
+		restore_focus()
+		if sys.platform == 'darwin':
+			pyautogui.hotkey('command', 'a')
+		else:
+			pyautogui.hotkey('ctrl', 'a')
+		return typed_text
 
 	if typed_char == 'Clear':
 		# Only clears our own preview line -- there's no general way to
@@ -540,224 +585,237 @@ def main(settings):
 			ret, image = cap.read()
 			if not ret:
 				break
-			image = cv2.flip(image, 1)  # Mirror display
+			try:
+				image = cv2.flip(image, 1)  # Mirror display
 
-			frame_height, frame_width = image.shape[:2]
+				frame_height, frame_width = image.shape[:2]
 
-			image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+				image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-			if overlay.paused:
-				# Skip hand detection/gesture processing entirely while
-				# paused (saves the model's per-frame cost too) -- just
-				# keep the UI responsive and, in debug mode, still show the
-				# raw camera feed so it's clear the camera itself is still
-				# working.
-				overlay.draw(event, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
-				if overlay.debug:
-					overlay.draw_video(image)
-				overlay.pump()
-				continue
+				if overlay.paused:
+					# Skip hand detection/gesture processing entirely while
+					# paused (saves the model's per-frame cost too) -- just
+					# keep the UI responsive and, in debug mode, still show the
+					# raw camera feed so it's clear the camera itself is still
+					# working.
+					overlay.draw(event, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
+					if overlay.debug:
+						overlay.draw_video(image)
+					overlay.pump()
+					continue
 
-			mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image)
-			timestamp_ms = int(time.time() * 1000) - start_time_ms
-			results = landmarker.detect_for_video(mp_image, timestamp_ms)
+				mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image)
+				timestamp_ms = int(time.time() * 1000) - start_time_ms
+				results = landmarker.detect_for_video(mp_image, timestamp_ms)
 
-			hand_debug_text = ''
+				hand_debug_text = ''
 
-			if results.hand_landmarks:
+				if results.hand_landmarks:
 
-				# Which hand does what is strictly by hand identity --
-				# right hand mouses/types, left hand zooms/pastes --
-				# regardless of how many hands are in frame. This is
-				# MediaPipe's own per-hand Left/Right classification
-				# (each hand is classified independently of whether a
-				# second hand is present, so there's no reason a single
-				# visible hand should be treated any differently than
-				# one of a pair); constants.SWAP_LABELED_HANDS flips it
-				# wholesale if it's ever backwards for your camera setup.
-				# A hand-rolled geometry-based classifier was tried
-				# instead of trusting this label, and came out less
-				# reliable, not more, so it's gone.
-				debug_parts = []
-				mouse_assigned = False
+					# Which hand does what is strictly by hand identity --
+					# right hand mouses/types, left hand zooms/pastes --
+					# regardless of how many hands are in frame. This is
+					# MediaPipe's own per-hand Left/Right classification
+					# (each hand is classified independently of whether a
+					# second hand is present, so there's no reason a single
+					# visible hand should be treated any differently than
+					# one of a pair); constants.SWAP_LABELED_HANDS flips it
+					# wholesale if it's ever backwards for your camera setup.
+					# A hand-rolled geometry-based classifier was tried
+					# instead of trusting this label, and came out less
+					# reliable, not more, so it's gone.
+					debug_parts = []
+					mouse_assigned = False
 
-				for hand_idx, hand_landmarks in enumerate(results.hand_landmarks):
-					abs_landmark_list = np.array(calc_landmark_list(image, hand_landmarks))
-					rel_landmark_list = np.array(pre_process_landmark(abs_landmark_list.tolist()))
+					for hand_idx, hand_landmarks in enumerate(results.hand_landmarks):
+						abs_landmark_list = np.array(calc_landmark_list(image, hand_landmarks))
+						rel_landmark_list = np.array(pre_process_landmark(abs_landmark_list.tolist()))
 
-					raw_label = results.handedness[hand_idx][0].category_name
-					if c.SWAP_LABELED_HANDS:
-						raw_label = 'Left' if raw_label == 'Right' else 'Right'
+						raw_label = results.handedness[hand_idx][0].category_name
+						if c.SWAP_LABELED_HANDS:
+							raw_label = 'Left' if raw_label == 'Right' else 'Right'
 
-					if raw_label == 'Left':
-						zoom_event, zoom_debug_text = get_zoom_event(rel_landmark_list)
-						if zoom_event == 'Zoom In':
-							mc.execute_zoom('in')
-							mc.set_zoomed(True)
-							zoom_debug_text += ' -> sent zoom-in'
-						elif zoom_event == 'Zoom Out':
-							mc.execute_zoom('out')
-							mc.set_zoomed(False)
-							zoom_debug_text += ' -> sent zoom-out'
+						if raw_label == 'Left':
+							zoom_event, zoom_debug_text = get_zoom_event(rel_landmark_list)
+							if zoom_event == 'Zoom In':
+								mc.execute_zoom('in')
+								mc.set_zoomed(True)
+								zoom_debug_text += ' -> sent zoom-in'
+							elif zoom_event == 'Zoom Out':
+								mc.execute_zoom('out')
+								mc.set_zoomed(False)
+								zoom_debug_text += ' -> sent zoom-out'
 
-						paste_fired, paste_debug_text = get_paste_event(rel_landmark_list)
-						if paste_fired:
-							# "Scissors" pose (index + middle extended) --
-							# the same shape as the right hand's Cut-Typed
-							# gesture, but paste on this (left) hand: a
-							# shortcut for the keyboard's 'Paste' key
-							# without needing the keyboard open at all.
-							typed_text = type_char('Paste', typed_text, type_in_keyboard_area)
+							paste_fired, paste_debug_text = get_paste_event(rel_landmark_list)
+							if paste_fired:
+								# "Scissors" pose (index + middle extended) --
+								# the same shape as the right hand's Cut-Typed
+								# gesture, but paste on this (left) hand: a
+								# shortcut for the keyboard's 'Paste' key
+								# without needing the keyboard open at all.
+								typed_text = type_char('Paste', typed_text, type_in_keyboard_area)
 
-						debug_parts.append(
-							f'Left [Zoom: {zoom_debug_text}] [Paste: {paste_debug_text}]'
+							debug_parts.append(
+								f'Left [Zoom: {zoom_debug_text}] [Paste: {paste_debug_text}]'
+							)
+
+							if overlay.debug:
+								draw_hand_debug_overlay(
+									image, abs_landmark_list,
+									f'Zoom: {zoom_debug_text.split(" -> ")[0]}  Paste: {paste_debug_text.split(" -> ")[0]}',
+									_LEFT_HAND_COLOR,
+								)
+
+							continue
+
+						# raw_label == 'Right'
+						if mouse_assigned:
+							# A second hand also read as 'Right' (shouldn't
+							# normally happen) -- ignored rather than fighting
+							# over the cursor with the hand already driving it.
+							debug_parts.append('Right [ignored]')
+							continue
+						mouse_assigned = True
+						debug_parts.append('Right [Mouse]')
+
+						event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
+
+						event_history.append(event)
+
+						if event == 'Keyboard On':
+							control_state = 'Keyboard'
+						elif event == 'Keyboard Off':
+							control_state = 'Mouse'
+						elif event == 'Quit':
+							# The thumb+pinky gesture now pauses instead of
+							# quitting outright (same as the control bar's
+							# Pause button) -- quitting is reserved for the
+							# explicit Quit button/Escape, so an accidental
+							# gesture during normal use can't end the session.
+							overlay.set_paused(True)
+						elif event == 'Cut Typed Gesture':
+							# Gesture shortcut for the 'Cut Typed' key: index +
+							# middle extended ("scissors"), cutting the
+							# keyboard's typed-text buffer without needing to
+							# aim at that specific key.
+							typed_text = copy_or_cut_typed_buffer(typed_text, should_clear=True)
+
+						# Always drive the real OS cursor so it tracks your
+						# finger in both modes (so it visually hovers over the
+						# overlay's keys too). Whether the pinch also clicks
+						# the real desktop is decided below, per-frame, rather
+						# than solely by Mouse-vs-Keyboard mode -- so you can
+						# still click things while the keyboard is open, as
+						# long as you're not currently aiming at one of its
+						# keys (see hit_button below).
+						hit_button = None
+						over_panel = False
+						if control_state == 'Keyboard':
+							mouse_screen_pos = pyautogui.position()
+							button_list, typed_char, hit_button, over_panel = k.execute_event_keyboard(
+								event, mouse_screen_pos, overlay.origin(),
+								(overlay.panel_width, overlay.panel_height), button_list,
+							)
+
+							# Case/page keys are handled here rather than inside
+							# type_char() -- they change local keyboard state
+							# (which page is showing, whether Shift/Caps is on)
+							# rather than sending anything to the OS or the
+							# typed-text preview.
+							if typed_char in ('123', 'ABC'):
+								keyboard_page = 'symbols' if keyboard_page == 'letters' else 'letters'
+								button_list = k.get_button_list(
+									overlay.panel_width, overlay.panel_height, page=keyboard_page,
+								)
+							elif typed_char == 'Shift':
+								shift_once = not shift_once
+							elif typed_char == 'Caps':
+								caps_lock = not caps_lock
+								shift_once = False
+							elif typed_char is not None:
+								typed_text = type_char(
+									typed_char, typed_text, type_in_keyboard_area,
+									shift_active=(shift_once or caps_lock),
+								)
+								# Shift is single-shot (like a phone keyboard):
+								# it capitalizes exactly the next letter, then
+								# clears itself -- Caps Lock is unaffected and
+								# stays on until toggled off explicitly.
+								if shift_once:
+									shift_once = False
+
+						if not over_panel:
+							# The cursor isn't anywhere over the keyboard panel
+							# at all (whether because the keyboard isn't open,
+							# or it is but you're pointing at something else on
+							# the desktop) -- this is the real window you're
+							# actually interacting with, so remember it as the
+							# restore_focus() target (see its docstring at the
+							# top of this file) before it can get silently
+							# stolen by aiming at the next key.
+							capture_focused_window()
+
+						# Click the real desktop when in Mouse mode, or in
+						# Keyboard mode as long as the cursor isn't anywhere
+						# over the keyboard panel -- landing on one of its own
+						# keys was already consumed above as a keypress instead
+						# (not a real click), and landing on the panel's own
+						# gray background between keys must do nothing at all,
+						# not fall through to a real click on whatever's
+						# visually behind this overrideredirect window (that
+						# stray click was what deselected whatever text field
+						# you were actually typing into).
+						allow_click = (control_state == 'Mouse') or not over_panel
+
+						execute_event_fast(
+							event, abs_landmark_list, event_history,
+							frame_width, frame_height,
+							allow_click=allow_click,
 						)
 
 						if overlay.debug:
 							draw_hand_debug_overlay(
-								image, abs_landmark_list,
-								f'Zoom: {zoom_debug_text.split(" -> ")[0]}  Paste: {paste_debug_text.split(" -> ")[0]}',
-								_LEFT_HAND_COLOR,
+								image, abs_landmark_list, event, _RIGHT_HAND_COLOR,
 							)
 
+					hand_debug_text = f'  [{", ".join(debug_parts)}]'
+
+				# Persistently highlight Shift/Caps while toggled on, the same
+				# way a phone keyboard does -- only when nothing else (hover/
+				# press) is already claiming that button's color this frame,
+				# so it doesn't fight the live hover/click feedback.
+				for button in button_list:
+					if button.color != 'idle':
 						continue
+					if (button.text == 'Shift' and shift_once) or (button.text == 'Caps' and caps_lock):
+						button.color = 'active'
 
-					# raw_label == 'Right'
-					if mouse_assigned:
-						# A second hand also read as 'Right' (shouldn't
-						# normally happen) -- ignored rather than fighting
-						# over the cursor with the hand already driving it.
-						debug_parts.append('Right [ignored]')
-						continue
-					mouse_assigned = True
-					debug_parts.append('Right [Mouse]')
+				# Debug aid: show which detected hand is doing what right next
+				# to the current action, so you can see at a glance whether
+				# it's routing your hands the way you expect (see
+				# constants.SWAP_LABELED_HANDS if it isn't).
+				overlay.draw(event + hand_debug_text, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
 
-					event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
-
-					event_history.append(event)
-
-					if event == 'Keyboard On':
-						control_state = 'Keyboard'
-					elif event == 'Keyboard Off':
-						control_state = 'Mouse'
-					elif event == 'Quit':
-						# The thumb+pinky gesture now pauses instead of
-						# quitting outright (same as the control bar's
-						# Pause button) -- quitting is reserved for the
-						# explicit Quit button/Escape, so an accidental
-						# gesture during normal use can't end the session.
-						overlay.set_paused(True)
-					elif event == 'Cut Typed Gesture':
-						# Gesture shortcut for the 'Cut Typed' key: index +
-						# middle extended ("scissors"), cutting the
-						# keyboard's typed-text buffer without needing to
-						# aim at that specific key.
-						typed_text = copy_or_cut_typed_buffer(typed_text, should_clear=True)
-
-					# Always drive the real OS cursor so it tracks your
-					# finger in both modes (so it visually hovers over the
-					# overlay's keys too). Whether the pinch also clicks
-					# the real desktop is decided below, per-frame, rather
-					# than solely by Mouse-vs-Keyboard mode -- so you can
-					# still click things while the keyboard is open, as
-					# long as you're not currently aiming at one of its
-					# keys (see hit_button below).
-					hit_button = None
-					over_panel = False
-					if control_state == 'Keyboard':
-						mouse_screen_pos = pyautogui.position()
-						button_list, typed_char, hit_button, over_panel = k.execute_event_keyboard(
-							event, mouse_screen_pos, overlay.origin(),
-							(overlay.panel_width, overlay.panel_height), button_list,
-						)
-
-						# Case/page keys are handled here rather than inside
-						# type_char() -- they change local keyboard state
-						# (which page is showing, whether Shift/Caps is on)
-						# rather than sending anything to the OS or the
-						# typed-text preview.
-						if typed_char in ('123', 'ABC'):
-							keyboard_page = 'symbols' if keyboard_page == 'letters' else 'letters'
-							button_list = k.get_button_list(
-								overlay.panel_width, overlay.panel_height, page=keyboard_page,
-							)
-						elif typed_char == 'Shift':
-							shift_once = not shift_once
-						elif typed_char == 'Caps':
-							caps_lock = not caps_lock
-							shift_once = False
-						elif typed_char is not None:
-							typed_text = type_char(
-								typed_char, typed_text, type_in_keyboard_area,
-								shift_active=(shift_once or caps_lock),
-							)
-							# Shift is single-shot (like a phone keyboard):
-							# it capitalizes exactly the next letter, then
-							# clears itself -- Caps Lock is unaffected and
-							# stays on until toggled off explicitly.
-							if shift_once:
-								shift_once = False
-
-					if not over_panel:
-						# The cursor isn't anywhere over the keyboard panel
-						# at all (whether because the keyboard isn't open,
-						# or it is but you're pointing at something else on
-						# the desktop) -- this is the real window you're
-						# actually interacting with, so remember it as the
-						# restore_focus() target (see its docstring at the
-						# top of this file) before it can get silently
-						# stolen by aiming at the next key.
-						capture_focused_window()
-
-					# Click the real desktop when in Mouse mode, or in
-					# Keyboard mode as long as the cursor isn't anywhere
-					# over the keyboard panel -- landing on one of its own
-					# keys was already consumed above as a keypress instead
-					# (not a real click), and landing on the panel's own
-					# gray background between keys must do nothing at all,
-					# not fall through to a real click on whatever's
-					# visually behind this overrideredirect window (that
-					# stray click was what deselected whatever text field
-					# you were actually typing into).
-					allow_click = (control_state == 'Mouse') or not over_panel
-
-					execute_event_fast(
-						event, abs_landmark_list, event_history,
-						frame_width, frame_height,
-						allow_click=allow_click,
-					)
-
-					if overlay.debug:
-						draw_hand_debug_overlay(
-							image, abs_landmark_list, event, _RIGHT_HAND_COLOR,
-						)
-
-				hand_debug_text = f'  [{", ".join(debug_parts)}]'
-
-			# Persistently highlight Shift/Caps while toggled on, the same
-			# way a phone keyboard does -- only when nothing else (hover/
-			# press) is already claiming that button's color this frame,
-			# so it doesn't fight the live hover/click feedback.
-			for button in button_list:
-				if button.color != 'idle':
-					continue
-				if (button.text == 'Shift' and shift_once) or (button.text == 'Caps' and caps_lock):
-					button.color = 'active'
-
-			# Debug aid: show which detected hand is doing what right next
-			# to the current action, so you can see at a glance whether
-			# it's routing your hands the way you expect (see
-			# constants.SWAP_LABELED_HANDS if it isn't).
-			overlay.draw(event + hand_debug_text, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
-
-			if overlay.debug:
-				# Purely cosmetic: the live camera feed with each hand's
-				# skeleton traced and its current gesture labeled, shown in
-				# its own always-on-top debug window. `image` is already
-				# RGB (converted above for MediaPipe) and now also carries
-				# whatever skeleton/labels were drawn onto it above.
-				overlay.draw_video(image)
-			overlay.pump()
+				if overlay.debug:
+					# Purely cosmetic: the live camera feed with each hand's
+					# skeleton traced and its current gesture labeled, shown in
+					# its own always-on-top debug window. `image` is already
+					# RGB (converted above for MediaPipe) and now also carries
+					# whatever skeleton/labels were drawn onto it above.
+					overlay.draw_video(image)
+				overlay.pump()
+			except Exception as exc:
+				# A single bad frame (a transient camera/model/OS-call
+				# hiccup) is not worth crashing the whole program over --
+				# and crashing here used to print a raw Python traceback
+				# straight to this console window, which (via the console's
+				# own mouse-selection/QuickEdit handling, combined with the
+				# real OS clicks this program drives) was a plausible way for
+				# that traceback text to end up copied onto the clipboard and
+				# later typed out somewhere else entirely (e.g. Notepad) by a
+				# stray Paste. Log it and skip to the next frame instead.
+				print(f'[WARN] Skipping a frame due to an unexpected error: {exc}')
+				continue
 
 	finally:
 		if is_zoomed_in():

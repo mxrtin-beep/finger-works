@@ -164,6 +164,7 @@ keys across its two bottom rows, beyond the regular QWERTY letters/digits:
 |---|---|
 | `Space` | Types a space. |
 | `Enter` | Sends Enter/Return. |
+| `Tab` | Sends Tab. |
 | `⌫` | Backspace. (Deliberately not the literal character `<` -- the symbols page has an actual `<` key, and reusing it for backspace would make that key erase instead of typing a less-than sign.) |
 | `Clear` | Clears this keyboard's own typed-text preview line only (not anything on your desktop). |
 | `Copy` | Sends a real Ctrl+C -- copies whatever's currently selected elsewhere on your desktop. |
@@ -175,6 +176,7 @@ keys across its two bottom rows, beyond the regular QWERTY letters/digits:
 | `Caps` | Toggles Caps Lock -- letters stay uppercase until you press it again. Independent of `Shift`. |
 | `Undo` | Sends Ctrl+Z (Cmd+Z on macOS). |
 | `Redo` | Sends Ctrl+Y (Cmd+Shift+Z on macOS). |
+| `Select All` | Sends Ctrl+A (Cmd+A on macOS) -- selects everything in whatever's focused, same as `Copy`/`Cut`. |
 | `123` / `ABC` | Switches the three letter rows to a symbols page (common punctuation and math symbols -- see below) and back, like a phone keyboard's mode key. The digit row on top stays put either way. |
 
 The symbols page: `! @ # $ % ^ & * ( ) - _ = + [ ] { } | ~ ` : " ' < > ? ,`

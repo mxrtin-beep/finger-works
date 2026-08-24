@@ -41,10 +41,10 @@ Settings persist across restarts (`~/.finger_works_settings.json`); see
 `INSTRUCTIONS.md` for details.
 
 The on-screen keyboard has `Shift` (capitalizes just the next letter, like
-a phone keyboard), `Caps` (stays on until pressed again), `Enter`, `Undo`/
-`Redo`, and a `123`/`ABC` key that switches its three letter rows to a
-symbols page (common punctuation and math symbols) and back -- the digit
-row on top stays put either way.
+a phone keyboard), `Caps` (stays on until pressed again), `Enter`, `Tab`,
+`Undo`/`Redo`, `Select All`, and a `123`/`ABC` key that switches its three
+letter rows to a symbols page (common punctuation and math symbols) and
+back -- the digit row on top stays put either way.
 
 Clicking the keyboard panel's own gray background (between keys, not on
 any of them) does nothing at all now, rather than passing through as a
@@ -60,6 +60,22 @@ Windows' AttachThreadInput trick, since a plain focus-switch request is
 usually blocked by Windows' own anti-focus-stealing protection) right
 before every keystroke. Windows only for now -- if you're on macOS/Linux
 and still see this, let us know.
+
+The Windows focus-restore code also had a real bug of its own: the raw
+ctypes calls it made weren't given explicit argument/return types, which
+lets ctypes silently truncate window handles (64-bit pointers) down to
+32 bits -- occasionally targeting the wrong window entirely. Fixed by
+declaring proper types for every WinAPI call involved.
+
+Every frame is now wrapped in its own error handler: an unexpected hiccup
+(camera, model, or an OS call having a bad moment) gets logged and skips
+to the next frame instead of crashing the whole program. Previously, a
+crash meant an unhandled Python traceback got printed straight to this
+program's console window -- and since it drives the real mouse and does
+real clicks, that traceback text could plausibly end up selected/copied
+from the console (e.g. via Windows console "QuickEdit" text selection)
+and later typed out somewhere else entirely by a stray `Paste`, which is
+likely what caused occasional "Traceback" text showing up in other apps.
 
 Startup now opens the camera and loads the hand-tracking model at the same
 time instead of one after the other, and prints how long each step took --
