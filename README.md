@@ -11,12 +11,87 @@ PyPerClip -- keep their own separate licenses.)
 
 ## Running it
 
-    python main_fast.py [--sensitivity MULTIPLIER]
+    python main_fast.py [--sensitivity MULTIPLIER] [--debug]
 
 `--sensitivity` scales overall cursor speed. It defaults to `1.0` (the
 program's normal speed, unchanged); `1.5` moves the cursor faster, `0.5`
 slower. It's a multiplier on top of `constants.MOUSE_SPEED`, so you don't
 need to edit that file just to try a faster or slower feel.
+
+`--debug` is off by default. Without it, the overlay panel stays hidden
+except while the on-screen keyboard is toggled on, and no debug text is
+drawn. With it, the panel is always visible and shows the debug text
+(current event, mouse sensitivity, which hand is doing what, live
+zoom/paste gesture state), and a second window shows the live camera feed
+with each hand's skeleton traced and its current gesture labeled in real
+time -- see `INSTRUCTIONS.md` for the full rundown of gestures, parameters,
+and what the debug output means.
+
+A small control bar always sits in the bottom-right corner of the screen
+with **Pause**/**Resume**, **Help**, **Settings**, and **Quit** -- so you
+can pause tracking, look up the gestures, change your camera/sensitivity/
+debug mode, or quit, without needing a gesture or the command line. Camera
+picking defaults to auto (the first camera that opens, same as always),
+overridable in Settings if you have more than one webcam. By default the
+on-screen keyboard types into whatever text box/app is actually focused,
+like a physical keyboard -- Settings also has a checkbox to switch it back
+to typing into the keyboard's own preview line instead (move it elsewhere
+yourself with `Copy Typed`/`Cut Typed`), if you'd rather have that.
+Settings persist across restarts (`~/.finger_works_settings.json`); see
+`INSTRUCTIONS.md` for details.
+
+The on-screen keyboard is laid out roughly like a physical/phone keyboard:
+`Tab`, `Caps`, and a `Shift` down the left of the QWERTY block, `Enter`
+and another `Shift` on the right, and a wide `Space` bar along the bottom.
+`Shift` capitalizes just the next letter (like a phone keyboard); `Caps`
+stays on until pressed again. Actions with no physical-keyboard spot of
+their own -- `Undo`/`Redo`, `Select All`, clipboard keys, and a `123`/`ABC`
+key that switches the letter rows to a symbols page (common punctuation
+and math symbols) and back -- sit in their own row under `Space`. The
+digit row on top stays put on both pages.
+
+Clicking the keyboard panel's own gray background (between keys, not on
+any of them) does nothing at all now, rather than passing through as a
+real click on whatever's visually behind the panel -- that stray click was
+the main remaining way typing could lose focus on the text box you were
+using, separate from the "focus follows mouse" issue below.
+
+On window managers with "focus follows mouse", aiming the cursor at the
+next on-screen key can otherwise silently steal keyboard focus away from
+the text box you were typing into. Typing now remembers the last real
+window you clicked into and force-restores it to the foreground (via
+Windows' AttachThreadInput trick, since a plain focus-switch request is
+usually blocked by Windows' own anti-focus-stealing protection) right
+before every keystroke. Windows only for now -- if you're on macOS/Linux
+and still see this, let us know.
+
+The Windows focus-restore code also had a real bug of its own: the raw
+ctypes calls it made weren't given explicit argument/return types, which
+lets ctypes silently truncate window handles (64-bit pointers) down to
+32 bits -- occasionally targeting the wrong window entirely. Fixed by
+declaring proper types for every WinAPI call involved.
+
+Every frame is now wrapped in its own error handler: an unexpected hiccup
+(camera, model, or an OS call having a bad moment) gets logged and skips
+to the next frame instead of crashing the whole program. Previously, a
+crash meant an unhandled Python traceback got printed straight to this
+program's console window -- and since it drives the real mouse and does
+real clicks, that traceback text could plausibly end up selected/copied
+from the console (e.g. via Windows console "QuickEdit" text selection)
+and later typed out somewhere else entirely by a stray `Paste`, which is
+likely what caused occasional "Traceback" text showing up in other apps.
+
+Startup now opens the camera and loads the hand-tracking model at the same
+time instead of one after the other, and prints how long each step took --
+if startup still feels slow, those two timings (and how long it took
+`ensure_model_downloaded()` to run, on a first run before the model file
+exists locally) point to which part to look at next.
+
+The control bar, its margins, and the debug camera window are all sized as
+a fraction of your screen resolution (clamped to a sane min/max) rather
+than fixed pixel counts, so they look proportionally similar on a small
+laptop screen and a large or 4K monitor instead of tiny on one and
+oversized on the other.
 
 Cursor speed is also automatically halved while the zoom gesture has the
 screen zoomed in, and restored the moment you zoom back out (or if the
@@ -38,7 +113,8 @@ The right hand drives the mouse and (optionally) the keyboard:
 - Closed fist: toggle the on-screen keyboard on/off.
 - Index + middle extended ("scissors"): cut the keyboard's typed-text
   buffer (shortcut for the 'Cut Typed' key).
-- Thumb + pinky extended, others folded: quit.
+- Thumb + pinky extended, others folded: pause (use the control bar's
+  Quit button, or Escape, to actually quit).
 
 While the keyboard is open, clicking still works normally as long as the
 cursor isn't over one of the keyboard's own buttons -- so you can type a

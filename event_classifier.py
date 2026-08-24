@@ -62,7 +62,12 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
 
 
-	# Thumb + pinky extended, other three fingers folded: quit gesture.
+	# Thumb + pinky extended, other three fingers folded: pause gesture.
+	# Still named/returned as 'Quit' here (event_history etc. downstream
+	# key off this exact string) -- main_fast.py is what decides this now
+	# pauses tracking rather than exiting the program, so an accidental
+	# gesture during normal use can't end the session outright; the
+	# control bar's Quit button (or Escape) is the only way to actually quit.
 	if np.array_equal(finger_out_arr, np.array([True, False, False, False, True])):
 		return 'Quit'
 
@@ -237,7 +242,14 @@ _was_left_scissors = False
 def get_paste_event(rel_landmark_list):
 	"""Edge-triggered like the other pose gestures -- fires once on the
 	frame the scissors pose starts on this (left) hand, not every frame
-	it's held."""
+	it's held.
+
+	Returns (fire, debug_text): fire is True on the exact frame the paste
+	gesture triggers; debug_text is a short, always-present description of
+	what this frame actually saw (mirrors get_zoom_event's debug_text), so
+	the overlay can show *why* paste did or didn't fire, not just that it
+	didn't.
+	"""
 	global _was_left_scissors
 
 	finger_pos = rel_landmark_list[c.FINGER_INDICES]
@@ -248,5 +260,15 @@ def get_paste_event(rel_landmark_list):
 	fire = is_scissors and not _was_left_scissors
 	_was_left_scissors = is_scissors
 
-	return fire
+	if is_scissors:
+		pose_text = 'scissors'
+	else:
+		out_fingers = ','.join(
+			name for name, out in zip(c.FINGER_NAMES, finger_out_arr) if out
+		) or 'none'
+		pose_text = f'neither ({out_fingers} out)'
+
+	debug_text = pose_text + (' -> sent paste' if fire else '')
+
+	return fire, debug_text
 
