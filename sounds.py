@@ -35,32 +35,68 @@ def get_keyboard_sounds_enabled():
 	return _keyboard_sounds_enabled
 
 
-def _play(path):
-	"""Best-effort, non-blocking, per-platform playback -- a missing sound
-	file, a missing platform player, or any other hiccup here should never
-	interrupt gesture control, so every failure mode is swallowed (with a
-	one-line warning) rather than raised.
+# Preferred playback path: simpleaudio, which plays through the platform's
+# actual audio API (mixing overlapping sounds properly) rather than
+# spawning a whole new OS process per play. That per-process approach
+# (still kept below as a fallback) is what caused keyboard sounds to
+# regularly go missing on fast typing: firing a new `afplay`/`aplay`
+# process for every keystroke means back-to-back keys can end up with two
+# processes racing to open the same audio device at once, and on `aplay`
+# (ALSA) specifically the loser of that race fails to open the device at
+# all -- silently, since stderr is suppressed. simpleaudio's mixing avoids
+# that entirely. Typed letters didn't share this problem because each
+# press already goes through a full pinch-release-repinch cycle, which is
+# almost always slower than the window where two afplay/aplay launches
+# actually overlap.
+try:
+	import simpleaudio
+	_HAVE_SIMPLEAUDIO = True
+except ImportError:
+	simpleaudio = None
+	_HAVE_SIMPLEAUDIO = False
 
-	No extra dependency is pulled in for this: each platform already ships
-	something that can fire off a short WAV asynchronously --
-	winsound (stdlib) on Windows, `afplay` on macOS, `aplay` (part of
-	ALSA, near-universal on Linux) elsewhere -- so this just shells out to
-	whichever applies, the same way execute_zoom() in mouse_control.py
-	already does per-platform OS calls."""
+# WaveObjects are cached per path (decoded once, not once per play) since
+# simpleaudio.WaveObject.from_wave_file() reads and parses the whole file
+# each time it's called -- this is instead done at most once, and then
+# reused for every future play_click()/play_key() call.
+_wave_object_cache = {}
+
+
+def _play_via_simpleaudio(path):
+	if path not in _wave_object_cache:
+		_wave_object_cache[path] = simpleaudio.WaveObject.from_wave_file(path)
+	_wave_object_cache[path].play()
+
+
+def _play_via_subprocess(path):
+	"""Fallback used only when simpleaudio isn't installed. Spawns a new
+	OS process per play -- see the _HAVE_SIMPLEAUDIO comment above for why
+	that's the less reliable option under rapid repeated triggers."""
+	if sys.platform == 'win32':
+		import winsound
+		winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+	elif sys.platform == 'darwin':
+		subprocess.Popen(
+			['afplay', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+		)
+	else:
+		subprocess.Popen(
+			['aplay', '-q', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+		)
+
+
+def _play(path):
+	"""Best-effort, non-blocking playback -- a missing sound file, missing
+	player/library, or any other hiccup here should never interrupt
+	gesture control, so every failure mode is swallowed (with a one-line
+	warning) rather than raised."""
 	if not os.path.exists(path):
 		return
 	try:
-		if sys.platform == 'win32':
-			import winsound
-			winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
-		elif sys.platform == 'darwin':
-			subprocess.Popen(
-				['afplay', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-			)
+		if _HAVE_SIMPLEAUDIO:
+			_play_via_simpleaudio(path)
 		else:
-			subprocess.Popen(
-				['aplay', '-q', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-			)
+			_play_via_subprocess(path)
 	except Exception as exc:
 		print(f'[WARN] Could not play sound {path}: {exc}')
 

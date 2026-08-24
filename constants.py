@@ -70,20 +70,32 @@ SCROLL_VEL_CUTOFF = 5
 # whether it's extended at all.
 INDEX_MCP_IDX = 5
 
+# Same idea for the thumb (its MCP joint, landmark 2) -- used by the
+# scroll-down gesture (thumb extended and aimed down, other four folded)
+# to read which way the thumb is pointing.
+THUMB_MCP_IDX = 2
+
 # How many pixels (in OS-scroll units, same as pyautogui.scroll()'s
 # argument) one scroll "tick" moves while the point-up/point-down gesture
-# is held. Applied every SCROLL_FRAME_INTERVAL-th frame rather than every
-# frame -- see SCROLL_FRAME_INTERVAL below for why.
-SCROLL_AMOUNT = 80
+# is held. Applied every SCROLL_FRAME_INTERVAL-th frame -- see that
+# constant just below for why SCROLL_AMOUNT and SCROLL_FRAME_INTERVAL are
+# tuned as a pair, not independently.
+SCROLL_AMOUNT = 27
 
 # The point-up/point-down scroll gesture is held continuously (unlike the
-# edge-triggered fist/scissors gestures), so firing a scroll tick on every
-# single camera frame -- at 30fps that's up to 30 ticks/sec -- reads as an
-# unpredictable, disorientating flick rather than a controlled scroll.
-# Only actually sending a tick every Nth held frame paces it down to
-# something that tracks more like a deliberate scroll-wheel turn. Raise
-# for slower/gentler scrolling, lower (minimum 1) for faster.
-SCROLL_FRAME_INTERVAL = 3
+# edge-triggered fist/scissors gestures). An earlier version sent a large
+# SCROLL_AMOUNT (80) only every 3rd held frame -- meant to avoid a firehose
+# of ticks, but the actual effect was the opposite of smooth: the page
+# visibly jumped in big steps every 3rd frame instead of gliding, which is
+# what "choppy" was describing. SCROLL_AMOUNT and SCROLL_FRAME_INTERVAL are
+# now tuned together to keep the same *overall* scroll speed (amount /
+# interval) while delivering it in smaller, more frequent ticks -- finer
+# granularity reads as smooth scrolling, the same total distance delivered
+# in fewer/bigger ticks reads as choppy. Retune as a pair (e.g. to change
+# overall speed without changing smoothness, scale SCROLL_AMOUNT and use
+# the Settings "Scroll speed" slider instead of touching this file) rather
+# than raising/lowering just one of the two.
+SCROLL_FRAME_INTERVAL = 1
 
 
 MOUSE_X_SENS = 1.0

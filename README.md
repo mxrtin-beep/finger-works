@@ -178,11 +178,15 @@ below):
   hand's Cut-Typed gesture, but paste on this hand: a shortcut for the
   keyboard's 'Paste' key without needing the keyboard open at all.
 - Point up (index finger extended and aimed upward, other four folded):
-  scroll up. Point down (same pose, aimed downward): scroll down. Keep the
-  pose held to keep scrolling -- it's paced to a tick every few frames
-  rather than every single one, so it scrolls steadily instead of flinging
-  the page around. See `SCROLL_AMOUNT`/`SCROLL_FRAME_INTERVAL` in
-  `constants.py` to make it faster/slower.
+  scroll up. Thumb down (thumb extended and aimed downward, other four
+  folded -- a "thumbs down"): scroll down. Different fingers rather than
+  the same pose flipped upside down, since pointing the index finger
+  downward turned out to be an easy pose for zoom's open-hand gesture to
+  misfire on (see `event_classifier.py`'s scroll-gesture comment for why).
+  Keep either pose held to keep scrolling; it's sent in small ticks every
+  frame rather than infrequent big jumps, tuned to add up to the same
+  overall speed either way -- see the Settings "Scroll speed" slider, or
+  `SCROLL_AMOUNT`/`SCROLL_FRAME_INTERVAL` in `constants.py`.
 
 ### Does my hand distance from the camera matter?
 

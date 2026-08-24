@@ -226,10 +226,24 @@ def get_zoom_event(rel_landmark_list):
 # --- Left hand: scroll gesture -------------------------------------------
 #
 # Point up (index finger extended and aimed upward, other four folded):
-# scroll up. Point down (same pose, aimed downward): scroll down. This
-# reuses the same hand that already does zoom -- zoom is your left hand's
-# "how much" gesture, scroll is its "which way" gesture -- so there's
-# nothing new to learn for the right (mouse) hand.
+# scroll up. Thumb down (thumb extended and aimed downward, other four
+# folded -- a "thumbs down"): scroll down. This reuses the same hand that
+# already does zoom -- zoom is your left hand's "how much" gesture, scroll
+# is its "which way" gesture -- so there's nothing new to learn for the
+# right (mouse) hand.
+#
+# Scroll-down used to be the *same* pose as scroll-up (index only,
+# pointing down instead of up), but that turned out to misfire as zoom-in
+# (all five fingers extended) in practice: pointing the index finger
+# downward is a less natural hand angle than pointing it up, and the
+# slight extra curl that takes tends to also read the other fingers as
+# "extended" right at the edge of FINGER_OUT_CUTOFF, which is exactly
+# zoom's open-hand pose. Using the thumb -- a different finger entirely,
+# with a different resting curl -- for scroll-down avoids the mode being
+# only a directional flip of another gesture that's prone to exactly this
+# confusion. (It doesn't need its own FINGER_OUT_CUTOFF-style pose-
+# confusion guard against the fist/pause gestures: those need particular
+# *other* fingers extended too, which "thumb only" never satisfies.)
 #
 # Held continuously rather than edge-triggered: unlike the fist/scissors
 # poses, a single scroll gesture needs to keep producing ticks for as long
@@ -238,7 +252,8 @@ def get_zoom_event(rel_landmark_list):
 # camera frame) is mouse_control.execute_scroll()'s job, not this
 # function's -- this just reports which way you're currently pointing,
 # every frame, for as long as you're pointing.
-_SCROLL_POSE = np.array([False, True, False, False, False])
+_SCROLL_UP_POSE = np.array([False, True, False, False, False])    # index only
+_SCROLL_DOWN_POSE = np.array([True, False, False, False, False])  # thumb only
 
 
 def get_scroll_event(rel_landmark_list):
@@ -253,30 +268,40 @@ def get_scroll_event(rel_landmark_list):
 	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
 	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
 
-	is_pointing = np.array_equal(finger_out_arr, _SCROLL_POSE)
-	if not is_pointing:
-		out_fingers = ','.join(
-			name for name, out in zip(c.FINGER_NAMES, finger_out_arr) if out
-		) or 'none'
-		return None, f'neither ({out_fingers} out)'
-
 	# rel_landmark_list is wrist-relative but still in camera-frame pixel
 	# axes, so y still increases *downward* (image convention) -- a
 	# fingertip aimed up on screen has a smaller/more negative y than its
 	# own base knuckle.
-	index_tip = rel_landmark_list[c.INDEX_IDX]
-	index_base = rel_landmark_list[c.INDEX_MCP_IDX]
-	dx = index_tip[0] - index_base[0]
-	dy = index_tip[1] - index_base[1]
+	if np.array_equal(finger_out_arr, _SCROLL_UP_POSE):
+		tip = rel_landmark_list[c.INDEX_IDX]
+		base = rel_landmark_list[c.INDEX_MCP_IDX]
+		dx, dy = tip[0] - base[0], tip[1] - base[1]
+		if abs(dy) <= abs(dx):
+			# Pointing mostly sideways, not up/down -- the pose is right
+			# but the direction is ambiguous, so do nothing rather than
+			# guess.
+			return None, 'pointing (sideways)'
+		if dy < 0:
+			return 'Scroll Up', 'pointing (up) -> scrolling up'
+		# Pointing down with the index finger doesn't scroll down anymore
+		# (see the comment above this function) -- no-op rather than
+		# silently doing nothing with no explanation in the debug text.
+		return None, 'pointing (down) -- use thumb-down to scroll down'
 
-	if abs(dy) <= abs(dx):
-		# Pointing mostly sideways, not up/down -- the pose is right but
-		# the direction is ambiguous, so do nothing rather than guess.
-		return None, 'pointing (sideways)'
+	if np.array_equal(finger_out_arr, _SCROLL_DOWN_POSE):
+		tip = rel_landmark_list[c.THUMB_IDX]
+		base = rel_landmark_list[c.THUMB_MCP_IDX]
+		dx, dy = tip[0] - base[0], tip[1] - base[1]
+		if abs(dy) <= abs(dx):
+			return None, 'thumb (sideways)'
+		if dy > 0:
+			return 'Scroll Down', 'thumb (down) -> scrolling down'
+		return None, 'thumb (up) -- unused'
 
-	if dy < 0:
-		return 'Scroll Up', 'pointing (up) -> scrolling up'
-	return 'Scroll Down', 'pointing (down) -> scrolling down'
+	out_fingers = ','.join(
+		name for name, out in zip(c.FINGER_NAMES, finger_out_arr) if out
+	) or 'none'
+	return None, f'neither ({out_fingers} out)'
 
 
 def is_zoomed_in():

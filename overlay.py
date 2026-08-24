@@ -49,7 +49,7 @@ LEFT HAND -- zoom & paste
  ✊  Closed fist -- zoom out
  ✌  Index + middle out ("scissors") -- paste
  \U0001F446  Point up (index only, aimed up) -- scroll up
- \U0001F447  Point down (index only, aimed down) -- scroll down
+ \U0001F44E  Thumb down (thumb only, aimed down) -- scroll down
 
 
 See INSTRUCTIONS.md in the project folder for the full

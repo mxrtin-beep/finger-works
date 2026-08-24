@@ -61,8 +61,8 @@ Click **Settings** in the control bar to open a small settings window:
   "sliding" when it's too heavily smoothed. See
   `constants.JITTER_ALPHA_MIN`/`JITTER_ALPHA_MAX`.
 - **Scroll speed** -- multiplies `constants.SCROLL_AMOUNT` for the
-  left-hand point-up/point-down scroll gesture (see "Left hand -- zoom,
-  paste & scroll" below).
+  left-hand scroll gesture (see "Left hand -- zoom, paste & scroll"
+  below).
 - **Keyboard size** -- scales the overlay panel (and so the on-screen
   keyboard drawn on it) up or down. The panel repositions itself to stay
   clear of the control bar at any size.
@@ -71,7 +71,11 @@ Click **Settings** in the control bar to open a small settings window:
   press, respectively -- see `sounds.py`. Deliberately light rather than
   an obvious "beep"; if you want them louder/different, `generate_sounds.py`
   regenerates `sounds/click.wav`/`sounds/key.wav` from adjustable
-  pitch/duration/amplitude parameters.
+  parameters. Playback prefers the `simpleaudio` package (in
+  `requirements.txt` -- run `pip install -r requirements.txt` again if
+  you installed before it was added) for reliable overlapping playback;
+  without it, sounds fall back to spawning a system player process per
+  play, which can occasionally drop a sound under fast repeated triggers.
 - **Debug mode** -- same as `--debug`, as a checkbox. Session-only,
   unlike every other setting here: it's never saved to
   `~/.finger_works_settings.json`, so it's always back off the next time
@@ -130,9 +134,11 @@ With `--debug`:
     (`scissors`/`neither (<fingers> out)`); `-> sent paste` is appended the
     instant paste actually fires.
   - The `Left [Scroll: ...]` bracket shows the scroll gesture's live pose
-    (`pointing (up)`/`pointing (down)`/`pointing (sideways)`/`neither
-    (<fingers> out)`); `-> scrolling up`/`-> scrolling down` is appended
-    while it's actively driving a scroll.
+    -- `pointing (up)`/`pointing (sideways)` for the index-up pose,
+    `thumb (down)`/`thumb (sideways)`/`thumb (up)` for the thumb-down
+    pose, or `neither (<fingers> out)` if neither pose is held; `->
+    scrolling up`/`-> scrolling down` is appended while it's actively
+    driving a scroll.
   - This is meant to answer "why isn't X working" directly: if a pose
     never reads as expected, detection isn't recognizing it (check
     lighting/framing, or `FINGER_OUT_CUTOFF`); if the pose registers but
@@ -173,13 +179,23 @@ back to mouse control.
 | Open hand, all five fingers extended | Zoom in (drives the OS's own screen magnifier). Does nothing if already zoomed in. |
 | Closed fist | Zoom back out. Does nothing if not currently zoomed in. |
 | Index + middle extended, others folded ("scissors") | Paste -- shortcut for the on-screen keyboard's `Paste` key, without needing the keyboard open at all. Reads the OS clipboard and types its contents as real keystrokes. |
-| Index finger extended and aimed upward, others folded | Scroll up. Held continuously -- keeps scrolling for as long as the pose and direction are held, paced to a tick every `SCROLL_FRAME_INTERVAL` frames (not every frame) so it reads as a controlled scroll rather than a fast, disorientating flick. |
-| Index finger extended and aimed downward, others folded | Scroll down (same pose, opposite direction). |
+| Index finger extended and aimed upward, others folded | Scroll up. Held continuously -- keeps scrolling for as long as the pose and direction are held, sent in small ticks every `SCROLL_FRAME_INTERVAL` frame(s) rather than infrequent big jumps, so it reads as a smooth, controlled scroll rather than a choppy or disorientating one. |
+| Thumb extended and aimed downward, others folded ("thumbs down") | Scroll down. Deliberately a different finger from scroll-up, not the same pose pointed the other way -- see below. |
 
-The scroll gesture's direction comes from the index finger's own angle
-(fingertip relative to its base knuckle), not its position relative to the
-wrist -- pointing mostly sideways does nothing rather than guessing a
-direction.
+Each scroll direction's finger has its own angle read separately: index's
+fingertip relative to its own base knuckle for scroll-up, thumb's fingertip
+relative to its own base knuckle for scroll-down. Pointing mostly sideways
+does nothing rather than guessing a direction, for either one.
+
+Scroll-down used to be the same pose as scroll-up (index only, pointed
+down instead of up), but that turned out to misfire as zoom's open-hand
+gesture in practice: aiming the index finger downward is a less natural
+hand angle than aiming it up, and the slight extra curl that takes was
+enough to also read the other fingers as "extended" right at
+`FINGER_OUT_CUTOFF`'s edge -- which is exactly zoom's pose. Using the
+thumb instead (a different finger, with a different resting curl) avoids
+scroll-down being only a directional flip of a gesture that's prone to
+that particular confusion.
 
 Zoom holds a single on/off level, not a repeatable "tick": forming the
 zoom-in pose while already zoomed in does nothing (close to a fist first),
@@ -259,10 +275,11 @@ special-casing for each character.
 | `FINGER_OUT_CUTOFF` | Wrist-relative distance, as a ratio of the hand's own live size (see "Hand-to-camera distance" above), above which a fingertip counts as "extended" rather than folded. Drives every pose gesture (fist, scissors, zoom's open-hand/fist, scroll's point-up/down). Raise if poses aren't registering as extended when they should; lower if folded fingers are misread as extended. |
 | `LEFT_CLICK_CUTOFF` | Max thumb-to-index distance (same hand-scale-relative ratio) that counts as a left-click pinch. Higher = a lighter tap triggers a click; too high risks false clicks from your hand's normal resting/aiming pose. |
 | `RIGHT_CLICK_CUTOFF` | Same, for thumb-to-ring (right-click pinch). |
-| `SCROLL_VEL_CUTOFF` | (Reserved; unused now that scrolling is pose-based -- see `INDEX_MCP_IDX`/`SCROLL_AMOUNT`/`SCROLL_FRAME_INTERVAL`.) |
-| `INDEX_MCP_IDX` | Landmark index for the index finger's base knuckle -- used with `INDEX_IDX` to read the index finger's pointing direction for the scroll gesture. |
-| `SCROLL_AMOUNT` | How far one scroll tick moves (in `pyautogui.scroll()` units) while the point-up/point-down gesture is held. |
-| `SCROLL_FRAME_INTERVAL` | Send a scroll tick only every this-many-th held frame, instead of every camera frame -- paces continuous scrolling down to something controllable. Raise to slow scrolling down, lower (min 1) to speed it up. |
+| `SCROLL_VEL_CUTOFF` | (Reserved; unused now that scrolling is pose-based -- see `INDEX_MCP_IDX`/`THUMB_MCP_IDX`/`SCROLL_AMOUNT`/`SCROLL_FRAME_INTERVAL`.) |
+| `INDEX_MCP_IDX` | Landmark index for the index finger's base knuckle -- used with `INDEX_IDX` to read the index finger's pointing direction for scroll-up. |
+| `THUMB_MCP_IDX` | Same idea, for the thumb's base knuckle -- used with `THUMB_IDX` to read the thumb's pointing direction for scroll-down. |
+| `SCROLL_AMOUNT` | How far one scroll tick moves (in `pyautogui.scroll()` units) while a scroll gesture is held, sent every `SCROLL_FRAME_INTERVAL` frame(s). Tuned together with `SCROLL_FRAME_INTERVAL` (a smaller amount sent more often at the same overall amount/interval ratio scrolls just as fast but smoother; the same total delivered in fewer, bigger ticks reads as choppy) -- retune both together, or leave this alone and use the Settings "Scroll speed" slider instead. |
+| `SCROLL_FRAME_INTERVAL` | Send a scroll tick only every this-many-th held frame, instead of every camera frame. See `SCROLL_AMOUNT` above -- these two are a pair. |
 | `MOUSE_X_SENS` / `MOUSE_Y_SENS` | Per-axis scale applied when mapping the fingertip's position in the camera frame onto screen coordinates. |
 | `MOUSE_SPEED` | Fraction of the remaining distance to the target the cursor closes each frame (exponential smoothing). Higher tracks the fingertip more tightly; lower is smoother but laggier. Also scaled by `--sensitivity` at runtime. |
 | `ZOOMED_MOUSE_SPEED_FACTOR` | Multiplies `MOUSE_SPEED` while the zoom gesture has the screen zoomed in, since the same hand movement then covers much more of the visible area. |

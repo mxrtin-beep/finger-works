@@ -4,3 +4,4 @@ numpy
 pyautogui
 pyperclip
 Pillow
+simpleaudio
