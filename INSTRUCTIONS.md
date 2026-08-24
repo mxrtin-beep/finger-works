@@ -32,8 +32,10 @@ gesture with, or to already know a gesture at all:
   without quitting the program outright.
 - **Help** -- opens a quick gesture cheat sheet (see "Gestures" below).
 - **Settings** -- opens the Settings window (see "Settings" below).
-- **Quit** -- quits the program. Same effect as the thumb+pinky quit
-  gesture or Escape.
+- **Quit** -- quits the program. Same effect as Escape. (The thumb+pinky
+  gesture that used to quit now pauses instead -- see "Gestures" below --
+  so quitting always needs a deliberate click/Escape, never an accidental
+  gesture mid-use.)
 
 ## Settings
 
@@ -48,6 +50,12 @@ Click **Settings** in the control bar to open a small settings window:
 - **Mouse sensitivity** -- same multiplier as `--sensitivity`, as a
   slider.
 - **Debug mode** -- same as `--debug`, as a checkbox; applies immediately.
+- **Type into the keyboard's own area** -- off by default. Off, the
+  on-screen keyboard types into whatever text box/app actually has OS
+  focus, just like a physical keyboard. On, keys only build up the
+  keyboard's own preview line instead (the original behavior), which you
+  then move elsewhere yourself with the `Copy Typed`/`Cut Typed` keys.
+  Applies immediately.
 
 Hit **Apply** to save and apply, or **Cancel**/close the window to discard.
 Settings are saved to `~/.finger_works_settings.json` and persist across
@@ -112,7 +120,7 @@ on-screen keyboard.
 | Pinch thumb + ring | Right click. |
 | Closed fist (no fingers extended) | Toggle the on-screen keyboard on/off. Edge-triggered on the fist *starting* -- holding it does nothing further until you release and re-form it. |
 | Index + middle extended, others folded ("scissors") | **Keyboard mode only:** cut the keyboard's own typed-text buffer (shortcut for the on-screen `Cut Typed` key). In Mouse mode this pose just does nothing (treated as an ordinary hand pose). |
-| Thumb + pinky extended, other three folded | Quit the program. |
+| Thumb + pinky extended, other three folded | Pause tracking (same as the control bar's Pause button). Resume from the control bar. |
 
 While the keyboard is open, clicking still works normally as long as the
 cursor isn't currently over one of the keyboard's own buttons -- so you can

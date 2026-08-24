@@ -62,7 +62,12 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
 
 
-	# Thumb + pinky extended, other three fingers folded: quit gesture.
+	# Thumb + pinky extended, other three fingers folded: pause gesture.
+	# Still named/returned as 'Quit' here (event_history etc. downstream
+	# key off this exact string) -- main_fast.py is what decides this now
+	# pauses tracking rather than exiting the program, so an accidental
+	# gesture during normal use can't end the session outright; the
+	# control bar's Quit button (or Escape) is the only way to actually quit.
 	if np.array_equal(finger_out_arr, np.array([True, False, False, False, True])):
 		return 'Quit'
 

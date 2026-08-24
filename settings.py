@@ -19,6 +19,11 @@ DEFAULTS = {
 	'camera_device': None,
 	'sensitivity': 1.0,
 	'debug': False,
+	# False (default): typed keys go to whatever text box/app actually has
+	# OS focus, like a physical keyboard. True: keys only update the
+	# on-screen keyboard's own preview line, left for you to move
+	# elsewhere with Copy Typed/Cut Typed (the original behavior).
+	'type_in_keyboard_area': False,
 }
 
 

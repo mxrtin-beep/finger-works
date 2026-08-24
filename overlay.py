@@ -19,12 +19,10 @@ _INSTRUCTIONS_TEXT = """RIGHT HAND -- mouse & keyboard
 
  ✋  Move your hand -- moves the cursor
  \U0001F90F  Pinch thumb + index -- left click
-     (hold + move = drag, release quickly = click)
  \U0001F90F  Pinch thumb + ring -- right click
  ✊  Closed fist -- toggle on-screen keyboard
  ✌  Index + middle out ("scissors") -- cut typed text
-     (keyboard mode only)
- \U0001F919  Thumb + pinky out, others folded -- quit
+ \U0001F919  Thumb + pinky out, others folded -- pause
 
 
 LEFT HAND -- zoom & paste
@@ -33,9 +31,6 @@ LEFT HAND -- zoom & paste
  ✊  Closed fist -- zoom out
  ✌  Index + middle out ("scissors") -- paste
 
-
-While the keyboard is open, clicking still works as long as
-the cursor isn't over one of its keys.
 
 See INSTRUCTIONS.md in the project folder for the full
 gesture and parameter reference.
@@ -138,9 +133,11 @@ class Overlay:
 
 		# The control bar sits in the actual bottom-right corner; the main
 		# panel (keyboard/debug text) sits directly above it, so the two
-		# never overlap regardless of which is currently visible.
-		self.control_width = 260
-		self.control_height = 40
+		# never overlap regardless of which is currently visible. Wide
+		# enough that "Settings" (the longest button label) doesn't get
+		# clipped.
+		self.control_width = 340
+		self.control_height = 44
 
 		self.origin_x = screen_width - self.panel_width - margin
 		self.origin_y = screen_height - self.panel_height - self.control_height - 2 * margin
@@ -165,7 +162,9 @@ class Overlay:
 			width=self.panel_width,
 			height=self.panel_height,
 			bg='#1e1e1e',
-			highlightthickness=0,
+			highlightthickness=2,
+			highlightbackground='#4a4a4a',
+			highlightcolor='#4a4a4a',
 		)
 		self.canvas.pack(fill='both', expand=True)
 
@@ -213,8 +212,15 @@ class Overlay:
 		self.control_window.bind('<Escape>', lambda _event: self._quit())
 		self.control_window.protocol('WM_DELETE_WINDOW', self._quit)
 
-		frame = tk.Frame(self.control_window, bg='#1e1e1e')
-		frame.pack(fill='both', expand=True, padx=4, pady=4)
+		frame = tk.Frame(
+			self.control_window, bg='#1e1e1e',
+			highlightthickness=2, highlightbackground='#4a4a4a', highlightcolor='#4a4a4a',
+		)
+		frame.pack(fill='both', expand=True)
+
+		inner = tk.Frame(frame, bg='#1e1e1e')
+		inner.pack(fill='both', expand=True, padx=6, pady=4)
+		frame = inner
 
 		self.status_canvas = tk.Canvas(
 			frame, width=14, height=14, bg='#1e1e1e', highlightthickness=0,
@@ -240,7 +246,14 @@ class Overlay:
 		self._refresh_pause_ui()
 
 	def _toggle_pause(self):
-		self.paused = not self.paused
+		self.set_paused(not self.paused)
+
+	def set_paused(self, paused):
+		"""Pause/resume hand tracking. Public so main_fast.py can call it
+		too -- the thumb+pinky gesture pauses the program (rather than
+		quitting it, as it originally did), same as clicking Pause/Resume
+		here."""
+		self.paused = paused
 		self._refresh_pause_ui()
 
 	def _refresh_pause_ui(self):
@@ -311,10 +324,23 @@ class Overlay:
 			activebackground='#1e1e1e', activeforeground='#dddddd',
 		).grid(row=2, column=0, columnspan=2, sticky='w', padx=10, pady=4)
 
+		# Off (default) = type into whatever text box/app has real OS
+		# focus, same as a physical keyboard. On = keep typing confined to
+		# the on-screen keyboard's own preview line instead (the old
+		# behavior), which you then move elsewhere with the Copy
+		# Typed/Cut Typed keys.
+		type_in_keyboard_area_var = tk.BooleanVar(value=current.get('type_in_keyboard_area', False))
+		tk.Checkbutton(
+			win, text="Type into the keyboard's own area (instead of your\nselected text box)",
+			variable=type_in_keyboard_area_var, justify='left',
+			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
+			activebackground='#1e1e1e', activeforeground='#dddddd',
+		).grid(row=3, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+
 		tk.Label(
 			win, text='Camera and debug changes apply immediately.\nAll settings are remembered for next time.',
 			fg='#999999', bg='#1e1e1e', font=('Segoe UI', 8), justify='left',
-		).grid(row=3, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
+		).grid(row=4, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
 
 		def apply_and_close():
 			chosen = camera_var.get()
@@ -323,13 +349,14 @@ class Overlay:
 				'camera_device': camera_device,
 				'sensitivity': round(sens_var.get(), 2),
 				'debug': debug_var.get(),
+				'type_in_keyboard_area': type_in_keyboard_area_var.get(),
 			}
 			if self.on_settings_changed:
 				self.on_settings_changed(new_settings)
 			close()
 
 		btn_frame = tk.Frame(win, bg='#1e1e1e')
-		btn_frame.grid(row=4, column=0, columnspan=2, pady=(0, 10))
+		btn_frame.grid(row=5, column=0, columnspan=2, pady=(0, 10))
 		_make_flat_button(btn_frame, 'Apply', apply_and_close, bg='#2ecc71').pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Cancel', close).pack(side='left', padx=4)
 
@@ -394,7 +421,9 @@ class Overlay:
 			width=self.video_width,
 			height=self.video_height,
 			bg='#000000',
-			highlightthickness=0,
+			highlightthickness=2,
+			highlightbackground='#4a4a4a',
+			highlightcolor='#4a4a4a',
 		)
 		self.video_canvas.pack(fill='both', expand=True)
 
@@ -499,7 +528,9 @@ class Overlay:
 				x, y = button.pos
 				w, h = button.size
 				fill = _STATE_COLORS.get(button.color, _STATE_COLORS['idle'])
-				c.create_rectangle(x, y, x + w, y + h, fill=fill, outline='#555555')
+				c.create_rectangle(
+					x, y, x + w, y + h, fill=fill, outline='#666666', width=1.5,
+				)
 
 				# Two-word labels ('Copy Typed', 'Cut Typed') are split onto
 				# their own centered line each, rather than relying on
@@ -509,11 +540,16 @@ class Overlay:
 				# line breaks depend on a width estimate that doesn't always
 				# land where you'd want it to.
 				display_text = button.text.replace(' ', '\n', 1)
-				font_size = max(8, int(h / 3))
+				# Capped well below h/3 (its old size) -- at h/3 a
+				# two-word label's two lines together were taller than the
+				# button itself and spilled past its edges; h/4.5 with a
+				# hard cap keeps every label (including "Copy Typed") fully
+				# inside its own rectangle.
+				font_size = max(7, min(13, int(h / 4.5)))
 				c.create_text(
 					x + w / 2, y + h / 2, fill='white',
 					anchor='center', justify='center',
-					font=('Segoe UI', font_size), text=display_text,
+					font=('Arial', font_size), text=display_text,
 				)
 
 		c.create_text(

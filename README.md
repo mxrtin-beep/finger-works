@@ -32,9 +32,13 @@ with **Pause**/**Resume**, **Help**, **Settings**, and **Quit** -- so you
 can pause tracking, look up the gestures, change your camera/sensitivity/
 debug mode, or quit, without needing a gesture or the command line. Camera
 picking defaults to auto (the first camera that opens, same as always),
-overridable in Settings if you have more than one webcam. Settings persist
-across restarts (`~/.finger_works_settings.json`); see `INSTRUCTIONS.md`
-for details.
+overridable in Settings if you have more than one webcam. By default the
+on-screen keyboard types into whatever text box/app is actually focused,
+like a physical keyboard -- Settings also has a checkbox to switch it back
+to typing into the keyboard's own preview line instead (move it elsewhere
+yourself with `Copy Typed`/`Cut Typed`), if you'd rather have that.
+Settings persist across restarts (`~/.finger_works_settings.json`); see
+`INSTRUCTIONS.md` for details.
 
 Cursor speed is also automatically halved while the zoom gesture has the
 screen zoomed in, and restored the moment you zoom back out (or if the
@@ -56,7 +60,8 @@ The right hand drives the mouse and (optionally) the keyboard:
 - Closed fist: toggle the on-screen keyboard on/off.
 - Index + middle extended ("scissors"): cut the keyboard's typed-text
   buffer (shortcut for the 'Cut Typed' key).
-- Thumb + pinky extended, others folded: quit.
+- Thumb + pinky extended, others folded: pause (use the control bar's
+  Quit button, or Escape, to actually quit).
 
 While the keyboard is open, clicking still works normally as long as the
 cursor isn't over one of the keyboard's own buttons -- so you can type a

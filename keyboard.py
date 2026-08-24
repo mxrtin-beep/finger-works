@@ -49,10 +49,14 @@ def get_button_list(panel_width, panel_height):
 	num_letter_rows = len(keyboard_keys)
 	max_cols = max(len(row) for row in keyboard_keys)
 
-	# Leave room at the top for the event/control-state text and at the
-	# bottom for the typed-text preview line.
+	# Leave room at the top for the event/control-state/sensitivity debug
+	# text and at the bottom for the typed-text preview line. The debug
+	# text is 3 lines starting at y=16 in 14pt bold (see overlay.py's
+	# draw()), which run down to roughly y=82 -- floored at 100px (rather
+	# than a pure fraction of panel_height) so the keyboard's top row still
+	# clears it on shorter panels instead of drawing underneath it.
 	margin_x = panel_width * 0.05
-	margin_top = panel_height * 0.20
+	margin_top = max(panel_height * 0.20, 100)
 	margin_bottom = panel_height * 0.10
 
 	usable_width = panel_width - 2 * margin_x

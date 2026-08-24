@@ -150,18 +150,37 @@ def copy_or_cut_typed_buffer(typed_text, should_clear):
 	return '>' if should_clear else typed_text
 
 
-def type_char(typed_char, typed_text):
-	"""Send a real keystroke (or clipboard hotkey) to whatever window has
-	OS focus, and return the updated local preview-text string shown on
-	the overlay (which is just an echo/log for feedback -- the real
-	destination of every keystroke is the focused app, not this string)."""
+def type_char(typed_char, typed_text, type_in_keyboard_area=False):
+	"""Handle one on-screen keyboard key, and return the updated local
+	preview-text string shown on the overlay.
+
+	`type_in_keyboard_area` (Settings -> "Type into the keyboard's own
+	area") decides where ordinary character keys, Space, Backspace, and
+	Paste actually go:
+
+	- False (default): a real keystroke is sent to whatever window has OS
+	  focus -- exactly like a physical keyboard -- and the overlay's own
+	  preview line is just an echo/log for feedback, not the real
+	  destination.
+	- True: nothing is sent to the OS at all; those keys only build up the
+	  overlay's own preview line, which you then move elsewhere yourself
+	  with Copy Typed/Cut Typed. This is the original behavior, kept as an
+	  option for anyone who'd rather type somewhere quarantined from
+	  whatever's focused and move it over deliberately.
+
+	Copy/Cut always send their real hotkey regardless of this setting --
+	they act on the focused app's current selection, which there's no
+	"keyboard area" equivalent for.
+	"""
 
 	if typed_char == '<':
-		pyautogui.press('backspace')
+		if not type_in_keyboard_area:
+			pyautogui.press('backspace')
 		return typed_text[:-1]
 
 	if typed_char == 'Space':
-		pyautogui.press('space')
+		if not type_in_keyboard_area:
+			pyautogui.press('space')
 		return typed_text + ' '
 
 	if typed_char == 'Clear':
@@ -187,23 +206,27 @@ def type_char(typed_char, typed_text):
 		return copy_or_cut_typed_buffer(typed_text, should_clear=True)
 
 	if typed_char == 'Paste':
+		clipboard_text = pyperclip.paste()
+		if not clipboard_text:
+			return typed_text
+		if type_in_keyboard_area:
+			return typed_text + clipboard_text
 		# Read the clipboard directly and type its contents as real
 		# keystrokes, instead of simulating Ctrl+V -- this doesn't depend
 		# on the focused app correctly intercepting the paste shortcut
 		# (some apps use a different one, or can swallow/mishandle a
 		# synthetic Ctrl+V), so it's more reliable across different apps.
-		clipboard_text = pyperclip.paste()
-		if clipboard_text:
-			pyautogui.typewrite(clipboard_text)
+		pyautogui.typewrite(clipboard_text)
 		return typed_text
 
 	# Regular character key. pyautogui.press() accepts single letters,
 	# digits, and this keyboard's punctuation (',', '.', '/', ';') as
 	# literal key names directly.
-	pyautogui.press(typed_char.lower())
+	if not type_in_keyboard_area:
+		pyautogui.press(typed_char.lower())
 
-	if play_audio:
-		k.say_key_pressed(typed_char)
+		if play_audio:
+			k.say_key_pressed(typed_char)
 
 	return typed_text + typed_char
 
@@ -228,6 +251,12 @@ def main(settings):
 	# shows "Auto" rather than whichever index auto-pick happened to land
 	# on, unless the user explicitly chose one.
 	camera_device_setting = settings.get('camera_device')
+
+	# Whether on-screen keyboard keys type into whatever's really focused
+	# (False, default) or stay confined to the overlay's own preview line
+	# (True) -- see type_char()'s docstring. Mutable via Settings ->
+	# Apply, hence a plain local rather than baked into a closure.
+	type_in_keyboard_area = settings.get('type_in_keyboard_area', False)
 
 	print(
 		f'FingerWorks v{__version__} -- started '
@@ -265,12 +294,13 @@ def main(settings):
 		return True
 
 	def handle_settings_changed(new_settings):
-		nonlocal cap_device, camera_device_setting
+		nonlocal cap_device, camera_device_setting, type_in_keyboard_area
 		fw_settings.save_settings(new_settings)
 
 		mc.set_sensitivity_multiplier(new_settings['sensitivity'])
 		overlay.set_sensitivity(new_settings['sensitivity'])
 		overlay.set_debug(new_settings['debug'])
+		type_in_keyboard_area = new_settings.get('type_in_keyboard_area', False)
 
 		resolved_device = fw_settings.pick_camera_device(new_settings)
 		if resolved_device != cap_device:
@@ -285,6 +315,7 @@ def main(settings):
 			'camera_device': camera_device_setting,
 			'sensitivity': overlay.mouse_sensitivity,
 			'debug': overlay.debug,
+			'type_in_keyboard_area': type_in_keyboard_area,
 		}
 
 	model_path = ensure_model_downloaded()
@@ -323,7 +354,7 @@ def main(settings):
 	button_list = k.get_button_list(overlay.panel_width, overlay.panel_height)
 
 	try:
-		while event != 'Quit' and not overlay.should_quit:
+		while not overlay.should_quit:
 
 			ret, image = cap.read()
 			if not ret:
@@ -395,7 +426,7 @@ def main(settings):
 							# gesture, but paste on this (left) hand: a
 							# shortcut for the keyboard's 'Paste' key
 							# without needing the keyboard open at all.
-							typed_text = type_char('Paste', typed_text)
+							typed_text = type_char('Paste', typed_text, type_in_keyboard_area)
 
 						debug_parts.append(
 							f'Left [Zoom: {zoom_debug_text}] [Paste: {paste_debug_text}]'
@@ -428,6 +459,13 @@ def main(settings):
 						control_state = 'Keyboard'
 					elif event == 'Keyboard Off':
 						control_state = 'Mouse'
+					elif event == 'Quit':
+						# The thumb+pinky gesture now pauses instead of
+						# quitting outright (same as the control bar's
+						# Pause button) -- quitting is reserved for the
+						# explicit Quit button/Escape, so an accidental
+						# gesture during normal use can't end the session.
+						overlay.set_paused(True)
 					elif event == 'Cut Typed Gesture':
 						# Gesture shortcut for the 'Cut Typed' key: index +
 						# middle extended ("scissors"), cutting the
@@ -451,7 +489,7 @@ def main(settings):
 						)
 
 						if typed_char is not None:
-							typed_text = type_char(typed_char, typed_text)
+							typed_text = type_char(typed_char, typed_text, type_in_keyboard_area)
 
 					# Click the real desktop when in Mouse mode, or in
 					# Keyboard mode as long as the cursor isn't over a key
