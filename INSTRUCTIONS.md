@@ -157,8 +157,12 @@ follows your cursor, see `README.md`.
 
 ### On-screen keyboard keys
 
-Once the keyboard is toggled on (right-hand fist), these are the utility
-keys across its two bottom rows, beyond the regular QWERTY letters/digits:
+Once the keyboard is toggled on (right-hand fist), it's laid out roughly
+like a physical/phone keyboard: `Tab`, `Caps`, and one `Shift` down the
+left side of the QWERTY block, `Enter` and the other `Shift` on the right,
+a wide `Space` bar along the bottom. The remaining actions below have no
+physical-keyboard spot of their own, so they get their own row underneath
+`Space`.
 
 | Key | Action |
 |---|---|

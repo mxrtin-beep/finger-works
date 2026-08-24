@@ -20,9 +20,10 @@ def say_key_pressed(typed_char):
 
 
 # The two "pages" of the letter grid -- like a phone keyboard's ABC/123
-# pages. Both keep the same 4-row, same-column-count shape as each other so
-# the layout math below (cell sizing) doesn't need to change per page; only
-# the 'symbols' toggle key's own label depends on which page it's showing.
+# pages. Both keep the same row shape as each other (same structural keys
+# in the same spots -- only the letters/punctuation between them differ)
+# so the layout math below doesn't need to change per page; only the
+# 'symbols' toggle key's own label depends on which page it's showing.
 #
 # The digit row stays on both pages (kept on top per user preference,
 # rather than moving it behind the symbols page like most phone keyboards
@@ -38,18 +39,50 @@ def say_key_pressed(typed_char):
 # future page too.
 BACKSPACE = '⌫'
 
-_LETTER_PAGE = [
-	['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', BACKSPACE],
-	['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
-	['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';'],
-	['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/'],
+# Each row is a list of (label, width) pairs -- width is in "normal key"
+# units (a plain letter/digit key is 1.0), so structural keys can be wider
+# than the letters around them, roughly matching where they sit on a
+# physical/phone keyboard: Tab/Caps/Shift on the left, Enter/Shift on the
+# right, Space spanning most of the bottom row. Each row's own total width
+# is spread across the panel independently (see get_button_list), so rows
+# don't need to add up to the same total.
+_ROW_DIGITS = [(str(d), 1.0) for d in range(1, 10)] + [('0', 1.0), (BACKSPACE, 1.0)]
+
+_ROW_QWERTY_LETTERS = [
+	('Tab', 1.5),
+	('Q', 1.0), ('W', 1.0), ('E', 1.0), ('R', 1.0), ('T', 1.0),
+	('Y', 1.0), ('U', 1.0), ('I', 1.0), ('O', 1.0), ('P', 1.0),
+]
+_ROW_QWERTY_SYMBOLS = [
+	('Tab', 1.5),
+	('!', 1.0), ('@', 1.0), ('#', 1.0), ('$', 1.0), ('%', 1.0),
+	('^', 1.0), ('&', 1.0), ('*', 1.0), ('(', 1.0), (')', 1.0),
 ]
 
-_SYMBOLS_PAGE = [
-	['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', BACKSPACE],
-	['!', '@', '#', '$', '%', '^', '&', '*', '(', ')'],
-	['-', '_', '=', '+', '[', ']', '{', '}', '\\', '|'],
-	['~', '`', ':', '"', "'", '<', '>', '?', '/', ','],
+_ROW_HOME_LETTERS = [
+	('Caps', 1.8),
+	('A', 1.0), ('S', 1.0), ('D', 1.0), ('F', 1.0), ('G', 1.0),
+	('H', 1.0), ('J', 1.0), ('K', 1.0), ('L', 1.0), (';', 1.0),
+	('Enter', 1.8),
+]
+_ROW_HOME_SYMBOLS = [
+	('Caps', 1.8),
+	('-', 1.0), ('_', 1.0), ('=', 1.0), ('+', 1.0), ('[', 1.0),
+	(']', 1.0), ('{', 1.0), ('}', 1.0), ('\\', 1.0), ('|', 1.0),
+	('Enter', 1.8),
+]
+
+_ROW_BOTTOM_LETTERS = [
+	('Shift', 2.2),
+	('Z', 1.0), ('X', 1.0), ('C', 1.0), ('V', 1.0), ('B', 1.0),
+	('N', 1.0), ('M', 1.0), (',', 1.0), ('.', 1.0), ('/', 1.0),
+	('Shift', 2.2),
+]
+_ROW_BOTTOM_SYMBOLS = [
+	('Shift', 2.2),
+	('~', 1.0), ('`', 1.0), (':', 1.0), ('"', 1.0), ("'", 1.0),
+	('<', 1.0), ('>', 1.0), ('?', 1.0), ('/', 1.0), (',', 1.0),
+	('Shift', 2.2),
 ]
 
 # Letters only -- used to decide which buttons get their displayed case
@@ -65,17 +98,25 @@ def get_button_list(panel_width, panel_height, page='letters'):
 	keyboard is now drawn on its own overlay panel rather than over the
 	webcam feed.
 
+	Roughly follows where keys sit on a physical/phone keyboard: Tab/Caps/
+	Shift down the left side of the QWERTY block, Enter/Shift on the
+	right, a wide Space bar along the bottom, with the remaining actions
+	(clipboard/undo-redo/page-switch, which have no physical-keyboard
+	equivalent) in their own row underneath.
+
 	`page` selects 'letters' (QWERTY, the default) or 'symbols' (punctuation
-	and math symbols) for the three rows below the digit row -- rebuild the
-	button list with the other page when the on-screen '123'/'ABC' key is
-	pressed (see main_fast.py)."""
+	and math symbols) for the letter rows -- rebuild the button list with
+	the other page when the on-screen '123'/'ABC' key is pressed (see
+	main_fast.py)."""
 
-	keyboard_keys = _SYMBOLS_PAGE if page == 'symbols' else _LETTER_PAGE
+	if page == 'symbols':
+		letter_rows = [_ROW_DIGITS, _ROW_QWERTY_SYMBOLS, _ROW_HOME_SYMBOLS, _ROW_BOTTOM_SYMBOLS]
+	else:
+		letter_rows = [_ROW_DIGITS, _ROW_QWERTY_LETTERS, _ROW_HOME_LETTERS, _ROW_BOTTOM_LETTERS]
 
-	# A separate, wider-buttoned row for utility actions -- distinct from
-	# the QWERTY grid above since these have longer labels and there are
-	# fewer of them, so they get more room each rather than being squeezed
-	# into narrow single-character-sized cells.
+	# Space spans most of the bottom row, like a real keyboard, with the
+	# clipboard actions that don't fit anywhere else in the physical-style
+	# grid above flanking it.
 	#
 	# 'Copy'/'Cut' act on whatever's currently selected elsewhere on the
 	# desktop (via a real Ctrl+C/Ctrl+X). 'Copy Typed'/'Cut Typed' instead
@@ -83,18 +124,25 @@ def get_button_list(panel_width, panel_height, page='letters'):
 	# the '>' on the overlay) -- a separate, smaller scratchpad of what
 	# you've typed here, independent of whatever else you've selected on
 	# your desktop.
-	utility_keys_row1 = [
-		'Space', 'Enter', 'Tab', 'Clear', 'Copy', 'Cut', 'Copy Typed', 'Cut Typed', 'Paste',
+	row_space = [
+		('Clear', 1.3), ('Copy', 1.3), ('Cut', 1.3),
+		('Space', 3.5),
+		('Copy Typed', 1.7), ('Cut Typed', 1.7), ('Paste', 1.3),
 	]
 
-	# Second utility row: case/edit controls, plus the page toggle. Its
-	# label flips between '123' and 'ABC' depending on which page is
-	# currently showing, like a phone keyboard's mode-switch key.
+	# Everything else that has no physical-keyboard spot of its own,
+	# spread across its own row. Its page-toggle key's label flips between
+	# '123' and 'ABC' depending on which page is currently showing, like a
+	# phone keyboard's mode-switch key.
 	page_toggle_label = 'ABC' if page == 'symbols' else '123'
-	utility_keys_row2 = ['Shift', 'Caps', 'Undo', 'Redo', 'Select All', page_toggle_label]
+	row_actions = [
+		('Undo', 1.3), ('Redo', 1.3), ('Select All', 1.7), (page_toggle_label, 1.3),
+	]
 
-	num_letter_rows = len(keyboard_keys)
-	max_cols = max(len(row) for row in keyboard_keys)
+	utility_rows = [row_space, row_actions]
+
+	num_letter_rows = len(letter_rows)
+	num_utility_rows = len(utility_rows)
 
 	# Leave room at the top for the event/control-state/sensitivity debug
 	# text and at the bottom for the typed-text preview line. The debug
@@ -111,42 +159,37 @@ def get_button_list(panel_width, panel_height, page='letters'):
 
 	# Each utility row is given extra height (for its longer, wrapped
 	# labels), counted here as worth 1.3 letter-rows each.
-	cell_h = usable_height / (num_letter_rows + 1.3 * 2)
-
-	# +0.5 columns of slack so the half-key offset on alternating rows
-	# still fits within usable_width.
-	cell_w = usable_width / (max_cols + 0.5)
-
-	button_w = cell_w * 0.85
+	cell_h = usable_height / (num_letter_rows + 1.3 * num_utility_rows)
 	button_h = cell_h * 0.85
+	utility_button_h = cell_h * 1.3 * 0.85
 
 	buttonList = []
-	for row_idx, row in enumerate(keyboard_keys):
 
-		# Offset every other row of keys
-		x_offset = cell_w / 2 if row_idx % 2 == 1 else 0
+	def add_row(row, row_y, row_height):
+		# Each row's own key widths are spread across the *same* usable
+		# width independently of every other row's total -- so a row with
+		# a few wide keys (Space's row) and a row with many narrow ones
+		# (the digit row) both end up flush with the panel's edges, rather
+		# than one row-wide cell size forcing every row to the same total
+		# key count.
+		total_units = sum(width for _, width in row)
+		cell_w = usable_width / total_units
 
-		for col_idx, key in enumerate(row):
-			pos = [int(margin_x + cell_w * col_idx + x_offset), int(margin_top + cell_h * row_idx)]
-			b = Button(pos, key, size=[int(button_w), int(button_h)])
+		x = margin_x
+		for label, width in row:
+			key_w = cell_w * width
+			pos = [int(x + (key_w - key_w * 0.85) / 2), int(row_y)]
+			size = [int(key_w * 0.85), int(row_height)]
+			buttonList.append(Button(pos, label, size=size))
+			x += key_w
 
-			buttonList.append(b)
+	for row_idx, row in enumerate(letter_rows):
+		add_row(row, margin_top + cell_h * row_idx, button_h)
 
-	# Utility rows: spread evenly across the full usable width (not the
-	# QWERTY grid) since each holds fewer, wider buttons.
-	utility_button_h = cell_h * 1.3 * 0.85
-	utility_row1_y = margin_top + cell_h * num_letter_rows
-	utility_row2_y = utility_row1_y + cell_h * 1.3
-
-	for utility_keys, row_y in ((utility_keys_row1, utility_row1_y), (utility_keys_row2, utility_row2_y)):
-		utility_cell_w = usable_width / len(utility_keys)
-		utility_button_w = utility_cell_w * 0.92
-
-		for col_idx, key in enumerate(utility_keys):
-			pos = [int(margin_x + utility_cell_w * col_idx), int(row_y)]
-			b = Button(pos, key, size=[int(utility_button_w), int(utility_button_h)])
-
-			buttonList.append(b)
+	utility_row_y = margin_top + cell_h * num_letter_rows
+	for row in utility_rows:
+		add_row(row, utility_row_y, utility_button_h)
+		utility_row_y += cell_h * 1.3
 
 	return buttonList
 

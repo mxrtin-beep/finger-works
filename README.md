@@ -40,11 +40,15 @@ yourself with `Copy Typed`/`Cut Typed`), if you'd rather have that.
 Settings persist across restarts (`~/.finger_works_settings.json`); see
 `INSTRUCTIONS.md` for details.
 
-The on-screen keyboard has `Shift` (capitalizes just the next letter, like
-a phone keyboard), `Caps` (stays on until pressed again), `Enter`, `Tab`,
-`Undo`/`Redo`, `Select All`, and a `123`/`ABC` key that switches its three
-letter rows to a symbols page (common punctuation and math symbols) and
-back -- the digit row on top stays put either way.
+The on-screen keyboard is laid out roughly like a physical/phone keyboard:
+`Tab`, `Caps`, and a `Shift` down the left of the QWERTY block, `Enter`
+and another `Shift` on the right, and a wide `Space` bar along the bottom.
+`Shift` capitalizes just the next letter (like a phone keyboard); `Caps`
+stays on until pressed again. Actions with no physical-keyboard spot of
+their own -- `Undo`/`Redo`, `Select All`, clipboard keys, and a `123`/`ABC`
+key that switches the letter rows to a symbols page (common punctuation
+and math symbols) and back -- sit in their own row under `Space`. The
+digit row on top stays put on both pages.
 
 Clicking the keyboard panel's own gray background (between keys, not on
 any of them) does nothing at all now, rather than passing through as a
