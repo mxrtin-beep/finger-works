@@ -2,6 +2,8 @@
 import sys
 import tkinter as tk
 
+import settings as fw_settings
+
 
 # Maps a button's logical state (set by keyboard.execute_event_keyboard) to
 # a fill color for drawing. Kept as plain state names rather than raw color
@@ -375,7 +377,7 @@ class Overlay:
 		# MAX and mouse_control.set_cursor_snappiness().
 		tk.Label(win, text='Cursor snappiness', **label_opts).grid(
 			row=2, column=0, sticky='w', padx=10, pady=4)
-		snappiness_var = tk.DoubleVar(value=current.get('cursor_snappiness', 0.2))
+		snappiness_var = tk.DoubleVar(value=current.get('cursor_snappiness', 0.65))
 		tk.Scale(
 			win, from_=0.0, to=1.0, resolution=0.05, orient='horizontal',
 			variable=snappiness_var, bg='#1e1e1e', fg='#dddddd', troughcolor='#3a3a3a',
@@ -400,17 +402,32 @@ class Overlay:
 			highlightthickness=0, length=180, showvalue=True,
 		).grid(row=4, column=1, sticky='ew', padx=10, pady=4)
 
+		# Both off by default -- a short, quiet tone (see sounds.py), not
+		# meant to be intrusive/annoying, so they're opt-in rather than
+		# something everyone hears the first time they click or type.
+		click_sounds_var = tk.BooleanVar(value=current.get('click_sounds', False))
+		tk.Checkbutton(
+			win, text='Click sounds', variable=click_sounds_var,
+			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
+			activebackground='#1e1e1e', activeforeground='#dddddd',
+		).grid(row=5, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+
+		keyboard_sounds_var = tk.BooleanVar(value=current.get('keyboard_sounds', False))
+		tk.Checkbutton(
+			win, text='Keyboard sounds', variable=keyboard_sounds_var,
+			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
+			activebackground='#1e1e1e', activeforeground='#dddddd',
+		).grid(row=6, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+
+		# Debug mode is deliberately excluded from "remembered for next
+		# time" (see settings.py's _PERSISTED_KEYS) -- it only ever applies
+		# to the run you turn it on for.
 		debug_var = tk.BooleanVar(value=current.get('debug', False))
 		tk.Checkbutton(
 			win, text='Debug mode (event text + live camera view)', variable=debug_var,
 			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
 			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=5, column=0, columnspan=2, sticky='w', padx=10, pady=4)
-
-		tk.Label(
-			win, text='Camera and debug changes apply immediately.\nAll settings are remembered for next time.',
-			fg='#999999', bg='#1e1e1e', font=('Segoe UI', 8), justify='left',
-		).grid(row=6, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
+		).grid(row=7, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
 
 		def apply_and_close():
 			chosen = camera_var.get()
@@ -422,15 +439,32 @@ class Overlay:
 				'cursor_snappiness': round(snappiness_var.get(), 2),
 				'scroll_speed': round(scroll_speed_var.get(), 2),
 				'keyboard_scale': round(keyboard_scale_var.get(), 2),
+				'click_sounds': click_sounds_var.get(),
+				'keyboard_sounds': keyboard_sounds_var.get(),
 			}
 			if self.on_settings_changed:
 				self.on_settings_changed(new_settings)
 			close()
 
+		def reset_to_defaults():
+			# Only resets what's shown in this window -- doesn't apply or
+			# save anything by itself, so Cancel still discards a reset you
+			# didn't mean to make, same as any other change here.
+			d = fw_settings.DEFAULTS
+			camera_var.set('Auto (recommended)')
+			sens_var.set(d['sensitivity'])
+			snappiness_var.set(d['cursor_snappiness'])
+			scroll_speed_var.set(d['scroll_speed'])
+			keyboard_scale_var.set(d['keyboard_scale'])
+			click_sounds_var.set(d['click_sounds'])
+			keyboard_sounds_var.set(d['keyboard_sounds'])
+			debug_var.set(d['debug'])
+
 		btn_frame = tk.Frame(win, bg='#1e1e1e')
-		btn_frame.grid(row=7, column=0, columnspan=2, pady=(0, 10))
+		btn_frame.grid(row=8, column=0, columnspan=2, pady=(0, 10))
 		_make_flat_button(btn_frame, 'Apply', apply_and_close, bg='#2ecc71').pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Cancel', close).pack(side='left', padx=4)
+		_make_flat_button(btn_frame, 'Reset to Defaults', reset_to_defaults).pack(side='left', padx=4)
 
 		win.update_idletasks()
 		_make_window_noactivate(win.winfo_id())

@@ -5,6 +5,7 @@ import time
 import pyautogui
 import constants as c
 import numpy as np
+import sounds
 
 # pyautogui's default is to sleep 0.1s after *every* call it makes (moveTo,
 # click, press, ...). We call several of these per camera frame, so at the
@@ -210,6 +211,7 @@ def execute_click(event):
 	if is_left_pinch and not _left_button_down:
 		pyautogui.mouseDown(button='left')
 		_left_button_down = True
+		sounds.play_click()
 	elif not is_left_pinch and _left_button_down:
 		pyautogui.mouseUp(button='left')
 		_left_button_down = False
@@ -217,6 +219,7 @@ def execute_click(event):
 	is_right_pinch = (event == 'Right-Click')
 	if is_right_pinch and not _was_right_click:
 		pyautogui.click(button='right')
+		sounds.play_click()
 	_was_right_click = is_right_pinch
 
 

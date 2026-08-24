@@ -30,14 +30,18 @@ and what the debug output means.
 A small control bar always sits in the bottom-right corner of the screen
 with **Pause**/**Resume**, **Help**, **Settings**, and **Quit** -- so you
 can pause tracking, look up the gestures, or quit, without needing a
-gesture or the command line. **Settings** covers camera, debug mode, and
-four feel-tuning sliders: mouse sensitivity, cursor snappiness (how
-readily the cursor responds to small movements -- see "Does the cursor
-feel like it's sliding?" below), scroll speed, and on-screen keyboard
-size. The on-screen keyboard always types into whatever text box/app is
-actually focused, like a physical keyboard. Settings persist across
-restarts (`~/.finger_works_settings.json`); see `INSTRUCTIONS.md` for
-details.
+gesture or the command line. **Settings** covers camera, debug mode, four
+feel-tuning sliders (mouse sensitivity, cursor snappiness -- see "Does the
+cursor feel like it's sliding?" below -- scroll speed, and on-screen
+keyboard size), and two off-by-default sound toggles (a short, quiet tone
+on clicks and/or keyboard presses -- deliberately light, not an obvious
+"beep"). A **Reset to Defaults** button in Settings puts every field back
+to its shipped default (Apply afterward to actually use them). The
+on-screen keyboard always types into whatever text box/app is actually
+focused, like a physical keyboard. Settings persist across restarts
+(`~/.finger_works_settings.json`) -- except debug mode, which is always
+back off the next time you start the program, however you left it; see
+`INSTRUCTIONS.md` for details.
 
 ### Does the cursor feel like it's sliding?
 

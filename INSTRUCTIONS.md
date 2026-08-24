@@ -66,12 +66,26 @@ Click **Settings** in the control bar to open a small settings window:
 - **Keyboard size** -- scales the overlay panel (and so the on-screen
   keyboard drawn on it) up or down. The panel repositions itself to stay
   clear of the control bar at any size.
-- **Debug mode** -- same as `--debug`, as a checkbox; applies immediately.
+- **Click sounds** / **Keyboard sounds** -- both off by default. A short,
+  quiet tone on every left/right-click, or every on-screen keyboard key
+  press, respectively -- see `sounds.py`. Deliberately light rather than
+  an obvious "beep"; if you want them louder/different, `generate_sounds.py`
+  regenerates `sounds/click.wav`/`sounds/key.wav` from adjustable
+  pitch/duration/amplitude parameters.
+- **Debug mode** -- same as `--debug`, as a checkbox. Session-only,
+  unlike every other setting here: it's never saved to
+  `~/.finger_works_settings.json`, so it's always back off the next time
+  you start the program even if you leave it checked now.
 
-Hit **Apply** to save and apply, or **Cancel**/close the window to discard.
-Settings are saved to `~/.finger_works_settings.json` and persist across
-restarts; a `--sensitivity`/`--debug` command-line flag overrides the
-saved value for that run (and re-saves it).
+**Reset to Defaults** resets every field in this window back to its
+default value (without applying or saving anything by itself -- hit
+**Apply** afterward to actually use them, or **Cancel** to back out of
+the reset too). Hit **Apply** to save and apply everything else, or
+**Cancel**/close the window to discard. Settings (other than Debug mode)
+are saved to `~/.finger_works_settings.json` and persist across restarts;
+a `--sensitivity`/`--debug` command-line flag overrides the in-memory
+value for that run (`--sensitivity` is then also re-saved; `--debug`
+never persists either way).
 
 ## Debug mode
 

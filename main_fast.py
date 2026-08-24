@@ -20,6 +20,7 @@ import numpy as np
 from collections import deque
 
 import mouse_control as mc
+import sounds
 from mouse_control import execute_event_fast, screenWidth, screenHeight
 from event_classifier import get_event_fast, get_zoom_event, get_paste_event, get_scroll_event, is_zoomed_in
 import constants as c
@@ -204,6 +205,18 @@ _HAND_CONNECTIONS = [
 # mouse/keyboard control at all.
 _RIGHT_HAND_COLOR = (255, 210, 0)   # cyan-ish -- the mouse/keyboard hand
 _LEFT_HAND_COLOR = (255, 0, 220)    # magenta-ish -- the zoom/paste hand
+
+
+def _debug_event_label(event):
+	"""What to show for `event` in debug text/overlays -- everywhere except
+	the actual gesture-recognition logic, which still needs the literal
+	string 'Quit' from get_event_fast() (event_history and other code key
+	off it -- see event_classifier.get_event_fast()'s docstring for why
+	it's still called that internally). Only the on-screen label is
+	misleading as 'Quit' now that the gesture pauses instead of quitting,
+	so it's translated to 'Pause' here, right before display, rather than
+	renaming the event itself everywhere it's produced/consumed."""
+	return 'Pause' if event == 'Quit' else event
 
 
 def draw_hand_debug_overlay(image, abs_landmark_list, label, color):
@@ -438,7 +451,9 @@ def main(settings):
 
 	mc.set_sensitivity_multiplier(mouse_sensitivity)
 	mc.set_scroll_speed_multiplier(settings.get('scroll_speed', 1.0))
-	mc.set_cursor_snappiness(settings.get('cursor_snappiness', 0.2))
+	mc.set_cursor_snappiness(settings.get('cursor_snappiness', 0.65))
+	sounds.set_click_sounds_enabled(settings.get('click_sounds', False))
+	sounds.set_keyboard_sounds_enabled(settings.get('keyboard_sounds', False))
 	keyboard_scale = settings.get('keyboard_scale', 1.0)
 
 	cap_width = width
@@ -517,7 +532,9 @@ def main(settings):
 		overlay.set_sensitivity(new_settings['sensitivity'])
 		overlay.set_debug(new_settings['debug'])
 		mc.set_scroll_speed_multiplier(new_settings.get('scroll_speed', 1.0))
-		mc.set_cursor_snappiness(new_settings.get('cursor_snappiness', 0.2))
+		mc.set_cursor_snappiness(new_settings.get('cursor_snappiness', 0.65))
+		sounds.set_click_sounds_enabled(new_settings.get('click_sounds', False))
+		sounds.set_keyboard_sounds_enabled(new_settings.get('keyboard_sounds', False))
 
 		overlay.set_keyboard_scale(new_settings.get('keyboard_scale', 1.0))
 		# The keyboard's button layout is sized off the overlay panel's
@@ -543,6 +560,8 @@ def main(settings):
 			'scroll_speed': mc.get_scroll_speed_multiplier(),
 			'cursor_snappiness': mc.get_cursor_snappiness(),
 			'keyboard_scale': overlay.keyboard_scale,
+			'click_sounds': sounds.get_click_sounds_enabled(),
+			'keyboard_sounds': sounds.get_keyboard_sounds_enabled(),
 		}
 
 	_startup_t0 = time.time()
@@ -619,7 +638,7 @@ def main(settings):
 					# keep the UI responsive and, in debug mode, still show the
 					# raw camera feed so it's clear the camera itself is still
 					# working.
-					overlay.draw(event, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
+					overlay.draw(_debug_event_label(event), control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
 					if overlay.debug:
 						overlay.draw_video(image)
 					overlay.pump()
@@ -764,6 +783,13 @@ def main(settings):
 								(overlay.panel_width, overlay.panel_height), button_list,
 							)
 
+							if typed_char is not None:
+								# Every key press, whatever it does (a
+								# letter, Shift/Caps, page-switch, ...) --
+								# one place covers all the branches below,
+								# rather than repeating this in each of them.
+								sounds.play_key()
+
 							# Case/page keys are handled here rather than inside
 							# type_char() -- they change local keyboard state
 							# (which page is showing, whether Shift/Caps is on)
@@ -822,7 +848,7 @@ def main(settings):
 
 						if overlay.debug:
 							draw_hand_debug_overlay(
-								image, abs_landmark_list, event, _RIGHT_HAND_COLOR,
+								image, abs_landmark_list, _debug_event_label(event), _RIGHT_HAND_COLOR,
 							)
 
 					hand_debug_text = f'  [{", ".join(debug_parts)}]'
@@ -841,7 +867,7 @@ def main(settings):
 				# to the current action, so you can see at a glance whether
 				# it's routing your hands the way you expect (see
 				# constants.SWAP_LABELED_HANDS if it isn't).
-				overlay.draw(event + hand_debug_text, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
+				overlay.draw(_debug_event_label(event) + hand_debug_text, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
 
 				if overlay.debug:
 					# Purely cosmetic: the live camera feed with each hand's
