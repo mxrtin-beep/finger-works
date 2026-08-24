@@ -161,6 +161,31 @@ below):
 - Index + middle extended ("scissors") -- the same shape as the right
   hand's Cut-Typed gesture, but paste on this hand: a shortcut for the
   keyboard's 'Paste' key without needing the keyboard open at all.
+- Point up (index finger extended and aimed upward, other four folded):
+  scroll up. Point down (same pose, aimed downward): scroll down. Keep the
+  pose held to keep scrolling -- it's paced to a tick every few frames
+  rather than every single one, so it scrolls steadily instead of flinging
+  the page around. See `SCROLL_AMOUNT`/`SCROLL_FRAME_INTERVAL` in
+  `constants.py` to make it faster/slower.
+
+### Is my hand too close or too far?
+
+Every gesture cutoff (pinch distance, finger-extended distance, ...) is
+tuned assuming your hand is roughly a certain size in the camera frame --
+which means there really is a "sweet spot" distance from the camera, same
+as you noticed. The control bar shows a **Move hand closer** / **Move hand
+back** hint next to the status dot whenever your hand drifts outside that
+comfortable range, so you don't have to guess why a click or gesture isn't
+registering.
+
+This is measured off your hand's wrist-to-knuckle size, not calibrated to
+any particular camera out of the box -- if the hint fires when your hand
+actually feels fine (or never fires when it doesn't), run with `--debug`
+once, hold your hand where things register reliably, note the "Hand
+scale" debug value, and set `HAND_SCALE_REFERENCE` in `constants.py` to
+match. See that constant's comment for the full explanation, including why
+distance matters at all (short version: the cutoffs are raw pixel
+distances, not yet normalized to be distance-independent).
 
 ### Which hand does what
 

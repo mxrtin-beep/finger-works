@@ -21,7 +21,7 @@ from collections import deque
 
 import mouse_control as mc
 from mouse_control import execute_event_fast, screenWidth, screenHeight
-from event_classifier import get_event_fast, get_zoom_event, get_paste_event, is_zoomed_in
+from event_classifier import get_event_fast, get_zoom_event, get_paste_event, get_scroll_event, is_zoomed_in
 import constants as c
 import keyboard as k
 import overlay as ov
@@ -655,14 +655,20 @@ def main(settings):
 								# without needing the keyboard open at all.
 								typed_text = type_char('Paste', typed_text, type_in_keyboard_area)
 
+							scroll_event, scroll_debug_text = get_scroll_event(rel_landmark_list)
+							mc.execute_scroll(scroll_event)
+
 							debug_parts.append(
-								f'Left [Zoom: {zoom_debug_text}] [Paste: {paste_debug_text}]'
+								f'Left [Zoom: {zoom_debug_text}] [Paste: {paste_debug_text}] '
+								f'[Scroll: {scroll_debug_text}]'
 							)
 
 							if overlay.debug:
 								draw_hand_debug_overlay(
 									image, abs_landmark_list,
-									f'Zoom: {zoom_debug_text.split(" -> ")[0]}  Paste: {paste_debug_text.split(" -> ")[0]}',
+									f'Zoom: {zoom_debug_text.split(" -> ")[0]}  '
+									f'Paste: {paste_debug_text.split(" -> ")[0]}  '
+									f'Scroll: {scroll_debug_text.split(" -> ")[0]}',
 									_LEFT_HAND_COLOR,
 								)
 
@@ -676,7 +682,18 @@ def main(settings):
 							debug_parts.append('Right [ignored]')
 							continue
 						mouse_assigned = True
-						debug_parts.append('Right [Mouse]')
+
+						distance_hint_text, _ = mc.distance_hint(abs_landmark_list)
+						overlay.set_distance_hint(distance_hint_text)
+						# "Hand scale" here is the same wrist-to-knuckle pixel
+						# distance the distance hint is based on -- shown in
+						# debug mode so calibrating HAND_SCALE_REFERENCE (see
+						# its comment in constants.py) doesn't require poking
+						# at internals, just reading this number off the
+						# overlay while your hand is where things feel right.
+						debug_parts.append(
+							f'Right [Mouse, scale={mc.hand_scale(abs_landmark_list):.0f}]'
+						)
 
 						event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
 
@@ -779,6 +796,15 @@ def main(settings):
 							)
 
 					hand_debug_text = f'  [{", ".join(debug_parts)}]'
+
+					if not mouse_assigned:
+						# The right/mouse hand wasn't in frame this pass
+						# (only the left hand was) -- nothing to base a
+						# distance hint on, so clear whatever it last said
+						# rather than leaving a stale hint on screen.
+						overlay.set_distance_hint('')
+				else:
+					overlay.set_distance_hint('')
 
 				# Persistently highlight Shift/Caps while toggled on, the same
 				# way a phone keyboard does -- only when nothing else (hover/

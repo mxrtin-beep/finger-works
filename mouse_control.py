@@ -252,6 +252,73 @@ def execute_zoom(direction):
 			pyautogui.keyUp('ctrl')
 
 
+# Counts consecutive held frames of the current scroll direction, so
+# execute_scroll() can only actually send a tick every SCROLL_FRAME_INTERVAL
+# frames instead of every single one -- see constants.SCROLL_FRAME_INTERVAL.
+# Reset (not just left to keep counting) whenever the gesture isn't held or
+# switches direction, so a fresh point-up/point-down always sends its first
+# tick promptly rather than picking up mid-cycle.
+_scroll_frame_counter = 0
+_last_scroll_direction = None
+
+
+def execute_scroll(direction):
+	"""Send a scroll tick for the held left-hand point-up/point-down
+	gesture, paced to one real scroll every SCROLL_FRAME_INTERVAL frames
+	rather than one per camera frame (see that constant's comment for why
+	-- an unpaced tick every frame reads as a fast, disorientating flick
+	rather than a controlled scroll).
+
+	`direction` is 'Scroll Up', 'Scroll Down', or None (gesture not
+	currently held) -- as returned by event_classifier.get_scroll_event().
+	"""
+	global _scroll_frame_counter, _last_scroll_direction
+
+	if direction is None:
+		_scroll_frame_counter = 0
+		_last_scroll_direction = None
+		return
+
+	if direction != _last_scroll_direction:
+		# Just started (or switched direction): send this first tick right
+		# away rather than making it wait out a stale counter.
+		_scroll_frame_counter = 0
+		_last_scroll_direction = direction
+
+	if _scroll_frame_counter % c.SCROLL_FRAME_INTERVAL == 0:
+		amount = c.SCROLL_AMOUNT if direction == 'Scroll Up' else -c.SCROLL_AMOUNT
+		pyautogui.scroll(amount)
+
+	_scroll_frame_counter += 1
+
+
+def hand_scale(abs_landmark_list):
+	"""Wrist-to-middle-knuckle pixel distance for this frame's hand -- a
+	stand-in for "how big does the hand look right now" (and so, how close
+	it is to the camera) that stays roughly constant across hand poses,
+	unlike a fingertip-based measurement. See constants.HAND_SCALE_REFERENCE
+	for how this is used to hint "move closer"/"move back"."""
+	wrist = abs_landmark_list[0]
+	middle_mcp = abs_landmark_list[9]
+	return ((wrist[0] - middle_mcp[0]) ** 2 + (wrist[1] - middle_mcp[1]) ** 2) ** 0.5
+
+
+def distance_hint(abs_landmark_list):
+	"""(text, is_warning) describing whether the hand looks too close, too
+	far, or fine, based on hand_scale() vs constants.HAND_SCALE_REFERENCE.
+	Empty text when it's within the comfortable band -- callers should
+	only show something on screen when there's actually a hint to give."""
+	scale = hand_scale(abs_landmark_list)
+	if scale <= 0:
+		return '', False
+	ratio = scale / c.HAND_SCALE_REFERENCE
+	if ratio > c.HAND_SCALE_TOO_CLOSE_RATIO:
+		return 'Move hand back', True
+	if ratio < c.HAND_SCALE_TOO_FAR_RATIO:
+		return 'Move hand closer', True
+	return '', False
+
+
 def execute_event_fast(event, abs_landmark_list, event_history, frame_width, frame_height, allow_click):
 
 	# The cursor is always moved (below) so it visually tracks your finger
