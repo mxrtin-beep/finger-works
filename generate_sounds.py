@@ -45,8 +45,16 @@ if __name__ == '__main__':
 	# Click: a short, soft "tap" -- low-ish pitch, ~45ms, gentle amplitude.
 	write_wav('sounds/click.wav', freq=740, duration_s=0.045, amplitude=0.28, attack_s=0.003, decay_s=0.038)
 
-	# Key: a slightly higher, even shorter "tick" so it reads as distinct
-	# from the click sound without being a different kind of noise.
-	write_wav('sounds/key.wav', freq=1050, duration_s=0.032, amplitude=0.22, attack_s=0.002, decay_s=0.026)
+	# Key: a slightly higher, quieter "tick" so it reads as distinct from
+	# the click sound without being a different kind of noise. Originally
+	# 32ms, which turned out to be too short to reliably render at all --
+	# most playback paths here (aplay spawning a fresh process per play,
+	# afplay, winsound) have real device/process startup latency of their
+	# own, and a clip that short can finish (or get clipped) before the
+	# audio device has actually woken up, so it plays as silence even
+	# though the file's samples are genuinely non-zero. 60ms -- still
+	# clearly the shorter/lighter of the two sounds -- gives playback
+	# enough of a window to actually be heard.
+	write_wav('sounds/key.wav', freq=1050, duration_s=0.06, amplitude=0.22, attack_s=0.003, decay_s=0.05)
 
 	print('Wrote sounds/click.wav and sounds/key.wav')

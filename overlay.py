@@ -172,10 +172,15 @@ class Overlay:
 
 		# The control bar sits in the actual bottom-right corner; the main
 		# panel (keyboard/debug text) sits directly above it, so the two
-		# never overlap regardless of which is currently visible. Wide
-		# enough that "Settings" (the longest button label) doesn't get
-		# clipped, at any of the clamped sizes below.
-		self.control_width = scaled(screen_width, 0.18, 260, 420)
+		# never overlap regardless of which is currently visible.
+		#
+		# control_width itself is set later, in _build_control_bar(), sized
+		# to fit its actual buttons/labels rather than guessed as a screen
+		# fraction here -- a fixed fraction wide enough for the longest
+		# label ('Settings') left visible empty space to the right of Quit
+		# on most screens. origin_y below only depends on control_height,
+		# which is still a screen fraction (nothing to fit it to), so
+		# nothing here needs control_width's later, more-accurate value.
 		self.control_height = scaled(screen_height, 0.032, 36, 56)
 
 		# pyautogui.size() (screen_width/height here) reports the full
@@ -251,16 +256,13 @@ class Overlay:
 	# --- Control bar --------------------------------------------------
 
 	def _build_control_bar(self):
-		cx = self.screen_width - self.control_width - self._margin
-		cy = self.screen_height - self.control_height - self._bottom_clearance
-
 		self.control_window = tk.Toplevel(self.root)
 		self.control_window.title('finger-works -- controls')
 		self.control_window.overrideredirect(True)
 		self.control_window.attributes('-topmost', True)
-		self.control_window.geometry(
-			f'{self.control_width}x{self.control_height}+{cx}+{cy}'
-		)
+		# No explicit size yet -- set below, after the buttons are packed,
+		# to whatever width they actually need (see the update_idletasks()
+		# call at the end of this method).
 		self.control_window.configure(bg='#1e1e1e')
 		self.control_window.bind('<Escape>', lambda _event: self._quit())
 		self.control_window.protocol('WM_DELETE_WINDOW', self._quit)
@@ -293,7 +295,19 @@ class Overlay:
 		_make_flat_button(frame, 'Settings', self._open_settings).pack(side='left', padx=2)
 		_make_flat_button(frame, 'Quit', self._quit, bg='#7a2e2e').pack(side='left', padx=2)
 
+		# Now that every button/label is packed, size the window to what
+		# it actually needs -- a floor still applies so it can't shrink to
+		# something absurd if the content here ever changes drastically,
+		# but there's no longer a fixed-fraction ceiling leaving empty
+		# space past the last button.
 		self.control_window.update_idletasks()
+		self.control_width = max(200, self.control_window.winfo_reqwidth())
+		cx = self.screen_width - self.control_width - self._margin
+		cy = self.screen_height - self.control_height - self._bottom_clearance
+		self.control_window.geometry(
+			f'{self.control_width}x{self.control_height}+{cx}+{cy}'
+		)
+
 		_make_window_noactivate(self.control_window.winfo_id())
 
 		self._refresh_pause_ui()
