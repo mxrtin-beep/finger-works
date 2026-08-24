@@ -83,7 +83,7 @@ def get_button_list(panel_width, panel_height, page='letters'):
 	# the '>' on the overlay) -- a separate, smaller scratchpad of what
 	# you've typed here, independent of whatever else you've selected on
 	# your desktop.
-	utility_keys_row1 = ['Space', 'Clear', 'Copy', 'Cut', 'Copy Typed', 'Cut Typed', 'Paste']
+	utility_keys_row1 = ['Space', 'Enter', 'Clear', 'Copy', 'Cut', 'Copy Typed', 'Cut Typed', 'Paste']
 
 	# Second utility row: case/edit controls, plus the page toggle. Its
 	# label flips between '123' and 'ABC' depending on which page is
@@ -157,7 +157,7 @@ def get_button_list(panel_width, panel_height, page='letters'):
 _was_clicking = False
 
 
-def execute_event_keyboard(event, mouse_screen_pos, panel_origin, button_list):
+def execute_event_keyboard(event, mouse_screen_pos, panel_origin, panel_size, button_list):
 	global _was_clicking
 
 	# Hit-test against the real OS mouse cursor's position, converted into
@@ -167,8 +167,18 @@ def execute_event_keyboard(event, mouse_screen_pos, panel_origin, button_list):
 	# tracks your finger across the overlay panel; this just asks "which
 	# key (if any) is it currently over".
 	origin_x, origin_y = panel_origin
+	panel_width, panel_height = panel_size
 	finger_x = mouse_screen_pos[0] - origin_x
 	finger_y = mouse_screen_pos[1] - origin_y
+
+	# Whether the cursor is anywhere over the keyboard panel at all, key or
+	# not -- used by main_fast.py to tell "clicked the panel's own gray
+	# background" (should do nothing at all, not fall through to a real
+	# desktop click on whatever's visually behind this overrideredirect
+	# window) apart from "clicked somewhere else on the desktop entirely"
+	# (a real click there is intentional and still allowed while the
+	# keyboard is open -- see main_fast.py's allow_click).
+	over_panel = 0 <= finger_x <= panel_width and 0 <= finger_y <= panel_height
 
 	is_clicking = (event == 'Left-Click')
 	fire_click = is_clicking and not _was_clicking
@@ -204,13 +214,14 @@ def execute_event_keyboard(event, mouse_screen_pos, panel_origin, button_list):
 		if hit_button is not None:
 			print(f'[DEBUG] click at cursor=({finger_x:.0f},{finger_y:.0f}) '
 				f'hit "{hit_button.text}" pos={hit_button.pos} size={hit_button.size}')
-		else:
+		elif over_panel:
 			nearest = min(
 				button_list,
 				key=lambda b: (b.pos[0] + b.size[0] / 2 - finger_x) ** 2
 					+ (b.pos[1] + b.size[1] / 2 - finger_y) ** 2,
 			)
 			print(f'[DEBUG] click at cursor=({finger_x:.0f},{finger_y:.0f}) '
-				f'missed all keys; nearest is "{nearest.text}" pos={nearest.pos} size={nearest.size}')
+				f'hit panel background (not a key); nearest is "{nearest.text}" '
+				f'pos={nearest.pos} size={nearest.size}')
 
-	return button_list, typed_char, hit_button
+	return button_list, typed_char, hit_button, over_panel

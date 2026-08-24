@@ -41,10 +41,16 @@ Settings persist across restarts (`~/.finger_works_settings.json`); see
 `INSTRUCTIONS.md` for details.
 
 The on-screen keyboard has `Shift` (capitalizes just the next letter, like
-a phone keyboard) and `Caps` (stays on until pressed again), plus `Undo`/
+a phone keyboard), `Caps` (stays on until pressed again), `Enter`, `Undo`/
 `Redo`, and a `123`/`ABC` key that switches its three letter rows to a
 symbols page (common punctuation and math symbols) and back -- the digit
 row on top stays put either way.
+
+Clicking the keyboard panel's own gray background (between keys, not on
+any of them) does nothing at all now, rather than passing through as a
+real click on whatever's visually behind the panel -- that stray click was
+the main remaining way typing could lose focus on the text box you were
+using, separate from the "focus follows mouse" issue below.
 
 On window managers with "focus follows mouse", aiming the cursor at the
 next on-screen key can otherwise silently steal keyboard focus away from

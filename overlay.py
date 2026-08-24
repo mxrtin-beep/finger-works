@@ -577,20 +577,19 @@ class Overlay:
 				# line breaks depend on a width estimate that doesn't always
 				# land where you'd want it to.
 				display_text = label.replace(' ', '\n', 1)
-				# Two-line labels ('Copy Typed', 'Cut Typed') need a much
-				# smaller size to fit both lines inside the button -- at
-				# h/3 their two lines together were taller than the button
-				# itself and spilled past its edges. Everything else (a
-				# single letter/digit/symbol, or a single-word label like
-				# 'Shift'/'Clear') is only ever one line, so it can go
-				# noticeably larger without overflowing -- the old shared
-				# h/4.5 size made ordinary lowercase letters and symbols
-				# look too small once case-flipping made lowercase the
-				# common case.
-				if '\n' in display_text:
-					font_size = max(7, min(13, int(h / 4.5)))
-				else:
+				# Only a true single character (a letter, digit, or symbol)
+				# gets the larger size -- it's the only case with just one
+				# glyph and tons of spare room in the button. Every label
+				# with more than one character, whether it wraps onto two
+				# lines ('Copy Typed') or stays on one ('Shift', 'Clear',
+				# '123') is back to the original smaller size: at the
+				# larger size those multi-character labels looked
+				# oversized/cramped against their own buttons, which is
+				# what this reverts.
+				if len(button.text) == 1:
 					font_size = max(10, min(20, int(h / 2.2)))
+				else:
+					font_size = max(7, min(13, int(h / 4.5)))
 				c.create_text(
 					x + w / 2, y + h / 2, fill='white',
 					anchor='center', justify='center',

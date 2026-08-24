@@ -302,6 +302,12 @@ def type_char(typed_char, typed_text, type_in_keyboard_area=False, shift_active=
 			pyautogui.press('space')
 		return typed_text + ' '
 
+	if typed_char == 'Enter':
+		if not type_in_keyboard_area:
+			restore_focus()
+			pyautogui.press('enter')
+		return typed_text + '\n'
+
 	if typed_char == 'Clear':
 		# Only clears our own preview line -- there's no general way to
 		# clear whatever's focused elsewhere on the desktop.
@@ -657,10 +663,12 @@ def main(settings):
 					# long as you're not currently aiming at one of its
 					# keys (see hit_button below).
 					hit_button = None
+					over_panel = False
 					if control_state == 'Keyboard':
 						mouse_screen_pos = pyautogui.position()
-						button_list, typed_char, hit_button = k.execute_event_keyboard(
-							event, mouse_screen_pos, overlay.origin(), button_list
+						button_list, typed_char, hit_button, over_panel = k.execute_event_keyboard(
+							event, mouse_screen_pos, overlay.origin(),
+							(overlay.panel_width, overlay.panel_height), button_list,
 						)
 
 						# Case/page keys are handled here rather than inside
@@ -690,21 +698,28 @@ def main(settings):
 							if shift_once:
 								shift_once = False
 
-					if hit_button is None:
-						# Not currently aiming at a keyboard key (whether
-						# because the keyboard isn't open, or it is but the
-						# cursor is elsewhere) -- this is the real window
-						# you're actually interacting with, so remember it
-						# as the restore_focus() target (see its docstring
-						# at the top of this file) before it can get
-						# silently stolen by aiming at the next key.
+					if not over_panel:
+						# The cursor isn't anywhere over the keyboard panel
+						# at all (whether because the keyboard isn't open,
+						# or it is but you're pointing at something else on
+						# the desktop) -- this is the real window you're
+						# actually interacting with, so remember it as the
+						# restore_focus() target (see its docstring at the
+						# top of this file) before it can get silently
+						# stolen by aiming at the next key.
 						capture_focused_window()
 
 					# Click the real desktop when in Mouse mode, or in
-					# Keyboard mode as long as the cursor isn't over a key
-					# (that pinch was just consumed above as a keypress
-					# instead).
-					allow_click = (control_state == 'Mouse') or (hit_button is None)
+					# Keyboard mode as long as the cursor isn't anywhere
+					# over the keyboard panel -- landing on one of its own
+					# keys was already consumed above as a keypress instead
+					# (not a real click), and landing on the panel's own
+					# gray background between keys must do nothing at all,
+					# not fall through to a real click on whatever's
+					# visually behind this overrideredirect window (that
+					# stray click was what deselected whatever text field
+					# you were actually typing into).
+					allow_click = (control_state == 'Mouse') or not over_panel
 
 					execute_event_fast(
 						event, abs_landmark_list, event_history,
