@@ -12,21 +12,27 @@ barely-there tick rather than an obvious "beep": no click/pop at the start
 enough amplitude that it's felt more than heard, per the "light, not
 intrusive or annoying" ask that started these.
 
-Click is deliberately *not* a pure tone -- an early version (a 740Hz sine,
-~45ms) sounded too much like a system alert/error "bonk" (the kind of
-sound macOS/other OSes make for an invalid keypress), which is a bad
-association for a sound meant to confirm something worked. A second
-version added a soft low sine "thud" under a noise burst for a bit of
-body, but that thud came out sounding heavy/harsh in practice too --
-turns out any held low-frequency layer reads as a "thump", whatever its
-volume. It's now just the noise burst itself (brighter/crisper than
-before, since there's no longer a thud to soften against) plus a very
-brief, very quiet high-pitched resonance under it for a touch of "pop"
-character -- like an actual mouse/trackpad click, not a knock on wood.
+Click has been through several redesigns:
+
+1. A held 740Hz sine (~45ms) -- sounded like a system alert/error "bonk".
+2. A noise burst plus a soft low sine "thud" underneath for body -- the
+   thud read as heavy/harsh no matter how quiet it was mixed.
+3. Noise burst plus a brief high pop resonance, no thud -- fixed the
+   harshness, but noise-based sounds have an inherent "scratchy"/staticky
+   texture (like radio static) that got *more* noticeable, not less, once
+   the noise had to be loud enough to actually be heard (an earlier tuning
+   pass of this version was so quiet it was closer to inaudible).
+
+Random noise was the wrong ingredient for "light click", not just wrongly
+tuned -- so this version drops noise synthesis entirely. It's a single
+short pure tone that *sweeps* pitch downward (freq_start -> freq_end)
+rather than holding one frequency: a held tone is what read as a "beep"
+in version 1, and a downward glide is closer to how a real mechanical
+click/tap actually sounds (a brief resonance whose pitch relaxes as it
+decays) without needing noise to feel percussive.
 """
 
 import math
-import random
 import struct
 import wave
 
@@ -53,62 +59,41 @@ def write_wav(path, freq, duration_s, amplitude, sample_rate=44100, attack_s=0.0
 
 
 def write_click(
-	path, sample_rate=44100, duration_s=0.07, noise_decay_s=0.032,
-	pop_freq=1500, pop_decay_s=0.006, amplitude=0.62, seed=7,
+	path, sample_rate=44100, duration_s=0.045,
+	freq_start=900, freq_end=320, amplitude=0.26, attack_s=0.001,
 ):
-	"""A short "pop" built from two layers, neither of them a held tone:
+	"""A single tone that glides in pitch from freq_start down to
+	freq_end over its (short) duration, instead of holding one frequency
+	-- see this file's module docstring for why: a held tone read as a
+	"beep", and noise (tried in between) read as harsh/scratchy static no
+	matter how it was tuned. A moving pitch reads as a natural, brief
+	resonance decaying -- closer to an actual click/tap -- without either
+	problem.
 
-	- A burst of noise, gently low-pass-filtered (a simple one-pole
-	  filter, not a proper EQ, just enough to take the raw edge off white
-	  noise) and decaying fast (noise_decay_s) -- the actual click/pop
-	  itself.
-	- A very brief, quiet, high-pitched resonance (pop_freq, decaying even
-	  faster than the noise -- pop_decay_s) mixed in for a touch of "pop"
-	  character, the way a real click/pop has a faint pitched ring to it
-	  that pure static doesn't. This replaces an earlier version's held
-	  low-frequency "thud" layer, which read as heavy/harsh no matter how
-	  quiet it was mixed -- any *held*, low-pitched layer apparently reads
-	  as a thump regardless of level, where a brief, high, fast-decaying
-	  one doesn't.
-
-	An earlier version of this (noise_decay_s 13ms, amplitude 0.42) went
-	the other way -- essentially inaudible on real hardware, despite a
-	peak sample amplitude similar to key.wav's. Peak level isn't what
-	makes something audible over time; *energy* (RMS, integrated over the
-	sound's duration) is, and 13ms of noise decay carries much less of it
-	than key.wav's 60ms tone even at the same peak. noise_decay_s and
-	amplitude are both raised here to bring the RMS level back up close to
-	key.wav's, while keeping the "pop" character (no held tone) that fixed
-	the original harsh/"thud" version.
+	The envelope's decay exponent (1.4, chosen by ear/feel rather than
+	anything physically modeled) front-loads the energy into roughly the
+	first half of duration_s, so despite being a genuinely short sound it
+	carries enough total energy (RMS) to actually be heard -- see
+	write_wav()'s docstring reasoning, same idea applied here: peak sample
+	level isn't what makes a sound audible, energy integrated over its
+	whole duration is.
 	"""
-	rnd = random.Random(seed)
 	n = int(sample_rate * duration_s)
-	attack_s = 0.001
 	frames = []
-	lp_state = 0.0
-	lp_alpha = 0.45  # brighter/crisper than a duller "thock" -- this is
-	                 # the actual click/pop character now that there's no
-	                 # thud layer underneath it to clash with. Slightly
-	                 # duller than the inaudible version's 0.55 since the
-	                 # louder/longer noise burst below would otherwise
-	                 # start sounding harsh again at this volume.
+	phase = 0.0
 
 	for i in range(n):
 		t = i / sample_rate
+		frac = t / duration_s
 
-		raw_noise = rnd.uniform(-1.0, 1.0)
-		lp_state += lp_alpha * (raw_noise - lp_state)
-		noise_env = max(0.0, 1.0 - t / noise_decay_s) ** 2
-		noise = lp_state * noise_env
+		freq = freq_start + (freq_end - freq_start) * frac
+		phase += 2 * math.pi * freq / sample_rate
 
-		pop_env = max(0.0, 1.0 - t / pop_decay_s) ** 3
-		pop = math.sin(2 * math.pi * pop_freq * t) * pop_env
-
-		sample = 0.78 * noise + 0.16 * pop
-		sample = max(-1.0, min(1.0, sample)) * amplitude
+		env = max(0.0, 1.0 - frac) ** 1.4
 		if t < attack_s:
-			sample *= t / attack_s
+			env *= t / attack_s
 
+		sample = amplitude * env * math.sin(phase)
 		frames.append(struct.pack('<h', int(sample * 32767)))
 
 	with wave.open(path, 'w') as f:
@@ -133,16 +118,4 @@ if __name__ == '__main__':
 	# actually be heard.
 	write_wav('sounds/key.wav', freq=1050, duration_s=0.06, amplitude=0.22, attack_s=0.003, decay_s=0.05)
 
-	# Near-silent (amplitude 0.002 -- inaudible) primer clip, played once
-	# automatically at startup by sounds.py regardless of whether either
-	# sound setting is on. Its only purpose is to make the *first* ever
-	# call to the platform sound player (afplay/aplay/winsound) happen
-	# during startup instead of on your first real click/keypress -- a
-	# process's first launch in a session can be slower than later ones
-	# (e.g. paging in its binary/libraries from disk the first time,
-	# faster from OS cache after), which lines up with "the very first
-	# sound doesn't play" reports better than anything already accounted
-	# for by key.wav/click.wav's own durations.
-	write_wav('sounds/_warmup.wav', freq=440, duration_s=0.02, amplitude=0.002, attack_s=0.002, decay_s=0.015)
-
-	print('Wrote sounds/click.wav, sounds/key.wav, and sounds/_warmup.wav')
+	print('Wrote sounds/click.wav and sounds/key.wav')

@@ -14,7 +14,6 @@ import threading
 _SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds')
 _CLICK_PATH = os.path.join(_SOUNDS_DIR, 'click.wav')
 _KEY_PATH = os.path.join(_SOUNDS_DIR, 'key.wav')
-_WARMUP_PATH = os.path.join(_SOUNDS_DIR, '_warmup.wav')
 
 _click_sounds_enabled = False
 _keyboard_sounds_enabled = False
@@ -38,39 +37,56 @@ def get_keyboard_sounds_enabled():
 	return _keyboard_sounds_enabled
 
 
-# Playback is a system player process per sound (winsound/afplay/aplay --
-# no extra dependency needed, every platform already ships one of these).
-# An earlier version tried simpleaudio instead (proper audio-API mixing,
-# no per-play process spawn) specifically to dodge the problem this module
-# now solves a different way -- but simpleaudio is a C extension that
-# needs to compile on install, and it failed to build in practice (no
-# prebuilt wheel for some platform/Python combos, and it's a fairly
-# unmaintained package), so it's not a dependency here anymore.
-#
-# The actual problem simpleaudio was meant to fix: firing a brand new
-# player process per sound means two sounds close together in time (e.g.
-# switching keys quickly) can end up as two processes racing to open the
-# same audio device -- and the loser of that race can fail silently
-# (stderr suppressed) rather than queue up, especially on Linux's ALSA
-# (`aplay`). The fix here doesn't need a new dependency: every sound is
-# queued and played one at a time from a single dedicated background
-# thread, using subprocess.run() (which *waits* for that one player to
-# finish) instead of Popen-and-forget. That serializes every play through
-# one process at a time, so there's never a second one to race against --
-# and since these sounds are only 25-60ms long, queuing rather than
-# overlapping is inaudible even when keys are pressed quickly.
+# On Windows, every sound's raw bytes are read from disk exactly once,
+# here, at import time, and played from memory (winsound's SND_MEMORY)
+# from then on -- not read fresh off disk on every single play (the
+# previous approach, SND_FILENAME). Reading a file for the very first time
+# in a process can be noticeably slower than every read after it (the OS
+# hasn't cached it yet), which lines up with "the very first key press of
+# a session doesn't seem to make a sound" far better than anything else
+# tried so far: click.wav gets replayed constantly once any click has
+# happened (so it's cache-warm almost immediately and mostly seems fine),
+# while a first-ever key press was hitting key.wav's own cold, uncached
+# first read every time. Reading it here at import time (well before any
+# real click/keypress, while the hand-tracking model is still loading)
+# moves that one-time cost out of the way entirely, for both sounds, since
+# playback afterward never touches the filesystem again.
+if sys.platform == 'win32':
+	def _read_wav_bytes(path):
+		if not os.path.exists(path):
+			return None
+		with open(path, 'rb') as f:
+			return f.read()
+
+	_CLICK_BYTES = _read_wav_bytes(_CLICK_PATH)
+	_KEY_BYTES = _read_wav_bytes(_KEY_PATH)
+else:
+	_CLICK_BYTES = None
+	_KEY_BYTES = None
+
+
+# Playback happens one sound at a time, from a single dedicated background
+# thread, rather than firing each one off independently -- on macOS/Linux
+# (a fresh `afplay`/`aplay` process per play there, since winsound's
+# SND_MEMORY trick above is Windows-only) that's what stops two sounds
+# close together in time from racing to open the same audio device, where
+# the loser can fail silently instead of queuing up. Even on Windows,
+# where a single process is already naturally serialized through one
+# winsound call at a time, routing everything through the same queue
+# keeps the two platforms' code paths (and this file) simpler.
 _sound_queue = queue.Queue()
 
 
 def _play_blocking(path):
 	if sys.platform == 'win32':
 		import winsound
-		# No SND_ASYNC here (unlike the old approach) -- this call is
-		# already on the dedicated background thread below, so blocking
-		# it until playback finishes is exactly what serializes plays
-		# through one at a time, the same as subprocess.run() does for
-		# the other two platforms.
-		winsound.PlaySound(path, winsound.SND_FILENAME)
+		data = _CLICK_BYTES if path == _CLICK_PATH else _KEY_BYTES
+		if data is None:
+			return
+		# No SND_ASYNC -- this call is already on the dedicated background
+		# thread below, so blocking it until playback finishes is exactly
+		# what serializes plays through one at a time.
+		winsound.PlaySound(data, winsound.SND_MEMORY)
 	elif sys.platform == 'darwin':
 		subprocess.run(
 			['afplay', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -95,22 +111,13 @@ def _sound_worker():
 # Daemon thread: never blocks program exit, even mid-playback.
 threading.Thread(target=_sound_worker, daemon=True).start()
 
-# Queued once at import time, ahead of and regardless of either sound
-# setting or _play()'s file-exists check being reached from a real click/
-# keypress -- the point is to get the platform sound player's *first ever*
-# launch this run (which can be slower than later launches -- see
-# generate_sounds.py's comment on _warmup.wav) out of the way during
-# startup, while the hand-tracking model is still loading, rather than
-# have it show up as your first real click or keypress not seeming to
-# make a sound.
-if os.path.exists(_WARMUP_PATH):
-	_sound_queue.put(_WARMUP_PATH)
-
 
 def _play(path):
 	"""Queue `path` to play on the background sound thread -- a missing
 	sound file is checked for here (not on the worker thread) so it's a
-	silent, immediate no-op rather than a queued failure."""
+	silent, immediate no-op rather than a queued failure. On Windows the
+	path is just a lookup key into the preloaded bytes above (see
+	_play_blocking()); the file itself isn't touched again after import."""
 	if not os.path.exists(path):
 		return
 	_sound_queue.put(path)

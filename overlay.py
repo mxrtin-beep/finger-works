@@ -386,21 +386,27 @@ class Overlay:
 		self._indicator_window = tk.Toplevel(self.root)
 		self._indicator_window.overrideredirect(True)
 		self._indicator_window.attributes('-topmost', True)
+		self._indicator_window.geometry(f'{size}x{size}+0+0')
+
+		# Windows-only Tk feature: any pixel painted exactly this color
+		# becomes fully see-through, rather than the window being an
+		# opaque square. Without this (an earlier version didn't set it)
+		# the square canvas behind the ring is what you'd actually see --
+		# it just happened to be a dark gray/black square, since that was
+		# the canvas's plain background color. Everywhere transparentcolor
+		# isn't supported (macOS, some Linux Tk builds), the canvas is
+		# left at that same dark color instead -- a real, if honest,
+		# fallback (a small square flashes briefly, not just a ring), not
+		# a silent bug.
+		bg = '#1e1e1e'
 		try:
-			# Best-effort translucency (Tk's whole-window alpha, supported
-			# on Windows/macOS, not universally on Linux) -- softens the
-			# indicator a little since, unlike the old control-bar flash,
-			# this is drawn directly over your cursor. A TclError here
-			# just means this platform's Tk doesn't support it; the
-			# indicator still works, just fully opaque.
-			self._indicator_window.attributes('-alpha', 0.8)
+			self._indicator_window.wm_attributes('-transparentcolor', bg)
 		except tk.TclError:
 			pass
-		self._indicator_window.geometry(f'{size}x{size}+0+0')
 
 		canvas = tk.Canvas(
 			self._indicator_window, width=size, height=size,
-			bg='#1e1e1e', highlightthickness=0,
+			bg=bg, highlightthickness=0,
 		)
 		canvas.pack(fill='both', expand=True)
 		self._indicator_canvas = canvas

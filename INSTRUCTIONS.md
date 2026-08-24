@@ -71,11 +71,17 @@ Click **Settings** in the control bar to open a small settings window:
   press, respectively -- see `sounds.py`. Deliberately light rather than
   an obvious "beep"; if you want them louder/different, `generate_sounds.py`
   regenerates `sounds/click.wav`/`sounds/key.wav` from adjustable
-  parameters. Playback needs no extra dependency: a background thread
-  plays sounds one at a time via a per-platform system player
-  (`winsound`/`afplay`/`aplay`), which is what keeps fast repeated
-  triggers (e.g. quickly switching keys) from ever racing each other and
-  dropping a sound.
+  parameters (rerun it after editing, then restart the program -- the WAV
+  bytes are only read once, at startup, not on every play; see below).
+  Playback needs no extra dependency: a background thread plays sounds
+  one at a time via a per-platform system player, which is what keeps
+  fast repeated triggers (e.g. quickly switching keys) from ever racing
+  each other and dropping a sound. On Windows specifically (`winsound`),
+  both WAV files' bytes are also read into memory once at import time and
+  played from memory from then on, rather than re-reading the file every
+  play -- a file's first-ever read in a process can be slower than every
+  read after it (not yet in the OS's file cache), which was showing up as
+  "the very first key press doesn't seem to make a sound".
 - **Click indicator** -- on by default, unlike the two sound settings
   above. A brief (~150ms) colored ring at the cursor on every left/right
   click -- green for left, yellow for right -- see
