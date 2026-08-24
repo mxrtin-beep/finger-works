@@ -269,7 +269,6 @@ def execute_event_keyboard(event, mouse_screen_pos, panel_origin, panel_size, bu
 				button.color = 'active'
 				if fire_click:
 					typed_char = button.text
-					print(button.text)
 		else:
 			button.color = 'idle'
 

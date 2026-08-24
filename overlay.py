@@ -370,51 +370,36 @@ class Overlay:
 			self.status_label.config(text='FingerWorks')
 			self.pause_button.config(text='Pause')
 
-	# --- Click indicator (a ring drawn at the cursor on every click) ----
+	# --- Click indicator (a solid dot drawn at the cursor on every click) -
 
-	_CLICK_INDICATOR_SIZE = 40
+	_CLICK_INDICATOR_SIZE = 20
 	_CLICK_INDICATOR_COLORS = {'left': '#2ecc71', 'right': '#f1c40f'}  # green / yellow
 
 	def _create_click_indicator_window(self):
-		"""Build the (initially hidden) small ring window show_click_
+		"""Build the (initially hidden) small indicator window show_click_
 		indicator() repositions and reveals on every click. Built once and
 		reused rather than created fresh per click, since click can fire
 		every camera frame during a drag-then-release and a fresh Toplevel
 		per click would be needless window-creation overhead on top of
-		that."""
+		that.
+
+		This is a plain solid-colored square, not a ring with a
+		transparent background -- a previous version tried
+		wm_attributes('-transparentcolor', ...) (a real, documented
+		Windows-only Tk feature) to get a true ring with nothing else
+		visible, but it didn't actually take effect in practice (showing
+		up as an opaque square instead, in whatever color the canvas
+		background was set to). Rather than debug Tk's transparency
+		support blind with no way to see the actual result, this trades
+		"ring" for "guaranteed correct color, always": the whole small
+		window is just filled with the click color directly, so there's
+		no separate background color that could ever show up wrong."""
 		size = self._CLICK_INDICATOR_SIZE
 		self._indicator_window = tk.Toplevel(self.root)
 		self._indicator_window.overrideredirect(True)
 		self._indicator_window.attributes('-topmost', True)
 		self._indicator_window.geometry(f'{size}x{size}+0+0')
-
-		# Windows-only Tk feature: any pixel painted exactly this color
-		# becomes fully see-through, rather than the window being an
-		# opaque square. Without this (an earlier version didn't set it)
-		# the square canvas behind the ring is what you'd actually see --
-		# it just happened to be a dark gray/black square, since that was
-		# the canvas's plain background color. Everywhere transparentcolor
-		# isn't supported (macOS, some Linux Tk builds), the canvas is
-		# left at that same dark color instead -- a real, if honest,
-		# fallback (a small square flashes briefly, not just a ring), not
-		# a silent bug.
-		bg = '#1e1e1e'
-		try:
-			self._indicator_window.wm_attributes('-transparentcolor', bg)
-		except tk.TclError:
-			pass
-
-		canvas = tk.Canvas(
-			self._indicator_window, width=size, height=size,
-			bg=bg, highlightthickness=0,
-		)
-		canvas.pack(fill='both', expand=True)
-		self._indicator_canvas = canvas
-		margin = 4
-		self._indicator_ring = canvas.create_oval(
-			margin, margin, size - margin, size - margin,
-			outline='#2ecc71', width=4,
-		)
+		self._indicator_window.configure(bg=self._CLICK_INDICATOR_COLORS['left'])
 
 		self._indicator_window.update_idletasks()
 		_make_window_noactivate(self._indicator_window.winfo_id())
@@ -437,10 +422,10 @@ class Overlay:
 			self._indicator_window.withdraw()
 
 	def show_click_indicator(self, kind, x, y):
-		"""Briefly show a colored ring centered on (x, y) -- the OS cursor
-		position at the moment of a left/right click -- green for left,
-		yellow for right. Wired up as mouse_control's click-feedback
-		callback by main_fast.py; `kind`/`x`/`y` match what
+		"""Briefly show a small solid-colored square centered on (x, y) --
+		the OS cursor position at the moment of a left/right click --
+		green for left, yellow for right. Wired up as mouse_control's
+		click-feedback callback by main_fast.py; `kind`/`x`/`y` match what
 		mouse_control.execute_click() passes.
 
 		This exists as a click confirmation that doesn't depend on your
@@ -464,7 +449,7 @@ class Overlay:
 		if color is None:
 			return
 		size = self._CLICK_INDICATOR_SIZE
-		self._indicator_canvas.itemconfig(self._indicator_ring, outline=color)
+		self._indicator_window.configure(bg=color)
 		self._indicator_window.geometry(
 			f'{size}x{size}+{int(x - size / 2)}+{int(y - size / 2)}'
 		)

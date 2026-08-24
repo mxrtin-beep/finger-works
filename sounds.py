@@ -37,56 +37,60 @@ def get_keyboard_sounds_enabled():
 	return _keyboard_sounds_enabled
 
 
-# On Windows, every sound's raw bytes are read from disk exactly once,
-# here, at import time, and played from memory (winsound's SND_MEMORY)
-# from then on -- not read fresh off disk on every single play (the
-# previous approach, SND_FILENAME). Reading a file for the very first time
-# in a process can be noticeably slower than every read after it (the OS
-# hasn't cached it yet), which lines up with "the very first key press of
-# a session doesn't seem to make a sound" far better than anything else
-# tried so far: click.wav gets replayed constantly once any click has
-# happened (so it's cache-warm almost immediately and mostly seems fine),
-# while a first-ever key press was hitting key.wav's own cold, uncached
-# first read every time. Reading it here at import time (well before any
-# real click/keypress, while the hand-tracking model is still loading)
-# moves that one-time cost out of the way entirely, for both sounds, since
-# playback afterward never touches the filesystem again.
-if sys.platform == 'win32':
-	def _read_wav_bytes(path):
-		if not os.path.exists(path):
-			return None
+def _warm_file_cache(path):
+	"""Read (and discard) a file's bytes once, so the OS's file cache has
+	it in memory before playback ever needs it -- see the comment above
+	_play_blocking() for why. Deliberately doesn't change *how* playback
+	reads the file afterward (still winsound's SND_FILENAME, on Windows)
+	-- an earlier version instead switched playback itself to read from
+	an in-memory copy (SND_MEMORY), which turned out to be the wrong fix:
+	SND_MEMORY is pickier about exact WAV formatting than SND_FILENAME,
+	and it was silently falling back to a Windows system/error sound
+	instead of ours. This just warms the cache and leaves the
+	known-working playback path alone."""
+	try:
 		with open(path, 'rb') as f:
-			return f.read()
+			f.read()
+	except OSError:
+		pass
 
-	_CLICK_BYTES = _read_wav_bytes(_CLICK_PATH)
-	_KEY_BYTES = _read_wav_bytes(_KEY_PATH)
-else:
-	_CLICK_BYTES = None
-	_KEY_BYTES = None
+
+if sys.platform == 'win32':
+	# Same reasoning as before: a file's first-ever read in this process
+	# can be slower than every read after it, since the OS hasn't cached
+	# it yet -- which is what was showing up as "the first key press
+	# doesn't seem to make a sound". Doing this once here, at import time
+	# (well before any real click/keypress, while the hand-tracking model
+	# is still loading), moves that one-time cost out of the way, without
+	# touching how the real plays below actually read the file.
+	_warm_file_cache(_CLICK_PATH)
+	_warm_file_cache(_KEY_PATH)
 
 
 # Playback happens one sound at a time, from a single dedicated background
 # thread, rather than firing each one off independently -- on macOS/Linux
-# (a fresh `afplay`/`aplay` process per play there, since winsound's
-# SND_MEMORY trick above is Windows-only) that's what stops two sounds
+# (a fresh `afplay`/`aplay` process per play) that's what stops two sounds
 # close together in time from racing to open the same audio device, where
-# the loser can fail silently instead of queuing up. Even on Windows,
-# where a single process is already naturally serialized through one
-# winsound call at a time, routing everything through the same queue
-# keeps the two platforms' code paths (and this file) simpler.
+# the loser can fail silently instead of queuing up. On Windows a single
+# process is already naturally serialized through one winsound call at a
+# time, but routing everything through the same queue keeps this file's
+# logic the same across all three platforms.
 _sound_queue = queue.Queue()
 
 
 def _play_blocking(path):
 	if sys.platform == 'win32':
 		import winsound
-		data = _CLICK_BYTES if path == _CLICK_PATH else _KEY_BYTES
-		if data is None:
-			return
 		# No SND_ASYNC -- this call is already on the dedicated background
 		# thread below, so blocking it until playback finishes is exactly
-		# what serializes plays through one at a time.
-		winsound.PlaySound(data, winsound.SND_MEMORY)
+		# what serializes plays through one at a time. SND_NODEFAULT is
+		# what stops Windows from substituting its own system/error sound
+		# if this ever *does* fail to play for some other reason -- better
+		# to silently do nothing than play a sound that reads as "your
+		# click didn't work" for a click that actually did.
+		winsound.PlaySound(
+			path, winsound.SND_FILENAME | winsound.SND_NODEFAULT,
+		)
 	elif sys.platform == 'darwin':
 		subprocess.run(
 			['afplay', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -115,9 +119,7 @@ threading.Thread(target=_sound_worker, daemon=True).start()
 def _play(path):
 	"""Queue `path` to play on the background sound thread -- a missing
 	sound file is checked for here (not on the worker thread) so it's a
-	silent, immediate no-op rather than a queued failure. On Windows the
-	path is just a lookup key into the preloaded bytes above (see
-	_play_blocking()); the file itself isn't touched again after import."""
+	silent, immediate no-op rather than a queued failure."""
 	if not os.path.exists(path):
 		return
 	_sound_queue.put(path)
