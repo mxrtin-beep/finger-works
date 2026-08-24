@@ -50,11 +50,6 @@ LEFT HAND -- zoom & paste
  \U0001F447  Point down (index only, aimed down) -- scroll down
 
 
-A "Move hand closer"/"Move hand back" hint appears on the
-control bar if your hand is too close/far from the camera
-for gestures to register reliably.
-
-
 See INSTRUCTIONS.md in the project folder for the full
 gesture and parameter reference.
 """
@@ -283,16 +278,6 @@ class Overlay:
 		)
 		self.status_label.pack(side='left', padx=(0, 6))
 
-		# Shows "Move hand closer"/"Move hand back" when your (mouse) hand
-		# is outside the comfortable distance-from-camera band the gesture
-		# cutoffs assume -- see constants.HAND_SCALE_REFERENCE and
-		# mouse_control.distance_hint(). Blank the rest of the time, so it
-		# doesn't clutter the bar when there's nothing to say.
-		self.distance_label = tk.Label(
-			frame, text='', fg='#e67e22', bg='#1e1e1e', font=('Segoe UI', 9),
-		)
-		self.distance_label.pack(side='left', padx=(0, 6))
-
 		self.pause_button = _make_flat_button(frame, 'Pause', self._toggle_pause)
 		self.pause_button.pack(side='left', padx=2)
 		_make_flat_button(frame, 'Help', self._open_instructions).pack(side='left', padx=2)
@@ -507,13 +492,6 @@ class Overlay:
 			self._create_video_window()
 		else:
 			self._destroy_video_window()
-
-	def set_distance_hint(self, text):
-		"""Update (or clear, with '') the "Move hand closer"/"Move hand
-		back" hint shown in the control bar. Called every frame from
-		main_fast.py with whatever mouse_control.distance_hint() currently
-		says -- an empty string clears it, same as no hand in frame."""
-		self.distance_label.config(text=text)
 
 	def set_sensitivity(self, sensitivity):
 		"""Update the sensitivity value shown on the debug panel. Doesn't

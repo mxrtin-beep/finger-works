@@ -296,27 +296,31 @@ def hand_scale(abs_landmark_list):
 	"""Wrist-to-middle-knuckle pixel distance for this frame's hand -- a
 	stand-in for "how big does the hand look right now" (and so, how close
 	it is to the camera) that stays roughly constant across hand poses,
-	unlike a fingertip-based measurement. See constants.HAND_SCALE_REFERENCE
-	for how this is used to hint "move closer"/"move back"."""
+	unlike a fingertip-based measurement.
+
+	main_fast.py divides every landmark's wrist-relative position by this
+	before handing it to event_classifier, which is what makes gesture
+	detection (FINGER_OUT_CUTOFF, LEFT_CLICK_CUTOFF, RIGHT_CLICK_CUTOFF --
+	see constants.py) work the same regardless of how far your hand is
+	from the camera, instead of only at one specific distance."""
 	wrist = abs_landmark_list[0]
 	middle_mcp = abs_landmark_list[9]
 	return ((wrist[0] - middle_mcp[0]) ** 2 + (wrist[1] - middle_mcp[1]) ** 2) ** 0.5
 
 
-def distance_hint(abs_landmark_list):
-	"""(text, is_warning) describing whether the hand looks too close, too
-	far, or fine, based on hand_scale() vs constants.HAND_SCALE_REFERENCE.
-	Empty text when it's within the comfortable band -- callers should
-	only show something on screen when there's actually a hint to give."""
-	scale = hand_scale(abs_landmark_list)
-	if scale <= 0:
-		return '', False
-	ratio = scale / c.HAND_SCALE_REFERENCE
-	if ratio > c.HAND_SCALE_TOO_CLOSE_RATIO:
-		return 'Move hand back', True
-	if ratio < c.HAND_SCALE_TOO_FAR_RATIO:
-		return 'Move hand closer', True
-	return '', False
+def normalize_landmarks(rel_landmark_list, scale):
+	"""Scale a hand's wrist-relative landmark positions (rel_landmark_list,
+	as produced by main_fast.pre_process_landmark) down by `scale` (its
+	hand_scale()) so every gesture cutoff in constants.py can be a
+	distance-independent ratio instead of a raw pixel count. `scale` is
+	floored well above zero so a degenerate near-zero measurement (wrist
+	and middle knuckle landmarks reported on top of each other) can't blow
+	this up into huge, spuriously "extended" finger distances."""
+	safe_scale = max(scale, 1.0)
+	normalized = rel_landmark_list.copy()
+	normalized[:, 0] /= safe_scale
+	normalized[:, 1] /= safe_scale
+	return normalized
 
 
 def execute_event_fast(event, abs_landmark_list, event_history, frame_width, frame_height, allow_click):

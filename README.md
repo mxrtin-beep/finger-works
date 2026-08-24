@@ -168,24 +168,19 @@ below):
   the page around. See `SCROLL_AMOUNT`/`SCROLL_FRAME_INTERVAL` in
   `constants.py` to make it faster/slower.
 
-### Is my hand too close or too far?
+### Does my hand distance from the camera matter?
 
-Every gesture cutoff (pinch distance, finger-extended distance, ...) is
-tuned assuming your hand is roughly a certain size in the camera frame --
-which means there really is a "sweet spot" distance from the camera, same
-as you noticed. The control bar shows a **Move hand closer** / **Move hand
-back** hint next to the status dot whenever your hand drifts outside that
-comfortable range, so you don't have to guess why a click or gesture isn't
-registering.
-
-This is measured off your hand's wrist-to-knuckle size, not calibrated to
-any particular camera out of the box -- if the hint fires when your hand
-actually feels fine (or never fires when it doesn't), run with `--debug`
-once, hold your hand where things register reliably, note the "Hand
-scale" debug value, and set `HAND_SCALE_REFERENCE` in `constants.py` to
-match. See that constant's comment for the full explanation, including why
-distance matters at all (short version: the cutoffs are raw pixel
-distances, not yet normalized to be distance-independent).
+No, by design: every gesture cutoff (pinch distance, finger-extended
+distance) is compared against your hand's own live size in the camera
+frame (its wrist-to-middle-knuckle pixel distance), not a fixed pixel
+count. A hand that's closer to the camera has both a bigger raw fingertip
+distance *and* a bigger reference size, so the ratio between them --
+what's actually compared to the cutoff -- stays the same. There's no
+"sweet spot" distance to find; move closer or farther and clicks/poses
+should keep registering the same way. See the "Distance-independent
+gesture cutoffs" comment at the top of `constants.py` for the full
+explanation, and `mouse_control.normalize_landmarks()` for where it
+happens.
 
 ### Which hand does what
 

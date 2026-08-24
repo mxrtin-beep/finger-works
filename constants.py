@@ -8,21 +8,47 @@ PINKY_IDX = 20
 
 FINGER_NAMES = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
 FINGER_INDICES = [4, 8, 12, 16, 20]
-#FINGER_OUT_CUTOFF = 2.5e4
 
-FINGER_OUT_CUTOFF = 280
+# --- Distance-independent gesture cutoffs ---------------------------------
+#
+# Every cutoff below (FINGER_OUT_CUTOFF, LEFT_CLICK_CUTOFF,
+# RIGHT_CLICK_CUTOFF) used to be a raw camera-frame *pixel* distance, which
+# implicitly assumed your hand was a certain size on screen -- i.e. a
+# certain distance from the camera. That's what caused the "optimal
+# distance" effect: too close and a pinch could read as "not quite
+# together" even with fingers touching; too far and folded fingers could
+# still clear the extended-finger cutoff.
+#
+# Fix: every landmark position gesture detection looks at is first divided
+# by HAND_SCALE_UNIT -- the hand's own live wrist-to-middle-knuckle pixel
+# distance (landmarks 0 and 9; stable across hand poses, unlike a
+# fingertip-based measurement) -- before being compared to a cutoff. A
+# bigger hand on screen (closer to the camera) has both a bigger raw
+# fingertip distance *and* a bigger HAND_SCALE_UNIT, so the ratio between
+# them stays the same regardless of distance. The cutoffs below are
+# therefore unitless ratios, not pixel counts, and (in principle) don't
+# need retuning if you sit closer/farther from the camera, or if someone
+# else with different-sized hands uses this. See mouse_control.hand_scale()
+# and main_fast.py, where every hand's landmarks are normalized by it once
+# per frame, before any gesture is read off them.
+#
+# Each ratio below is simply the old pixel cutoff divided by 150 -- the
+# wrist-to-middle-knuckle pixel distance a hand happened to measure at
+# under the distance this project was originally tuned/used at -- so the
+# *feel* at that distance is unchanged; only the "you have to be at
+# roughly that one distance" requirement is gone.
+FINGER_OUT_CUTOFF = 280 / 150   # extended-finger cutoff, was 280px
 
-
-# Max thumb-to-fingertip pixel distance (in the camera frame) that counts
-# as a pinch/click. Raised from 50 -- at 50, registering a click required
-# pressing the thumb and index almost fully together, hard enough that it
-# dragged the rest of the hand (including the middle finger, which aims
-# the cursor) along with it. Higher = lighter tap triggers a click, but
-# too high risks false clicks from your hand's normal resting pose while
-# just aiming/hovering. This is a fine line and worth retuning for your
-# own hand/camera setup if it still feels off in either direction.
-LEFT_CLICK_CUTOFF = 70
-RIGHT_CLICK_CUTOFF = 60
+# Max thumb-to-fingertip distance (relative to hand size) that counts as a
+# pinch/click. Was raised from 50px to 70px -- at 50, registering a click
+# required pressing the thumb and index almost fully together, hard enough
+# that it dragged the rest of the hand (including the middle finger, which
+# aims the cursor) along with it. Higher = lighter tap triggers a click,
+# but too high risks false clicks from your hand's normal resting pose
+# while just aiming/hovering. This is a fine line and worth retuning for
+# your own hand/camera setup if it still feels off in either direction.
+LEFT_CLICK_CUTOFF = 70 / 150    # was 70px
+RIGHT_CLICK_CUTOFF = 60 / 150   # was 60px
 
 SCROLL_VEL_CUTOFF = 5
 
@@ -36,7 +62,7 @@ INDEX_MCP_IDX = 5
 # argument) one scroll "tick" moves while the point-up/point-down gesture
 # is held. Applied every SCROLL_FRAME_INTERVAL-th frame rather than every
 # frame -- see SCROLL_FRAME_INTERVAL below for why.
-SCROLL_AMOUNT = 40
+SCROLL_AMOUNT = 80
 
 # The point-up/point-down scroll gesture is held continuously (unlike the
 # edge-triggered fist/scissors gestures), so firing a scroll tick on every
@@ -80,44 +106,6 @@ ZOOMED_MOUSE_SPEED_FACTOR = 0.5
 # training data (see the "Using this with gloves on" section of README.md).
 MIN_DETECTION_CONFIDENCE = 0.7
 MIN_TRACKING_CONFIDENCE = 0.5
-
-
-# --- Hand-to-camera distance hint -----------------------------------------
-#
-# Every gesture cutoff above (FINGER_OUT_CUTOFF, LEFT_CLICK_CUTOFF, ...) is
-# a raw camera-frame *pixel* distance, which means it implicitly assumes
-# your hand is roughly a certain size on screen -- i.e. a certain distance
-# from the camera. Too close and your hand fills more of the frame than
-# that assumes (pinches read as "not quite together" even when your
-# fingers are touching); too far and it fills less (folded fingers can
-# still clear FINGER_OUT_CUTOFF, or a pinch never quite reads as closed).
-# That's the "optimal distance" effect: it's not you, it's these pixel
-# cutoffs being tuned for one specific hand size on screen.
-#
-# HAND_SCALE_REFERENCE below is that assumed hand size, measured as the
-# wrist-to-middle-knuckle pixel distance (landmarks 0 and 9 -- a distance
-# that stays roughly constant across hand poses, unlike fingertip-based
-# measurements, so it's a stable stand-in for "how big does my hand look
-# right now"). The overlay's control bar divides your hand's *live*
-# wrist-to-middle-knuckle distance by this reference and shows "Move
-# closer" / "Move back" / a normal (uncolored) status when you're outside
-# a comfortable band around it -- see main_fast.py and overlay.py.
-#
-# This can't be pre-tuned for your camera/hand/desk setup the way the
-# other cutoffs are documented as needing -- run with --debug once, hold
-# your hand where clicks/poses register reliably, and note the
-# "Hand scale: NNN" debug line; set HAND_SCALE_REFERENCE to that value.
-# The default below is a rough placeholder, not a calibrated value.
-HAND_SCALE_REFERENCE = 150
-
-# Ratios (live hand_scale / HAND_SCALE_REFERENCE) outside this range show
-# "Move back" (too close, hand looks larger than the reference) or "Move
-# closer" (too far, hand looks smaller) on the control bar. Widened a bit
-# past 1.0 on both sides so the hint doesn't flicker for ordinary
-# in-and-out hand jitter -- tighten if you want earlier warning, widen if
-# it fires too eagerly.
-HAND_SCALE_TOO_CLOSE_RATIO = 1.3
-HAND_SCALE_TOO_FAR_RATIO = 0.7
 
 
 # Which hand does what (see main_fast.py) is decided strictly by hand

@@ -631,6 +631,17 @@ def main(settings):
 						abs_landmark_list = np.array(calc_landmark_list(image, hand_landmarks))
 						rel_landmark_list = np.array(pre_process_landmark(abs_landmark_list.tolist()))
 
+						# Normalize by this hand's own live size (wrist-to-
+						# middle-knuckle pixel distance) before any gesture
+						# is read off it, so the ratio cutoffs in
+						# constants.py (FINGER_OUT_CUTOFF, LEFT_CLICK_CUTOFF,
+						# RIGHT_CLICK_CUTOFF) work the same regardless of how
+						# far this hand is from the camera -- see
+						# mouse_control.normalize_landmarks().
+						rel_landmark_list = mc.normalize_landmarks(
+							rel_landmark_list, mc.hand_scale(abs_landmark_list),
+						)
+
 						raw_label = results.handedness[hand_idx][0].category_name
 						if c.SWAP_LABELED_HANDS:
 							raw_label = 'Left' if raw_label == 'Right' else 'Right'
@@ -682,20 +693,9 @@ def main(settings):
 							debug_parts.append('Right [ignored]')
 							continue
 						mouse_assigned = True
+						debug_parts.append('Right [Mouse]')
 
-						distance_hint_text, _ = mc.distance_hint(abs_landmark_list)
-						overlay.set_distance_hint(distance_hint_text)
-						# "Hand scale" here is the same wrist-to-knuckle pixel
-						# distance the distance hint is based on -- shown in
-						# debug mode so calibrating HAND_SCALE_REFERENCE (see
-						# its comment in constants.py) doesn't require poking
-						# at internals, just reading this number off the
-						# overlay while your hand is where things feel right.
-						debug_parts.append(
-							f'Right [Mouse, scale={mc.hand_scale(abs_landmark_list):.0f}]'
-						)
-
-						event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
+						event = get_event_fast(rel_landmark_list, control_state)
 
 						event_history.append(event)
 
@@ -796,15 +796,6 @@ def main(settings):
 							)
 
 					hand_debug_text = f'  [{", ".join(debug_parts)}]'
-
-					if not mouse_assigned:
-						# The right/mouse hand wasn't in frame this pass
-						# (only the left hand was) -- nothing to base a
-						# distance hint on, so clear whatever it last said
-						# rather than leaving a stale hint on screen.
-						overlay.set_distance_hint('')
-				else:
-					overlay.set_distance_hint('')
 
 				# Persistently highlight Shift/Caps while toggled on, the same
 				# way a phone keyboard does -- only when nothing else (hover/

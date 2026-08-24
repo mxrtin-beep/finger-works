@@ -50,7 +50,15 @@ _was_fist = False
 _was_scissors = False
 
 
-def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
+def get_event_fast(rel_landmark_list, control_state):
+	"""`rel_landmark_list` must already be hand-scale-normalized (wrist-
+	relative, then divided by the hand's own hand_scale()) -- see
+	mouse_control.normalize_landmarks() and main_fast.py, where that
+	happens once per hand before any gesture function is called. Every
+	distance compared to a constants.py cutoff below (finger-extended,
+	pinch) is then a ratio of the hand's own size, not a raw pixel count,
+	which is what makes gesture detection work the same regardless of how
+	far your hand is from the camera."""
 	global _was_fist, _was_scissors
 
 	finger_pos = rel_landmark_list[c.FINGER_INDICES]
@@ -109,9 +117,11 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 			return 'Cut Typed Gesture'
 		return 'Mousing'
 
-	# Clicking
-	thumb_index_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.INDEX_IDX])
-	thumb_ring_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.RING_IDX])
+	# Clicking -- thumb-to-fingertip distance, in hand-scale-normalized
+	# units (see this function's docstring), compared against the ratio
+	# cutoffs in constants.py.
+	thumb_index_dist = dist_twopoints(rel_landmark_list[c.THUMB_IDX], rel_landmark_list[c.INDEX_IDX])
+	thumb_ring_dist = dist_twopoints(rel_landmark_list[c.THUMB_IDX], rel_landmark_list[c.RING_IDX])
 
 	if thumb_ring_dist < c.RIGHT_CLICK_CUTOFF:
 		return 'Right-Click'

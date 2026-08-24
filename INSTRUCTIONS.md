@@ -26,9 +26,6 @@ gesture with, or to already know a gesture at all:
 
 - A status dot + label -- green **FingerWorks** when active, orange
   **Paused** when paused.
-- A **Move hand closer** / **Move hand back** hint, shown only when your
-  (right/mouse) hand is currently outside the distance-from-camera range
-  the gesture cutoffs assume -- see "Hand-to-camera distance" below.
 - **Pause / Resume** -- stops all hand tracking and gesture processing
   (the camera keeps running, just isn't acted on) until you resume. Useful
   for stepping away or using your physical mouse/keyboard for a bit
@@ -84,12 +81,8 @@ With `--debug`:
   `Keyboard`), the current mouse-sensitivity multiplier (`Sensitivity:
   1.0x`, from `--sensitivity`), and -- next to the action text -- which
   detected hand is doing what, e.g. `Mousing  [Right [Mouse]]`, or with a
-  left hand also in frame, `Mousing  [Right [Mouse, scale=142], Left
-  [Zoom: open, normal] [Paste: neither (none out)] [Scroll: neither (none
-  out)]]`. The `scale=NNN` next to `Right [Mouse` is the live
-  wrist-to-knuckle "hand scale" the distance hint is based on -- see
-  "Hand-to-camera distance" below for calibrating `HAND_SCALE_REFERENCE`
-  off this number.
+  left hand also in frame, `Mousing  [Right [Mouse], Left [Zoom: open,
+  normal] [Paste: neither (none out)] [Scroll: neither (none out)]]`.
 - A second always-on-top window (top-left corner) shows the **live camera
   feed**, with each detected hand's skeleton traced over it in real time
   and its current gesture labeled right next to it (cyan for the right/
@@ -175,36 +168,24 @@ follows your cursor, see `README.md`.
 
 ## Hand-to-camera distance
 
-Every gesture cutoff (`FINGER_OUT_CUTOFF`, `LEFT_CLICK_CUTOFF`,
-`RIGHT_CLICK_CUTOFF`) is a raw camera-frame pixel distance, which
-implicitly assumes your hand is roughly a certain size on screen -- i.e. a
-certain distance from the camera. Too close and pinches can read as "not
-quite together" even when your fingers are touching; too far and folded
-fingers can still read as extended, or a pinch never quite registers as
-closed. That's the "there's an optimal distance" effect.
+Gesture cutoffs (`FINGER_OUT_CUTOFF`, `LEFT_CLICK_CUTOFF`,
+`RIGHT_CLICK_CUTOFF`) are compared against every landmark position only
+*after* it's been divided by the hand's own live wrist-to-middle-knuckle
+pixel distance (`mouse_control.hand_scale()` /
+`mouse_control.normalize_landmarks()`, applied once per hand per frame in
+`main_fast.py`) -- so they're unitless ratios of the hand's own size, not
+raw pixel counts. A hand that's closer to the camera has both a bigger raw
+fingertip distance *and* a bigger reference size, so the ratio stays the
+same either way. In short: there's no "optimal distance" to find -- move
+closer or farther and gestures should keep registering the same way.
 
-The control bar shows **Move hand closer** / **Move hand back** next to
-the status dot whenever your (right/mouse) hand drifts outside the
-comfortable band around `HAND_SCALE_REFERENCE` in `constants.py`, so a
-gesture not registering has an obvious first thing to check, rather than
-looking like flaky tracking. It's based on your hand's live
-wrist-to-middle-knuckle pixel distance (`mouse_control.hand_scale()`) --
-stable across hand poses, unlike a fingertip-based measurement -- shown
-live in `--debug` as `scale=NNN` next to `Right [Mouse`.
-
-`HAND_SCALE_REFERENCE`'s shipped value is a rough placeholder, not
-calibrated to any particular camera. To calibrate it for yours: run with
-`--debug`, hold your hand where clicks and poses register reliably, note
-the `scale=NNN` value, and set `HAND_SCALE_REFERENCE` to it.
-
-This is a hint, not a fix -- the underlying cutoffs are still raw pixel
-distances, so there's still a real sweet spot; the hint just tells you
-when you've left it. Making the gesture cutoffs themselves
-distance-independent (normalizing every pixel distance by hand scale
-before comparing it to a cutoff, instead of comparing raw pixels) would
-remove the sweet spot rather than just flagging when you're outside it --
-a larger change than this hint, left for later since it touches every
-tuned cutoff in `constants.py` at once.
+Each cutoff's value in `constants.py` is still derived from (divided by
+150 against) the old pixel-tuned numbers, so the *feel* at a typical
+webcam distance is unchanged from before this normalization existed --
+only the requirement to stay at roughly that one distance is gone. If
+gestures still feel off for your hand/camera/lighting, retune the ratios
+directly the same way the old pixel values were documented as needing
+retuning -- see each constant's comment.
 
 ### On-screen keyboard keys
 
@@ -246,15 +227,13 @@ special-casing for each character.
 
 | Parameter | Meaning |
 |---|---|
-| `FINGER_OUT_CUTOFF` | Wrist-relative pixel distance above which a fingertip counts as "extended" rather than folded. Drives every pose gesture (fist, scissors, zoom's open-hand/fist). Raise if poses aren't registering as extended when they should; lower if folded fingers are misread as extended. |
-| `LEFT_CLICK_CUTOFF` | Max thumb-to-index pixel distance that counts as a left-click pinch. Higher = a lighter tap triggers a click; too high risks false clicks from your hand's normal resting/aiming pose. |
+| `FINGER_OUT_CUTOFF` | Wrist-relative distance, as a ratio of the hand's own live size (see "Hand-to-camera distance" above), above which a fingertip counts as "extended" rather than folded. Drives every pose gesture (fist, scissors, zoom's open-hand/fist, scroll's point-up/down). Raise if poses aren't registering as extended when they should; lower if folded fingers are misread as extended. |
+| `LEFT_CLICK_CUTOFF` | Max thumb-to-index distance (same hand-scale-relative ratio) that counts as a left-click pinch. Higher = a lighter tap triggers a click; too high risks false clicks from your hand's normal resting/aiming pose. |
 | `RIGHT_CLICK_CUTOFF` | Same, for thumb-to-ring (right-click pinch). |
 | `SCROLL_VEL_CUTOFF` | (Reserved; unused now that scrolling is pose-based -- see `INDEX_MCP_IDX`/`SCROLL_AMOUNT`/`SCROLL_FRAME_INTERVAL`.) |
 | `INDEX_MCP_IDX` | Landmark index for the index finger's base knuckle -- used with `INDEX_IDX` to read the index finger's pointing direction for the scroll gesture. |
 | `SCROLL_AMOUNT` | How far one scroll tick moves (in `pyautogui.scroll()` units) while the point-up/point-down gesture is held. |
 | `SCROLL_FRAME_INTERVAL` | Send a scroll tick only every this-many-th held frame, instead of every camera frame -- paces continuous scrolling down to something controllable. Raise to slow scrolling down, lower (min 1) to speed it up. |
-| `HAND_SCALE_REFERENCE` | Wrist-to-middle-knuckle pixel distance the gesture cutoffs assume ("how big your hand should look"). Drives the control bar's Move-closer/Move-back hint -- see "Hand-to-camera distance" above for how to calibrate it. |
-| `HAND_SCALE_TOO_CLOSE_RATIO` / `HAND_SCALE_TOO_FAR_RATIO` | Live-scale-to-`HAND_SCALE_REFERENCE` ratio bounds outside which the Move-closer/Move-back hint fires. |
 | `MOUSE_X_SENS` / `MOUSE_Y_SENS` | Per-axis scale applied when mapping the fingertip's position in the camera frame onto screen coordinates. |
 | `MOUSE_SPEED` | Fraction of the remaining distance to the target the cursor closes each frame (exponential smoothing). Higher tracks the fingertip more tightly; lower is smoother but laggier. Also scaled by `--sensitivity` at runtime. |
 | `ZOOMED_MOUSE_SPEED_FACTOR` | Multiplies `MOUSE_SPEED` while the zoom gesture has the screen zoomed in, since the same hand movement then covers much more of the visible area. |
