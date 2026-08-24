@@ -162,10 +162,10 @@ class Overlay:
 		# governs the right-edge gap as before.
 		self._bottom_clearance = scaled(screen_height, 0.06, 64, 110)
 
-		self.origin_x = screen_width - self.panel_width - margin
+		self.origin_x = screen_width - self.panel_width - self._margin
 		self.origin_y = (
 			screen_height - self.panel_height - self.control_height
-			- margin - self._bottom_clearance
+			- self._margin - self._bottom_clearance
 		)
 
 		self.root = tk.Tk()
