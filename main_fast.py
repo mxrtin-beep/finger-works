@@ -603,6 +603,7 @@ def main(settings):
 		get_settings=get_current_settings,
 		get_available_cameras=fw_settings.list_cameras,
 	)
+	mc.set_click_feedback_callback(overlay.flash_click_feedback)
 
 	# Keyboard case/page state. 'letters' (QWERTY) or 'symbols'
 	# (punctuation/math), toggled by the on-screen '123'/'ABC' key --

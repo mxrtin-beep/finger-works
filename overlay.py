@@ -251,6 +251,12 @@ class Overlay:
 
 		self._settings_win = None
 		self._instructions_win = None
+		# Pending Tk `after()` id for flash_click_feedback()'s revert-the-
+		# border callback, so a second click arriving before the first
+		# flash finishes can cancel and restart the timer instead of the
+		# two racing (which could otherwise revert the border early, right
+		# out from under the second flash).
+		self._flash_after_id = None
 		self._build_control_bar()
 
 	# --- Control bar --------------------------------------------------
@@ -272,6 +278,11 @@ class Overlay:
 			highlightthickness=2, highlightbackground='#4a4a4a', highlightcolor='#4a4a4a',
 		)
 		frame.pack(fill='both', expand=True)
+		# Kept around so flash_click_feedback() can briefly recolor this
+		# specific border (see that method) -- this is the outermost
+		# bordered frame, not `inner` below, which only exists to add
+		# padding inside it.
+		self._control_border = frame
 
 		inner = tk.Frame(frame, bg='#1e1e1e')
 		inner.pack(fill='both', expand=True, padx=6, pady=4)
@@ -332,6 +343,39 @@ class Overlay:
 			self.status_canvas.itemconfig(self.status_dot, fill='#2ecc71')
 			self.status_label.config(text='FingerWorks')
 			self.pause_button.config(text='Pause')
+
+	_FLASH_COLORS = {'left': '#2ecc71', 'right': '#f1c40f'}  # green / yellow
+
+	def flash_click_feedback(self, kind):
+		"""Briefly recolor the control bar's border -- green for a left
+		click, yellow for a right click -- as a visual confirmation that a
+		click actually registered, independent of (and more reliable than)
+		the optional click sound. Wired up as mouse_control's
+		click-feedback callback by main_fast.py; `kind` is 'left' or
+		'right', matching what mouse_control.execute_click() passes.
+
+		Deliberately doesn't move anything to the cursor's position (a
+		"ripple" right where you clicked, closer to what was asked for) --
+		a small always-on-top window there risks swallowing a fast
+		follow-up click aimed at the same spot, and reliably making a
+		Tk window click-through the cursor is itself platform-specific,
+		fragile territory (see _make_window_noactivate's own Windows-only
+		ctypes workaround for a taste of that). The control bar is fixed,
+		already always-on-top, and never has anything else worth clicking
+		on it, so flashing its border is a free, safe way to give the same
+		kind of confirmation.
+		"""
+		color = self._FLASH_COLORS.get(kind)
+		if color is None:
+			return
+		self._control_border.config(highlightbackground=color, highlightcolor=color)
+		if self._flash_after_id is not None:
+			self.control_window.after_cancel(self._flash_after_id)
+		self._flash_after_id = self.control_window.after(150, self._revert_control_border)
+
+	def _revert_control_border(self):
+		self._flash_after_id = None
+		self._control_border.config(highlightbackground='#4a4a4a', highlightcolor='#4a4a4a')
 
 	# --- Settings window ------------------------------------------------
 

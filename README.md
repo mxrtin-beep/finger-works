@@ -43,6 +43,12 @@ focused, like a physical keyboard. Settings persist across restarts
 back off the next time you start the program, however you left it; see
 `INSTRUCTIONS.md` for details.
 
+Every left/right click also flashes the control bar's border -- green for
+left, yellow for right -- for a moment, regardless of the click-sound
+setting. This is meant as a more reliable confirmation than the (optional,
+still off by default) click sound: sound playback depends on your OS/audio
+setup in ways a visual flash on our own always-on-top window doesn't.
+
 ### Does the cursor feel like it's sliding?
 
 There are two separate smoothing layers between your fingertip and the

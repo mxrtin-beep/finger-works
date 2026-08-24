@@ -14,6 +14,7 @@ import threading
 _SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds')
 _CLICK_PATH = os.path.join(_SOUNDS_DIR, 'click.wav')
 _KEY_PATH = os.path.join(_SOUNDS_DIR, 'key.wav')
+_WARMUP_PATH = os.path.join(_SOUNDS_DIR, '_warmup.wav')
 
 _click_sounds_enabled = False
 _keyboard_sounds_enabled = False
@@ -93,6 +94,17 @@ def _sound_worker():
 
 # Daemon thread: never blocks program exit, even mid-playback.
 threading.Thread(target=_sound_worker, daemon=True).start()
+
+# Queued once at import time, ahead of and regardless of either sound
+# setting or _play()'s file-exists check being reached from a real click/
+# keypress -- the point is to get the platform sound player's *first ever*
+# launch this run (which can be slower than later launches -- see
+# generate_sounds.py's comment on _warmup.wav) out of the way during
+# startup, while the hand-tracking model is still loading, rather than
+# have it show up as your first real click or keypress not seeming to
+# make a sound.
+if os.path.exists(_WARMUP_PATH):
+	_sound_queue.put(_WARMUP_PATH)
 
 
 def _play(path):

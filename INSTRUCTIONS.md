@@ -26,6 +26,11 @@ gesture with, or to already know a gesture at all:
 
 - A status dot + label -- green **FingerWorks** when active, orange
   **Paused** when paused.
+- Its own border flashes on every left/right click -- green for left,
+  yellow for right -- for about 150ms, regardless of the Click sounds
+  setting. See `overlay.flash_click_feedback()`; this exists as click
+  confirmation that doesn't depend on your OS/audio setup working, unlike
+  the (optional) click sound.
 - **Pause / Resume** -- stops all hand tracking and gesture processing
   (the camera keeps running, just isn't acted on) until you resume. Useful
   for stepping away or using your physical mouse/keyboard for a bit
