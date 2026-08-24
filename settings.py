@@ -59,29 +59,44 @@ def save_settings(settings):
 		print(f'[WARN] Could not save settings to {SETTINGS_PATH}: {exc}')
 
 
-def list_cameras(max_index=8):
+def list_cameras(max_index=8, stop_at_first=False):
 	"""Probe camera indices 0..max_index-1 and return the ones that
 	actually open. Opens and immediately releases each one, so this is
-	slow-ish (a few hundred ms) -- call it when the Settings window opens,
-	not once per frame."""
+	slow-ish (each open can take several hundred ms depending on the OS's
+	camera backend) -- call it when the Settings window opens (so it can
+	show every camera), not once per frame.
+
+	`stop_at_first=True` returns as soon as one opens, without probing the
+	rest -- used by pick_camera_device()'s auto-pick, which only ever
+	wants the first one anyway; probing every remaining index too (most of
+	which don't exist and are individually slow to fail) is exactly what
+	made startup noticeably slower once auto-pick was added."""
 	available = []
 	for idx in range(max_index):
 		cap = cv2.VideoCapture(idx)
 		if cap.isOpened():
 			available.append(idx)
-		cap.release()
+			cap.release()
+			if stop_at_first:
+				return available
+		else:
+			cap.release()
 	return available
 
 
 def pick_camera_device(settings, available=None):
 	"""Resolve the camera device index to actually use. An explicit
-	`camera_device` setting always wins; otherwise auto-pick the first
-	camera that opens (today's existing default behavior), falling back to
-	plain 0 if nothing was detected as open so a probing glitch doesn't
-	crash startup outright."""
+	`camera_device` setting always wins and skips probing entirely;
+	otherwise auto-pick the first camera that opens (today's existing
+	default behavior), falling back to plain 0 if nothing was detected as
+	open so a probing glitch doesn't crash startup outright.
+
+	Pass `available` (e.g. from a Settings-window camera list already on
+	hand) to skip a redundant probe; otherwise auto-pick probes just far
+	enough to find the first working camera, not every index."""
 	if settings.get('camera_device') is not None:
 		return settings['camera_device']
 
 	if available is None:
-		available = list_cameras()
+		available = list_cameras(stop_at_first=True)
 	return available[0] if available else 0

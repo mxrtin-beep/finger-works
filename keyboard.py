@@ -19,19 +19,48 @@ def say_key_pressed(typed_char):
 		os.system(' say ' + str(typed_char).lower())
 
 
-def get_button_list(panel_width, panel_height):
+# The two "pages" of the letter grid -- like a phone keyboard's ABC/123
+# pages. Both keep the same 4-row, same-column-count shape as each other so
+# the layout math below (cell sizing) doesn't need to change per page; only
+# the 'symbols' toggle key's own label depends on which page it's showing.
+#
+# The digit row stays on both pages (kept on top per user preference,
+# rather than moving it behind the symbols page like most phone keyboards
+# do) -- the 'symbols' page swaps in punctuation/math symbols for the
+# QWERTY rows underneath it instead.
+_LETTER_PAGE = [
+	['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '<'],
+	['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+	['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';'],
+	['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/'],
+]
+
+_SYMBOLS_PAGE = [
+	['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '<'],
+	['!', '@', '#', '$', '%', '^', '&', '*', '(', ')'],
+	['-', '_', '=', '+', '[', ']', '{', '}', '\\', '|'],
+	['~', '`', ':', '"', "'", '<', '>', '?', '/', ','],
+]
+
+# Letters only -- used to decide which buttons get their displayed case
+# flipped by Shift/Caps (see overlay.py's draw()). Symbol-page keys are
+# literal characters that don't have an upper/lower form.
+LETTER_CHARS = frozenset('QWERTYUIOPASDFGHJKLZXCVBNM')
+
+
+def get_button_list(panel_width, panel_height, page='letters'):
 	"""Build the on-screen keyboard, laid out as a fraction of the overlay
 	panel's (fixed) size -- unlike the old video-frame-based layout, this
 	no longer depends on the camera's resolution at all, since the
 	keyboard is now drawn on its own overlay panel rather than over the
-	webcam feed."""
+	webcam feed.
 
-	keyboard_keys = [
-				['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '<'],
-				["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
-				["A", "S", "D", "F", "G", "H", "J", "K", "L", ";"],
-				["Z", "X", "C", "V", "B", "N", "M", ",", ".", "/"],
-				]
+	`page` selects 'letters' (QWERTY, the default) or 'symbols' (punctuation
+	and math symbols) for the three rows below the digit row -- rebuild the
+	button list with the other page when the on-screen '123'/'ABC' key is
+	pressed (see main_fast.py)."""
+
+	keyboard_keys = _SYMBOLS_PAGE if page == 'symbols' else _LETTER_PAGE
 
 	# A separate, wider-buttoned row for utility actions -- distinct from
 	# the QWERTY grid above since these have longer labels and there are
@@ -44,7 +73,13 @@ def get_button_list(panel_width, panel_height):
 	# the '>' on the overlay) -- a separate, smaller scratchpad of what
 	# you've typed here, independent of whatever else you've selected on
 	# your desktop.
-	utility_keys = ['Space', 'Clear', 'Copy', 'Cut', 'Copy Typed', 'Cut Typed', 'Paste']
+	utility_keys_row1 = ['Space', 'Clear', 'Copy', 'Cut', 'Copy Typed', 'Cut Typed', 'Paste']
+
+	# Second utility row: case/edit controls, plus the page toggle. Its
+	# label flips between '123' and 'ABC' depending on which page is
+	# currently showing, like a phone keyboard's mode-switch key.
+	page_toggle_label = 'ABC' if page == 'symbols' else '123'
+	utility_keys_row2 = ['Shift', 'Caps', 'Undo', 'Redo', page_toggle_label]
 
 	num_letter_rows = len(keyboard_keys)
 	max_cols = max(len(row) for row in keyboard_keys)
@@ -62,9 +97,9 @@ def get_button_list(panel_width, panel_height):
 	usable_width = panel_width - 2 * margin_x
 	usable_height = panel_height - margin_top - margin_bottom
 
-	# The utility row is given extra height (for its longer, wrapped
-	# labels), counted here as worth 1.3 letter-rows.
-	cell_h = usable_height / (num_letter_rows + 1.3)
+	# Each utility row is given extra height (for its longer, wrapped
+	# labels), counted here as worth 1.3 letter-rows each.
+	cell_h = usable_height / (num_letter_rows + 1.3 * 2)
 
 	# +0.5 columns of slack so the half-key offset on alternating rows
 	# still fits within usable_width.
@@ -85,18 +120,21 @@ def get_button_list(panel_width, panel_height):
 
 			buttonList.append(b)
 
-	# Utility row: spread evenly across the full usable width (not the
-	# QWERTY grid) since it holds fewer, wider buttons.
-	utility_cell_w = usable_width / len(utility_keys)
-	utility_button_w = utility_cell_w * 0.92
+	# Utility rows: spread evenly across the full usable width (not the
+	# QWERTY grid) since each holds fewer, wider buttons.
 	utility_button_h = cell_h * 1.3 * 0.85
-	utility_row_y = margin_top + cell_h * num_letter_rows
+	utility_row1_y = margin_top + cell_h * num_letter_rows
+	utility_row2_y = utility_row1_y + cell_h * 1.3
 
-	for col_idx, key in enumerate(utility_keys):
-		pos = [int(margin_x + utility_cell_w * col_idx), int(utility_row_y)]
-		b = Button(pos, key, size=[int(utility_button_w), int(utility_button_h)])
+	for utility_keys, row_y in ((utility_keys_row1, utility_row1_y), (utility_keys_row2, utility_row2_y)):
+		utility_cell_w = usable_width / len(utility_keys)
+		utility_button_w = utility_cell_w * 0.92
 
-		buttonList.append(b)
+		for col_idx, key in enumerate(utility_keys):
+			pos = [int(margin_x + utility_cell_w * col_idx), int(row_y)]
+			b = Button(pos, key, size=[int(utility_button_w), int(utility_button_h)])
+
+			buttonList.append(b)
 
 	return buttonList
 

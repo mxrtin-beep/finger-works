@@ -139,8 +139,21 @@ class Overlay:
 		self.control_width = 340
 		self.control_height = 44
 
+		# pyautogui.size() (screen_width/height here) reports the full
+		# display resolution, not the desktop work area -- it doesn't know
+		# about the taskbar at all. A plain `margin` from the true bottom
+		# edge lands partly underneath a normal-height Windows/macOS/Linux
+		# taskbar or dock, which is what clipped the control bar. This
+		# floors the bottom clearance well above any of those (taskbars
+		# commonly run 40-56px) so the bar clears it and hovers just above,
+		# while `margin` still governs the right-edge gap as before.
+		self._bottom_clearance = max(margin, 64)
+
 		self.origin_x = screen_width - self.panel_width - margin
-		self.origin_y = screen_height - self.panel_height - self.control_height - 2 * margin
+		self.origin_y = (
+			screen_height - self.panel_height - self.control_height
+			- margin - self._bottom_clearance
+		)
 
 		self.root = tk.Tk()
 		self.root.title('finger-works')
@@ -199,7 +212,7 @@ class Overlay:
 
 	def _build_control_bar(self):
 		cx = self.screen_width - self.control_width - self._margin
-		cy = self.screen_height - self.control_height - self._margin
+		cy = self.screen_height - self.control_height - self._bottom_clearance
 
 		self.control_window = tk.Toplevel(self.root)
 		self.control_window.title('finger-works -- controls')
@@ -487,7 +500,7 @@ class Overlay:
 	def close(self):
 		self.root.destroy()
 
-	def draw(self, event_text, control_state, typed_preview, button_list):
+	def draw(self, event_text, control_state, typed_preview, button_list, shift_active=False):
 		# The panel itself is only up while there's something on it you
 		# actually need (the on-screen keyboard, to aim clicks at its
 		# keys) -- unless debug is on, in which case it's up all the time
@@ -532,6 +545,14 @@ class Overlay:
 					x, y, x + w, y + h, fill=fill, outline='#666666', width=1.5,
 				)
 
+				# Single letter keys flip visible case with Shift/Caps, like
+				# a phone keyboard -- everything else (digits, symbols,
+				# multi-character utility labels) is unaffected, since only
+				# letters have an upper/lower form at all.
+				label = button.text
+				if len(label) == 1 and label.isalpha():
+					label = label.upper() if shift_active else label.lower()
+
 				# Two-word labels ('Copy Typed', 'Cut Typed') are split onto
 				# their own centered line each, rather than relying on
 				# create_text's auto-wrap -- its default justify is 'left',
@@ -539,7 +560,7 @@ class Overlay:
 				# block instead of centering each line, and auto-wrap's
 				# line breaks depend on a width estimate that doesn't always
 				# land where you'd want it to.
-				display_text = button.text.replace(' ', '\n', 1)
+				display_text = label.replace(' ', '\n', 1)
 				# Capped well below h/3 (its old size) -- at h/3 a
 				# two-word label's two lines together were taller than the
 				# button itself and spilled past its edges; h/4.5 with a

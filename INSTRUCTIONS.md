@@ -157,8 +157,8 @@ follows your cursor, see `README.md`.
 
 ### On-screen keyboard keys
 
-Once the keyboard is toggled on (right-hand fist), these are the
-utility keys in its bottom row, beyond the regular QWERTY letters/digits:
+Once the keyboard is toggled on (right-hand fist), these are the utility
+keys across its two bottom rows, beyond the regular QWERTY letters/digits:
 
 | Key | Action |
 |---|---|
@@ -170,6 +170,19 @@ utility keys in its bottom row, beyond the regular QWERTY letters/digits:
 | `Copy Typed` | Copies this keyboard's own typed-text buffer (the preview line, not your desktop selection) to the OS clipboard. |
 | `Cut Typed` | Same, then clears the preview line. Also reachable via the right-hand "scissors" gesture. |
 | `Paste` | Reads the OS clipboard and types its contents as real keystrokes. Also reachable via the left-hand "scissors" gesture, without opening the keyboard. |
+| `Shift` | Capitalizes the *next* letter only, then turns itself back off -- like a phone keyboard. Letter keys visibly flip to uppercase while it's active. |
+| `Caps` | Toggles Caps Lock -- letters stay uppercase until you press it again. Independent of `Shift`. |
+| `Undo` | Sends Ctrl+Z (Cmd+Z on macOS). |
+| `Redo` | Sends Ctrl+Y (Cmd+Shift+Z on macOS). |
+| `123` / `ABC` | Switches the three letter rows to a symbols page (common punctuation and math symbols -- see below) and back, like a phone keyboard's mode key. The digit row on top stays put either way. |
+
+The symbols page: `! @ # $ % ^ & * ( ) - _ = + [ ] { } | ~ ` : " ' < > ? ,`
+
+Letters are typed lowercase by default and uppercase while `Shift`/`Caps`
+is active, matching whatever's currently shown on the button -- via
+`pyautogui.typewrite()` rather than `press()`, so shifted punctuation (on
+the symbols page, or anywhere else) comes out correct without needing
+special-casing for each character.
 
 ## Parameters (`constants.py`)
 

@@ -1,6 +1,7 @@
 
 import datetime
 import os
+import sys
 import time
 import urllib.request
 
@@ -46,6 +47,52 @@ height = 900
 play_audio = False
 history_length = 8
 event_history = deque(maxlen=history_length)
+
+
+# --- Focus-restore, so typing lands where you're actually typing --------
+#
+# Real keystrokes go to whatever window has OS focus, which is normally
+# whatever you last clicked into (a text box, say). But on window managers
+# that use "focus follows mouse", just moving the cursor to aim at the
+# next on-screen key -- which is real cursor movement over real screen
+# coordinates, not a click -- can itself silently hand focus to whatever's
+# now under the cursor, stealing it away from the field you were typing
+# into. That's what made typing feel like it needed constant back-and-forth
+# clicking between the text box and the keyboard: after a letter or two,
+# aiming at the next key had already stolen focus elsewhere.
+#
+# The fix: remember the last window that had focus while the cursor was
+# *not* hovering the on-screen keyboard (i.e. the window you actually
+# clicked into), and force it back into the foreground immediately before
+# every real keystroke, regardless of whatever's currently under the
+# cursor. Implemented for Windows only for now (ctypes, like the rest of
+# this codebase's platform-specific bits, e.g. mouse_control.execute_zoom)
+# -- a no-op elsewhere, so this doesn't help avoid the same "focus follows
+# mouse" issue on Linux/macOS yet, but also doesn't regress normal
+# click-to-focus typing there either.
+_target_hwnd = None
+
+if sys.platform == 'win32':
+	import ctypes
+
+
+def capture_focused_window():
+	"""Call whenever the cursor is *not* over a keyboard key (see
+	main_fast.py's main loop) -- remembers the real window you're actually
+	typing into before it can get silently stolen."""
+	global _target_hwnd
+	if sys.platform == 'win32':
+		_target_hwnd = ctypes.windll.user32.GetForegroundWindow()
+
+
+def restore_focus():
+	"""Best-effort: put the remembered target window back in the OS
+	foreground immediately before sending a real keystroke."""
+	if sys.platform == 'win32' and _target_hwnd:
+		try:
+			ctypes.windll.user32.SetForegroundWindow(_target_hwnd)
+		except Exception:
+			pass
 
 
 # The 21 hand-landmark connections drawn for the debug video's hand
@@ -150,7 +197,7 @@ def copy_or_cut_typed_buffer(typed_text, should_clear):
 	return '>' if should_clear else typed_text
 
 
-def type_char(typed_char, typed_text, type_in_keyboard_area=False):
+def type_char(typed_char, typed_text, type_in_keyboard_area=False, shift_active=False):
 	"""Handle one on-screen keyboard key, and return the updated local
 	preview-text string shown on the overlay.
 
@@ -171,15 +218,27 @@ def type_char(typed_char, typed_text, type_in_keyboard_area=False):
 	Copy/Cut always send their real hotkey regardless of this setting --
 	they act on the focused app's current selection, which there's no
 	"keyboard area" equivalent for.
+
+	`shift_active` (Shift held for one letter, or Caps Lock on) only
+	affects letter keys (see keyboard.LETTER_CHARS) -- it decides whether
+	the letter comes out upper- or lowercase, mirroring what's currently
+	shown on the button (see overlay.py's draw()).
+
+	Every branch that reaches the real OS calls restore_focus() first --
+	see its docstring: aiming the cursor at this key may itself have just
+	stolen OS focus away from whatever you're actually typing into, so
+	it's put back immediately before the keystroke goes out.
 	"""
 
 	if typed_char == '<':
 		if not type_in_keyboard_area:
+			restore_focus()
 			pyautogui.press('backspace')
 		return typed_text[:-1]
 
 	if typed_char == 'Space':
 		if not type_in_keyboard_area:
+			restore_focus()
 			pyautogui.press('space')
 		return typed_text + ' '
 
@@ -192,10 +251,12 @@ def type_char(typed_char, typed_text, type_in_keyboard_area=False):
 		# No way around simulating the real shortcut here -- only the
 		# focused app knows what's currently selected, so it has to do the
 		# actual copying into the OS clipboard itself.
+		restore_focus()
 		pyautogui.hotkey('ctrl', 'c')
 		return typed_text
 
 	if typed_char == 'Cut':
+		restore_focus()
 		pyautogui.hotkey('ctrl', 'x')
 		return typed_text
 
@@ -216,19 +277,43 @@ def type_char(typed_char, typed_text, type_in_keyboard_area=False):
 		# on the focused app correctly intercepting the paste shortcut
 		# (some apps use a different one, or can swallow/mishandle a
 		# synthetic Ctrl+V), so it's more reliable across different apps.
+		restore_focus()
 		pyautogui.typewrite(clipboard_text)
 		return typed_text
 
-	# Regular character key. pyautogui.press() accepts single letters,
-	# digits, and this keyboard's punctuation (',', '.', '/', ';') as
-	# literal key names directly.
+	if typed_char == 'Undo':
+		restore_focus()
+		if sys.platform == 'darwin':
+			pyautogui.hotkey('command', 'z')
+		else:
+			pyautogui.hotkey('ctrl', 'z')
+		return typed_text
+
+	if typed_char == 'Redo':
+		restore_focus()
+		if sys.platform == 'darwin':
+			pyautogui.hotkey('command', 'shift', 'z')
+		else:
+			pyautogui.hotkey('ctrl', 'y')
+		return typed_text
+
+	# Regular character key: a letter, digit, or symbol-page punctuation.
+	# Letters respect shift_active for case; typewrite() (rather than
+	# press()) is what makes uppercase/shifted-punctuation output actually
+	# come out right, since it holds Shift itself for whichever characters
+	# need it instead of us having to special-case each one.
+	actual_char = typed_char
+	if typed_char in k.LETTER_CHARS:
+		actual_char = typed_char.upper() if shift_active else typed_char.lower()
+
 	if not type_in_keyboard_area:
-		pyautogui.press(typed_char.lower())
+		restore_focus()
+		pyautogui.typewrite(actual_char)
 
 		if play_audio:
-			k.say_key_pressed(typed_char)
+			k.say_key_pressed(actual_char)
 
-	return typed_text + typed_char
+	return typed_text + actual_char
 
 
 def main(settings):
@@ -241,11 +326,11 @@ def main(settings):
 	cap_width = width
 	cap_height = height
 
-	# camera_device resolution: an explicit setting always wins; otherwise
-	# auto-pick the first camera that actually opens (today's original
-	# behavior, device=0, made robust against a camera that isn't there).
-	available_cameras = fw_settings.list_cameras()
-	cap_device = fw_settings.pick_camera_device(settings, available=available_cameras)
+	# camera_device resolution: an explicit setting always wins, and skips
+	# probing entirely (straight to opening that one device, like the
+	# program always did before the camera picker existed). Auto-pick
+	# (the default) only probes when it actually needs to.
+	cap_device = fw_settings.pick_camera_device(settings)
 	# The raw setting (None means "Auto"), kept separate from `cap_device`
 	# (the actual resolved index currently in use) so the Settings window
 	# shows "Auto" rather than whichever index auto-pick happened to land
@@ -349,9 +434,20 @@ def main(settings):
 		get_available_cameras=fw_settings.list_cameras,
 	)
 
-	# The keyboard's layout is now sized to the overlay panel (fixed at
-	# startup), not the camera frame, so it only needs to be built once.
-	button_list = k.get_button_list(overlay.panel_width, overlay.panel_height)
+	# Keyboard case/page state. 'letters' (QWERTY) or 'symbols'
+	# (punctuation/math), toggled by the on-screen '123'/'ABC' key --
+	# button_list is rebuilt from scratch on that toggle since the two
+	# pages show different keys (see keyboard.get_button_list). shift_once
+	# is a single-shot Shift (like a phone keyboard: capitalizes the next
+	# letter, then clears itself); caps_lock stays on until toggled off.
+	keyboard_page = 'letters'
+	shift_once = False
+	caps_lock = False
+
+	# The keyboard's layout is sized to the overlay panel (fixed at
+	# startup), not the camera frame -- rebuilt only when the page toggles,
+	# not every frame.
+	button_list = k.get_button_list(overlay.panel_width, overlay.panel_height, page=keyboard_page)
 
 	try:
 		while not overlay.should_quit:
@@ -371,7 +467,7 @@ def main(settings):
 				# keep the UI responsive and, in debug mode, still show the
 				# raw camera feed so it's clear the camera itself is still
 				# working.
-				overlay.draw(event, control_state, typed_text, button_list)
+				overlay.draw(event, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
 				if overlay.debug:
 					overlay.draw_video(image)
 				overlay.pump()
@@ -488,8 +584,42 @@ def main(settings):
 							event, mouse_screen_pos, overlay.origin(), button_list
 						)
 
-						if typed_char is not None:
-							typed_text = type_char(typed_char, typed_text, type_in_keyboard_area)
+						# Case/page keys are handled here rather than inside
+						# type_char() -- they change local keyboard state
+						# (which page is showing, whether Shift/Caps is on)
+						# rather than sending anything to the OS or the
+						# typed-text preview.
+						if typed_char in ('123', 'ABC'):
+							keyboard_page = 'symbols' if keyboard_page == 'letters' else 'letters'
+							button_list = k.get_button_list(
+								overlay.panel_width, overlay.panel_height, page=keyboard_page,
+							)
+						elif typed_char == 'Shift':
+							shift_once = not shift_once
+						elif typed_char == 'Caps':
+							caps_lock = not caps_lock
+							shift_once = False
+						elif typed_char is not None:
+							typed_text = type_char(
+								typed_char, typed_text, type_in_keyboard_area,
+								shift_active=(shift_once or caps_lock),
+							)
+							# Shift is single-shot (like a phone keyboard):
+							# it capitalizes exactly the next letter, then
+							# clears itself -- Caps Lock is unaffected and
+							# stays on until toggled off explicitly.
+							if shift_once:
+								shift_once = False
+
+					if hit_button is None:
+						# Not currently aiming at a keyboard key (whether
+						# because the keyboard isn't open, or it is but the
+						# cursor is elsewhere) -- this is the real window
+						# you're actually interacting with, so remember it
+						# as the restore_focus() target (see its docstring
+						# at the top of this file) before it can get
+						# silently stolen by aiming at the next key.
+						capture_focused_window()
 
 					# Click the real desktop when in Mouse mode, or in
 					# Keyboard mode as long as the cursor isn't over a key
@@ -510,11 +640,21 @@ def main(settings):
 
 				hand_debug_text = f'  [{", ".join(debug_parts)}]'
 
+			# Persistently highlight Shift/Caps while toggled on, the same
+			# way a phone keyboard does -- only when nothing else (hover/
+			# press) is already claiming that button's color this frame,
+			# so it doesn't fight the live hover/click feedback.
+			for button in button_list:
+				if button.color != 'idle':
+					continue
+				if (button.text == 'Shift' and shift_once) or (button.text == 'Caps' and caps_lock):
+					button.color = 'active'
+
 			# Debug aid: show which detected hand is doing what right next
 			# to the current action, so you can see at a glance whether
 			# it's routing your hands the way you expect (see
 			# constants.SWAP_LABELED_HANDS if it isn't).
-			overlay.draw(event + hand_debug_text, control_state, typed_text, button_list)
+			overlay.draw(event + hand_debug_text, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
 
 			if overlay.debug:
 				# Purely cosmetic: the live camera feed with each hand's

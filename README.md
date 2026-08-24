@@ -40,6 +40,19 @@ yourself with `Copy Typed`/`Cut Typed`), if you'd rather have that.
 Settings persist across restarts (`~/.finger_works_settings.json`); see
 `INSTRUCTIONS.md` for details.
 
+The on-screen keyboard has `Shift` (capitalizes just the next letter, like
+a phone keyboard) and `Caps` (stays on until pressed again), plus `Undo`/
+`Redo`, and a `123`/`ABC` key that switches its three letter rows to a
+symbols page (common punctuation and math symbols) and back -- the digit
+row on top stays put either way.
+
+On window managers with "focus follows mouse", aiming the cursor at the
+next on-screen key used to be enough to silently steal keyboard focus away
+from the text box you were typing into, forcing you to click back and
+forth between the two. Typing now remembers the last real window you
+clicked into and restores it to the foreground right before every
+keystroke (Windows only for now).
+
 Cursor speed is also automatically halved while the zoom gesture has the
 screen zoomed in, and restored the moment you zoom back out (or if the
 program quits while still zoomed in) -- a given hand movement covers much
