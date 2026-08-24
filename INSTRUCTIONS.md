@@ -24,6 +24,12 @@ screen, regardless of Mouse/Keyboard mode or debug state -- so there's
 always a way to pause, get help, or quit without needing a free hand to
 gesture with, or to already know a gesture at all:
 
+- A `⋮⋮` grip at the very left -- pinch-and-hold-and-move it (a Left-Click
+  pinch, held, dragged like anywhere else) to reposition the whole bar.
+  Only that grip is draggable, not the buttons next to it, so an aimed
+  click at Pause/Help/Settings/Quit is never mistaken for a drag. Not
+  remembered across restarts -- it's always back at the default
+  bottom-right corner next time you start the program.
 - A status dot + label -- green **FingerWorks** when active, orange
   **Paused** when paused.
 - **Pause / Resume** -- stops all hand tracking and gesture processing
@@ -36,6 +42,11 @@ gesture with, or to already know a gesture at all:
   gesture that used to quit now pauses instead -- see "Gestures" below --
   so quitting always needs a deliberate click/Escape, never an accidental
   gesture mid-use.)
+
+The overlay panel (the keyboard/debug-text panel, separate from the
+control bar above) is draggable too -- a thin `⋮⋮⋮⋮⋮⋮` strip along its very
+top, same idea: pinch-and-hold-and-move only that strip, not the keyboard
+keys beneath it. Also not remembered across restarts.
 
 ## Settings
 

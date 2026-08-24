@@ -128,6 +128,50 @@ def _make_flat_button(parent, text, command, bg='#3a3a3a'):
 	)
 
 
+def _bind_window_drag(handle_widget, window, screen_width, screen_height):
+	"""Make dragging `handle_widget` (press and move, e.g. a pinch-hold-
+	move -- the same real OS mouse events driven by a Left-Click pinch
+	elsewhere in this app, so this works from a gesture exactly like it
+	would from a physical mouse) reposition `window`.
+
+	Position is intentionally *not* persisted anywhere -- every window
+	still starts at its normal default spot each launch; dragging only
+	ever affects the current run.
+
+	Clamped so the window can't be dragged fully off-screen and become
+	unreachable: at least a `_MIN_ONSCREEN` margin of it stays visible on
+	every edge.
+	"""
+	_MIN_ONSCREEN = 40
+	drag_state = {}
+
+	def on_press(event):
+		drag_state['x_root'] = event.x_root
+		drag_state['y_root'] = event.y_root
+		drag_state['win_x'] = window.winfo_x()
+		drag_state['win_y'] = window.winfo_y()
+
+	def on_motion(event):
+		if 'x_root' not in drag_state:
+			return
+		dx = event.x_root - drag_state['x_root']
+		dy = event.y_root - drag_state['y_root']
+		new_x = drag_state['win_x'] + dx
+		new_y = drag_state['win_y'] + dy
+		w = window.winfo_width()
+		h = window.winfo_height()
+		new_x = max(_MIN_ONSCREEN - w, min(new_x, screen_width - _MIN_ONSCREEN))
+		new_y = max(0, min(new_y, screen_height - _MIN_ONSCREEN))
+		window.geometry(f'+{new_x}+{new_y}')
+
+	def on_release(_event):
+		drag_state.clear()
+
+	handle_widget.bind('<ButtonPress-1>', on_press)
+	handle_widget.bind('<B1-Motion>', on_motion)
+	handle_widget.bind('<ButtonRelease-1>', on_release)
+
+
 class Overlay:
 	"""A fixed, always-on-top panel docked in the corner of the screen.
 
@@ -257,6 +301,20 @@ class Overlay:
 		)
 		self.canvas.pack(fill='both', expand=True)
 
+		# Drag handle for this panel: only a thin strip at the very top
+		# (drawn each frame in draw(), see _PANEL_GRIP_HEIGHT) actually
+		# starts a drag -- checked by y-position in _on_panel_drag_press()
+		# below, since the canvas is one single widget doing its own
+		# hit-testing for the keyboard's buttons (via main_fast.py polling
+		# the cursor position, not Tk click events), so it can't have only
+		# part of itself draggable via separate widgets the way the
+		# control bar's dedicated grip label can. Not persisted across
+		# restarts, like the control bar's drag -- see _bind_window_drag().
+		self._panel_drag_state = None
+		self.canvas.bind('<ButtonPress-1>', self._on_panel_drag_press)
+		self.canvas.bind('<B1-Motion>', self._on_panel_drag_motion)
+		self.canvas.bind('<ButtonRelease-1>', self._on_panel_drag_release)
+
 		# Tracks whether the main panel is currently mapped, so draw() only
 		# calls withdraw()/deiconify() on an actual change instead of every
 		# frame (redundant, but also deiconify() steals focus back on some
@@ -313,6 +371,18 @@ class Overlay:
 		inner = tk.Frame(frame, bg='#1e1e1e')
 		inner.pack(fill='both', expand=True, padx=6, pady=4)
 		frame = inner
+
+		# Drag handle: pinch-and-hold-and-move this (not any other part of
+		# the bar, so an aimed click at Pause/Help/Settings/Quit right
+		# next to it is never mistaken for a drag) to move the whole
+		# control bar. See _bind_window_drag()'s docstring -- the new
+		# position only lasts for this run, not remembered on restart.
+		grip = tk.Label(
+			frame, text='⋮⋮', fg='#777777', bg='#1e1e1e',
+			font=('Segoe UI', 9), cursor='fleur',
+		)
+		grip.pack(side='left', padx=(4, 4))
+		_bind_window_drag(grip, self.control_window, self.screen_width, self.screen_height)
 
 		self.status_canvas = tk.Canvas(
 			frame, width=14, height=14, bg='#1e1e1e', highlightthickness=0,
@@ -768,6 +838,43 @@ class Overlay:
 	def _quit(self):
 		self.should_quit = True
 
+	# Height, in canvas pixels, of the draggable strip at the top of this
+	# panel -- drawn each frame in draw() (a thin bar with a grip glyph),
+	# and checked against event.y in _on_panel_drag_press() below to
+	# decide whether a press starts a drag or is just an ordinary press
+	# somewhere else on the canvas.
+	_PANEL_GRIP_HEIGHT = 14
+
+	def _on_panel_drag_press(self, event):
+		if event.y > self._PANEL_GRIP_HEIGHT:
+			return
+		self._panel_drag_state = {
+			'x_root': event.x_root, 'y_root': event.y_root,
+			'win_x': self.root.winfo_x(), 'win_y': self.root.winfo_y(),
+		}
+
+	def _on_panel_drag_motion(self, event):
+		state = self._panel_drag_state
+		if state is None:
+			return
+		dx = event.x_root - state['x_root']
+		dy = event.y_root - state['y_root']
+		min_onscreen = 40
+		new_x = max(min_onscreen - self.panel_width, min(
+			state['win_x'] + dx, self.screen_width - min_onscreen,
+		))
+		new_y = max(0, min(state['win_y'] + dy, self.screen_height - min_onscreen))
+		# Keep in sync with the real window position -- k.execute_event_
+		# keyboard() converts the OS cursor position into this panel's
+		# local coordinate space using exactly these two values (see
+		# origin() below), so keyboard hit-testing would silently
+		# misalign against the dragged panel if they went stale.
+		self.origin_x, self.origin_y = new_x, new_y
+		self.root.geometry(f'+{new_x}+{new_y}')
+
+	def _on_panel_drag_release(self, _event):
+		self._panel_drag_state = None
+
 	def origin(self):
 		"""(x, y) of this panel's top-left corner, in real screen coordinates.
 
@@ -804,6 +911,19 @@ class Overlay:
 
 		c = self.canvas
 		c.delete('all')
+
+		# Drag grip -- a thin strip along the very top, redrawn every
+		# frame like everything else here (delete('all') above wipes it
+		# too). See _PANEL_GRIP_HEIGHT/_on_panel_drag_press() for the
+		# matching hit-test.
+		c.create_rectangle(
+			0, 0, self.panel_width, self._PANEL_GRIP_HEIGHT,
+			fill='#2a2a2a', outline='',
+		)
+		c.create_text(
+			self.panel_width / 2, self._PANEL_GRIP_HEIGHT / 2,
+			fill='#777777', font=('Segoe UI', 8), text='⋮⋮⋮⋮⋮⋮',
+		)
 
 		if self.debug:
 			c.create_text(

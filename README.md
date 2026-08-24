@@ -30,7 +30,12 @@ and what the debug output means.
 A small control bar always sits in the bottom-right corner of the screen
 with **Pause**/**Resume**, **Help**, **Settings**, and **Quit** -- so you
 can pause tracking, look up the gestures, or quit, without needing a
-gesture or the command line. **Settings** covers camera, debug mode, four
+gesture or the command line. Both it and the keyboard/debug panel above
+it are movable: pinch-and-hold-and-drag the control bar's `⋮⋮` grip, or
+the keyboard panel's `⋮⋮⋮⋮⋮⋮` strip along its top, to reposition either
+one wherever's convenient -- neither remembers a moved position across
+restarts, both are always back at their default spot next launch.
+**Settings** covers camera, debug mode, four
 feel-tuning sliders (mouse sensitivity, cursor snappiness -- see "Does the
 cursor feel like it's sliding?" below -- scroll speed, and on-screen
 keyboard size), two off-by-default sound toggles (a short, quiet tone on
