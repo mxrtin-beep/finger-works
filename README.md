@@ -29,16 +29,28 @@ and what the debug output means.
 
 A small control bar always sits in the bottom-right corner of the screen
 with **Pause**/**Resume**, **Help**, **Settings**, and **Quit** -- so you
-can pause tracking, look up the gestures, change your camera/sensitivity/
-debug mode, or quit, without needing a gesture or the command line. Camera
-picking defaults to auto (the first camera that opens, same as always),
-overridable in Settings if you have more than one webcam. By default the
-on-screen keyboard types into whatever text box/app is actually focused,
-like a physical keyboard -- Settings also has a checkbox to switch it back
-to typing into the keyboard's own preview line instead (move it elsewhere
-yourself with `Copy Typed`/`Cut Typed`), if you'd rather have that.
-Settings persist across restarts (`~/.finger_works_settings.json`); see
-`INSTRUCTIONS.md` for details.
+can pause tracking, look up the gestures, or quit, without needing a
+gesture or the command line. **Settings** covers camera, debug mode, and
+four feel-tuning sliders: mouse sensitivity, cursor snappiness (how
+readily the cursor responds to small movements -- see "Does the cursor
+feel like it's sliding?" below), scroll speed, and on-screen keyboard
+size. The on-screen keyboard always types into whatever text box/app is
+actually focused, like a physical keyboard. Settings persist across
+restarts (`~/.finger_works_settings.json`); see `INSTRUCTIONS.md` for
+details.
+
+### Does the cursor feel like it's sliding?
+
+There are two separate smoothing layers between your fingertip and the
+cursor: one damps small (likely-jitter) movements before the cursor even
+starts moving toward them, the other governs how fast the cursor then
+closes in on wherever it's currently aiming. Historically only the second
+was adjustable (`--sensitivity`, or the sensitivity slider). If the cursor
+tracks large movements fine but feels laggy/floaty on small, precise ones,
+that's almost always the first layer -- raise **Cursor snappiness** in
+Settings. Higher trades some visible raw hand-tracking jitter for a
+cursor that responds to small movements almost immediately; lower trades
+the reverse.
 
 The on-screen keyboard is laid out roughly like a physical/phone keyboard:
 `Tab`, `Caps`, and a `Shift` down the left of the QWERTY block, `Enter`

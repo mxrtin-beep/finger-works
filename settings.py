@@ -19,11 +19,18 @@ DEFAULTS = {
 	'camera_device': None,
 	'sensitivity': 1.0,
 	'debug': False,
-	# False (default): typed keys go to whatever text box/app actually has
-	# OS focus, like a physical keyboard. True: keys only update the
-	# on-screen keyboard's own preview line, left for you to move
-	# elsewhere with Copy Typed/Cut Typed (the original behavior).
-	'type_in_keyboard_area': False,
+	# Multiplies constants.SCROLL_AMOUNT -- see mouse_control's
+	# set_scroll_speed_multiplier(). 1.0 = default speed.
+	'scroll_speed': 1.0,
+	# Multiplies the overlay panel's (and so the on-screen keyboard's) base
+	# size -- see overlay.Overlay.set_keyboard_scale(). 1.0 = default size.
+	'keyboard_scale': 1.0,
+	# 0.0 (max smoothing, steadiest but can feel like the cursor is
+	# "sliding") to 1.0 (max snappiness, tracks the fingertip almost
+	# immediately but shows more raw hand-tracking jitter) -- see
+	# mouse_control.set_cursor_snappiness(). Starts low/smooth, matching
+	# this project's original (pre-Settings) hardcoded behavior.
+	'cursor_snappiness': 0.2,
 }
 
 

@@ -38,6 +38,43 @@ def set_sensitivity_multiplier(multiplier):
 	_sensitivity_multiplier = multiplier
 
 
+# Multiplies constants.SCROLL_AMOUNT -- set from the Settings window's
+# "Scroll speed" slider, same pattern as _sensitivity_multiplier above.
+_scroll_speed_multiplier = 1.0
+
+
+def set_scroll_speed_multiplier(multiplier):
+	global _scroll_speed_multiplier
+	_scroll_speed_multiplier = multiplier
+
+
+def get_scroll_speed_multiplier():
+	return _scroll_speed_multiplier
+
+
+# The jitter-smoothing alpha _smooth_fingertip() actually uses -- set from
+# the Settings window's "Cursor snappiness" slider (see
+# set_cursor_snappiness()) via a value between constants.JITTER_ALPHA_MIN
+# and constants.JITTER_ALPHA_MAX. Starts at the low/smooth end, matching
+# this project's original (pre-Settings) hardcoded behavior.
+_jitter_alpha = c.JITTER_ALPHA_MIN
+
+
+def set_cursor_snappiness(snappiness):
+	"""`snappiness` is 0.0 (max smoothing) to 1.0 (max snappiness) -- see
+	constants.JITTER_ALPHA_MIN/MAX for what this actually changes and why."""
+	global _jitter_alpha
+	snappiness = min(max(snappiness, 0.0), 1.0)
+	_jitter_alpha = c.JITTER_ALPHA_MIN + snappiness * (c.JITTER_ALPHA_MAX - c.JITTER_ALPHA_MIN)
+
+
+def get_cursor_snappiness():
+	"""Inverse of set_cursor_snappiness() -- used to prefill the Settings
+	window with whatever's currently in effect."""
+	span = c.JITTER_ALPHA_MAX - c.JITTER_ALPHA_MIN
+	return (_jitter_alpha - c.JITTER_ALPHA_MIN) / span if span else 0.0
+
+
 def set_zoomed(is_zoomed_in):
 	"""Told by main.py whenever the zoom gesture's on/off state changes.
 	Cursor speed is automatically reduced while zoomed in (see
@@ -110,8 +147,9 @@ _filtered_x = None
 _filtered_y = None
 
 _JITTER_RADIUS_FRAC = 0.01   # frame-widths; deltas below this count as noise
-_JITTER_ALPHA = 0.15         # smoothing factor applied to jitter-sized movement
-_INTENT_ALPHA = 0.9          # smoothing factor applied to larger, intentional movement
+# The jitter-sized-movement alpha is a module-level variable (_jitter_alpha,
+# defined above near set_cursor_snappiness()), not a constant here -- it's
+# what the Settings window's "Cursor snappiness" slider actually changes.
 
 
 def _smooth_fingertip(raw_x, raw_y, frame_width):
@@ -123,7 +161,7 @@ def _smooth_fingertip(raw_x, raw_y, frame_width):
 
 	jitter_radius = frame_width * _JITTER_RADIUS_FRAC
 	delta = ((raw_x - _filtered_x) ** 2 + (raw_y - _filtered_y) ** 2) ** 0.5
-	alpha = _JITTER_ALPHA if delta < jitter_radius else _INTENT_ALPHA
+	alpha = _jitter_alpha if delta < jitter_radius else c.INTENT_ALPHA
 
 	_filtered_x += alpha * (raw_x - _filtered_x)
 	_filtered_y += alpha * (raw_y - _filtered_y)
@@ -286,7 +324,9 @@ def execute_scroll(direction):
 		_last_scroll_direction = direction
 
 	if _scroll_frame_counter % c.SCROLL_FRAME_INTERVAL == 0:
-		amount = c.SCROLL_AMOUNT if direction == 'Scroll Up' else -c.SCROLL_AMOUNT
+		amount = round(c.SCROLL_AMOUNT * _scroll_speed_multiplier)
+		if direction == 'Scroll Down':
+			amount = -amount
 		pyautogui.scroll(amount)
 
 	_scroll_frame_counter += 1

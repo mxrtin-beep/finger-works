@@ -48,14 +48,25 @@ Click **Settings** in the control bar to open a small settings window:
   one) -- it stays pinned across restarts until you set it back to Auto.
   Changing it applies immediately, no restart needed.
 - **Mouse sensitivity** -- same multiplier as `--sensitivity`, as a
-  slider.
+  slider. Governs how fast the cursor closes the gap to wherever it's
+  currently aiming (`constants.MOUSE_SPEED`).
+- **Cursor snappiness** -- a slider from 0.0 (max smoothing -- steadiest,
+  but small precise movements can feel like the cursor is "sliding"/
+  lagging behind your fingertip) to 1.0 (max snappiness -- tracks small
+  movements almost immediately, at the cost of more visible raw hand-
+  tracking jitter). A separate knob from Mouse sensitivity above: that one
+  governs how fast the cursor closes in on an already-computed target
+  position; this one governs how readily small fingertip movements even
+  *move* that target in the first place, which is what mainly reads as
+  "sliding" when it's too heavily smoothed. See
+  `constants.JITTER_ALPHA_MIN`/`JITTER_ALPHA_MAX`.
+- **Scroll speed** -- multiplies `constants.SCROLL_AMOUNT` for the
+  left-hand point-up/point-down scroll gesture (see "Left hand -- zoom,
+  paste & scroll" below).
+- **Keyboard size** -- scales the overlay panel (and so the on-screen
+  keyboard drawn on it) up or down. The panel repositions itself to stay
+  clear of the control bar at any size.
 - **Debug mode** -- same as `--debug`, as a checkbox; applies immediately.
-- **Type into the keyboard's own area** -- off by default. Off, the
-  on-screen keyboard types into whatever text box/app actually has OS
-  focus, just like a physical keyboard. On, keys only build up the
-  keyboard's own preview line instead (the original behavior), which you
-  then move elsewhere yourself with the `Copy Typed`/`Cut Typed` keys.
-  Applies immediately.
 
 Hit **Apply** to save and apply, or **Cancel**/close the window to discard.
 Settings are saved to `~/.finger_works_settings.json` and persist across
@@ -80,9 +91,13 @@ With `--debug`:
   (`Mousing`, `Left-Click`, ...), the active control state (`Mouse` or
   `Keyboard`), the current mouse-sensitivity multiplier (`Sensitivity:
   1.0x`, from `--sensitivity`), and -- next to the action text -- which
-  detected hand is doing what, e.g. `Mousing  [Right [Mouse]]`, or with a
-  left hand also in frame, `Mousing  [Right [Mouse], Left [Zoom: open,
-  normal] [Paste: neither (none out)] [Scroll: neither (none out)]]`.
+  detected hand is doing what, e.g. `Mousing  [Right [Mouse, scale=228]]`,
+  or with a left hand also in frame, `Mousing  [Right [Mouse, scale=228],
+  Left [Zoom: open, normal] [Paste: neither (none out)] [Scroll: neither
+  (none out)]]`. The `scale=NNN` next to `Right [Mouse` is the live
+  wrist-to-knuckle pixel size gesture cutoffs are normalized against this
+  frame -- see "Hand-to-camera distance" below for calibrating
+  `HAND_SCALE_TUNING_REFERENCE` off it.
 - A second always-on-top window (top-left corner) shows the **live camera
   feed**, with each detected hand's skeleton traced over it in real time
   and its current gesture labeled right next to it (cyan for the right/
@@ -131,7 +146,7 @@ cursor isn't currently over one of the keyboard's own buttons -- so you can
 type something, then click elsewhere (e.g. confirm a rename, or click into
 another field) without closing the keyboard first.
 
-### Left hand -- zoom & paste
+### Left hand -- zoom, paste & scroll
 
 The left hand is dedicated to zoom and paste, so the right hand isn't stuck
 doing everything. Routing is strict, by hand identity (MediaPipe's own

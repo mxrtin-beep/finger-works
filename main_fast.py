@@ -288,21 +288,25 @@ def type_char(typed_char, typed_text, type_in_keyboard_area=False, shift_active=
 	"""Handle one on-screen keyboard key, and return the updated local
 	preview-text string shown on the overlay.
 
-	`type_in_keyboard_area` (Settings -> "Type into the keyboard's own
-	area") decides where ordinary character keys, Space, Backspace, and
-	Paste actually go:
+	`type_in_keyboard_area` decides where ordinary character keys, Space,
+	Backspace, and Paste actually go. Always False now -- main_fast.py no
+	longer exposes a Settings toggle for this (it was a confusing extra
+	option; typing into whatever's really focused is what everyone
+	actually wants) -- but the parameter and its True branch are kept
+	rather than ripped out, since the behavior is still simple,
+	self-contained, and easy to resurrect if that turns out wrong:
 
-	- False (default): a real keystroke is sent to whatever window has OS
-	  focus -- exactly like a physical keyboard -- and the overlay's own
-	  preview line is just an echo/log for feedback, not the real
-	  destination.
-	- True: nothing is sent to the OS at all; those keys only build up the
-	  overlay's own preview line, which you then move elsewhere yourself
-	  with Copy Typed/Cut Typed. This is the original behavior, kept as an
-	  option for anyone who'd rather type somewhere quarantined from
-	  whatever's focused and move it over deliberately.
+	- False (always, currently): a real keystroke is sent to whatever
+	  window has OS focus -- exactly like a physical keyboard -- and the
+	  overlay's own preview line is just an echo/log for feedback, not the
+	  real destination.
+	- True (unreachable via the UI right now): nothing is sent to the OS
+	  at all; those keys only build up the overlay's own preview line,
+	  which you then move elsewhere yourself with Copy Typed/Cut Typed.
+	  This was the original behavior, before typing into the real focused
+	  window existed at all.
 
-	Copy/Cut always send their real hotkey regardless of this setting --
+	Copy/Cut always send their real hotkey regardless of this parameter --
 	they act on the focused app's current selection, which there's no
 	"keyboard area" equivalent for.
 
@@ -433,6 +437,9 @@ def main(settings):
 	debug = settings['debug']
 
 	mc.set_sensitivity_multiplier(mouse_sensitivity)
+	mc.set_scroll_speed_multiplier(settings.get('scroll_speed', 1.0))
+	mc.set_cursor_snappiness(settings.get('cursor_snappiness', 0.2))
+	keyboard_scale = settings.get('keyboard_scale', 1.0)
 
 	cap_width = width
 	cap_height = height
@@ -448,11 +455,13 @@ def main(settings):
 	# on, unless the user explicitly chose one.
 	camera_device_setting = settings.get('camera_device')
 
-	# Whether on-screen keyboard keys type into whatever's really focused
-	# (False, default) or stay confined to the overlay's own preview line
-	# (True) -- see type_char()'s docstring. Mutable via Settings ->
-	# Apply, hence a plain local rather than baked into a closure.
-	type_in_keyboard_area = settings.get('type_in_keyboard_area', False)
+	# On-screen keyboard keys always type into whatever's really focused,
+	# like a physical keyboard -- see type_char()'s docstring. (There used
+	# to be a Settings toggle to instead confine typing to the overlay's
+	# own preview line; removed since typing into the real focused window
+	# is what everyone actually wants, and it was just adding a confusing
+	# extra option.)
+	type_in_keyboard_area = False
 
 	print(
 		f'FingerWorks v{__version__} -- started '
@@ -501,13 +510,22 @@ def main(settings):
 		return True
 
 	def handle_settings_changed(new_settings):
-		nonlocal cap_device, camera_device_setting, type_in_keyboard_area
+		nonlocal cap_device, camera_device_setting, button_list
 		fw_settings.save_settings(new_settings)
 
 		mc.set_sensitivity_multiplier(new_settings['sensitivity'])
 		overlay.set_sensitivity(new_settings['sensitivity'])
 		overlay.set_debug(new_settings['debug'])
-		type_in_keyboard_area = new_settings.get('type_in_keyboard_area', False)
+		mc.set_scroll_speed_multiplier(new_settings.get('scroll_speed', 1.0))
+		mc.set_cursor_snappiness(new_settings.get('cursor_snappiness', 0.2))
+
+		overlay.set_keyboard_scale(new_settings.get('keyboard_scale', 1.0))
+		# The keyboard's button layout is sized off the overlay panel's
+		# pixel dimensions (see keyboard.get_button_list), so a keyboard-
+		# size change needs it rebuilt against the new panel size -- same
+		# as when the letters/symbols page toggles, just triggered from
+		# here instead.
+		button_list = k.get_button_list(overlay.panel_width, overlay.panel_height, page=keyboard_page)
 
 		resolved_device = fw_settings.pick_camera_device(new_settings)
 		if resolved_device != cap_device:
@@ -522,7 +540,9 @@ def main(settings):
 			'camera_device': camera_device_setting,
 			'sensitivity': overlay.mouse_sensitivity,
 			'debug': overlay.debug,
-			'type_in_keyboard_area': type_in_keyboard_area,
+			'scroll_speed': mc.get_scroll_speed_multiplier(),
+			'cursor_snappiness': mc.get_cursor_snappiness(),
+			'keyboard_scale': overlay.keyboard_scale,
 		}
 
 	_startup_t0 = time.time()
@@ -559,6 +579,7 @@ def main(settings):
 
 	overlay = ov.Overlay(
 		screenWidth, screenHeight, debug=debug, mouse_sensitivity=mouse_sensitivity,
+		keyboard_scale=keyboard_scale,
 		on_settings_changed=handle_settings_changed,
 		get_settings=get_current_settings,
 		get_available_cameras=fw_settings.list_cameras,

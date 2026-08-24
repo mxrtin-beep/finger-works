@@ -45,7 +45,9 @@ FINGER_INDICES = [4, 8, 12, 16, 20]
 # debug text/overlay, and set this to that number -- every ratio below
 # rescales together, so this is the one thing to retune, not each cutoff
 # individually.
-HAND_SCALE_TUNING_REFERENCE = 150
+# Measured directly (--debug's scale=NNN reading, at the distance
+# gestures used to work reliably at): ~200-250, so 225 (the midpoint).
+HAND_SCALE_TUNING_REFERENCE = 225
 
 FINGER_OUT_CUTOFF = 280 / HAND_SCALE_TUNING_REFERENCE   # extended-finger cutoff, was 280px
 
@@ -94,6 +96,28 @@ MOUSE_Y_SENS = 2.0
 # Raised to track much closer to the fingertip (like the debug dot)
 # while still smoothing out a bit of frame-to-frame hand-tracking jitter.
 MOUSE_SPEED = 0.65
+
+# Bounds for the Settings window's "Cursor snappiness" slider, which
+# controls how heavily small (likely-jitter) fingertip movements get
+# damped before the cursor even starts closing in on them -- see
+# mouse_control._smooth_fingertip()/set_cursor_snappiness(). The slider
+# runs 0.0 (max smoothing -- steadiest, but reads as "sliding"/laggy for
+# small precise movements) to 1.0 (snappiest -- tracks your fingertip
+# almost immediately, but shows more raw hand-tracking jitter), linearly
+# interpolated between these two alpha values. This is a separate knob
+# from MOUSE_SPEED/`--sensitivity` above: that one governs how fast the
+# cursor closes the gap to an already-computed target position; this one
+# governs how readily small movements even *move* that target position
+# in the first place, which is what mainly reads as "sliding" when it's
+# too heavily smoothed.
+JITTER_ALPHA_MIN = 0.05
+JITTER_ALPHA_MAX = 0.6
+
+# Smoothing factor applied to larger, clearly-intentional fingertip
+# movement -- always fast, regardless of the snappiness slider, since
+# there's no jitter-vs-intent ambiguity to weigh once a movement is this
+# big.
+INTENT_ALPHA = 0.9
 
 # Cursor speed is scaled by this while the zoom gesture has the screen
 # zoomed in. A fixed-size hand movement covers much more of the visible
