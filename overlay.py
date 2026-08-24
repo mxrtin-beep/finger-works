@@ -12,6 +12,11 @@ _STATE_COLORS = {
 	'active': '#e74c3c',
 }
 
+# These keyboard labels get their text nudged up slightly (see draw()) --
+# short, wide buttons otherwise read as visually bottom-heavy when their
+# text is dead-centered.
+_RAISED_LABELS = {'Tab', 'Caps', 'Shift', 'Enter', 'Undo', 'Redo', 'Space', '123', 'ABC'}
+
 # Simple text-and-emoji cheat sheet shown in the Help window -- a quick
 # visual reminder of the gestures, not a replacement for the full reference
 # in INSTRUCTIONS.md (which also covers every tunable parameter).
@@ -590,8 +595,16 @@ class Overlay:
 					font_size = max(10, min(20, int(h / 2.2)))
 				else:
 					font_size = max(7, min(13, int(h / 4.5)))
+
+				# These labels sit visually low when dead-centered in
+				# their (fairly short/wide) buttons -- nudged up a bit to
+				# look more centered.
+				text_y = y + h / 2
+				if button.text in _RAISED_LABELS:
+					text_y -= h * 0.14
+
 				c.create_text(
-					x + w / 2, y + h / 2, fill='white',
+					x + w / 2, text_y, fill='white',
 					anchor='center', justify='center',
 					font=('Arial', font_size), text=display_text,
 				)

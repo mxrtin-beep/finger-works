@@ -165,6 +165,14 @@ def get_button_list(panel_width, panel_height, page='letters'):
 
 	buttonList = []
 
+	# A small, fixed pixel gutter between adjacent keys -- not a fraction
+	# of each key's own width. Sizing the gap as a percentage of the key
+	# (the old approach) meant a very wide key (Space) got a proportionally
+	# huge gap on each side of it, which is what made the space around
+	# Space and the bottom action row look oversized/uneven. A fixed gap
+	# looks the same regardless of how wide the key next to it is.
+	gap = max(3, round(panel_width * 0.006))
+
 	def add_row(row, row_y, row_height):
 		# Each row's own key widths are spread across the *same* usable
 		# width independently of every other row's total -- so a row with
@@ -176,10 +184,23 @@ def get_button_list(panel_width, panel_height, page='letters'):
 		cell_w = usable_width / total_units
 
 		x = margin_x
-		for label, width in row:
+		last_idx = len(row) - 1
+		for idx, (label, width) in enumerate(row):
 			key_w = cell_w * width
-			pos = [int(x + (key_w - key_w * 0.85) / 2), int(row_y)]
-			size = [int(key_w * 0.85), int(row_height)]
+			# Only the gap *between* keys is carved out of each button's
+			# rendered width -- the first key in every row still starts
+			# exactly at margin_x, and the last key in every row still
+			# ends exactly at margin_x + usable_width, regardless of that
+			# row's own total unit count. That's what keeps every row's
+			# left and right edges flush with each other (and with the
+			# panel), where shrinking every key symmetrically (including
+			# its outer edge) used to leave each row's actual left/right
+			# edge at a slightly different inset depending on its first/
+			# last key's width.
+			left_inset = 0 if idx == 0 else gap / 2
+			right_inset = 0 if idx == last_idx else gap / 2
+			pos = [int(x + left_inset), int(row_y)]
+			size = [int(key_w - left_inset - right_inset), int(row_height)]
 			buttonList.append(Button(pos, label, size=size))
 			x += key_w
 
