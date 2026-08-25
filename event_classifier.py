@@ -3,6 +3,16 @@ import numpy as np
 import constants as c
 
 
+# Turned off for now (2026-08-25): the "scissors" pose (index + middle
+# extended) that triggers Cut Typed (right hand) / Paste (left hand) was
+# firing by accident during ordinary use, corrupting whatever the user was
+# actually doing. Both gestures still exist and can be flipped back on by
+# setting this back to True -- see is_scissors below and get_paste_event()
+# -- the on-screen keyboard's own 'Cut Typed'/'Paste' keys are unaffected
+# either way, since this only gates the gesture shortcut, not the buttons.
+CUT_PASTE_GESTURES_ENABLED = False
+
+
 # THUMB: 35,000 - 55,000
 # INDEX: 25,000 - 100,000
 # MIDDLE: 16,000 - 90,000
@@ -131,7 +141,10 @@ def get_event_fast(rel_landmark_list, control_state):
 	# just treated as an ordinary hand pose (returns 'Mousing') so it
 	# doesn't do anything unexpected while you're just moving the cursor.
 	is_scissors = np.array_equal(finger_out_arr, np.array([False, True, True, False, False]))
-	cut_typed = is_scissors and not _was_scissors and control_state == 'Keyboard'
+	cut_typed = (
+		is_scissors and not _was_scissors and control_state == 'Keyboard'
+		and CUT_PASTE_GESTURES_ENABLED
+	)
 	_was_scissors = is_scissors
 
 	if is_scissors:
@@ -369,7 +382,7 @@ def get_paste_event(rel_landmark_list):
 	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
 
 	is_scissors = np.array_equal(finger_out_arr, np.array([False, True, True, False, False]))
-	fire = is_scissors and not _was_left_scissors
+	fire = is_scissors and not _was_left_scissors and CUT_PASTE_GESTURES_ENABLED
 	_was_left_scissors = is_scissors
 
 	if is_scissors:
