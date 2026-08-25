@@ -56,9 +56,13 @@ def get_keyboard_sounds_enabled():
 # falls back to exactly the previous behavior unchanged, so there's no
 # downside to trying it. `pip install pygame` to get it; unlike simpleaudio
 # (tried earlier in this project and dropped -- see git history) it's one
-# of the most widely used Python packages, with mature prebuilt wheels for
-# every common platform/Python version, so it's much less likely to fail
-# to install the way simpleaudio did.
+# of the most widely used Python packages, with prebuilt wheels for every
+# common platform/Python version -- *except* very new Python releases,
+# where a prebuilt wheel may not exist yet (observed failing to build
+# from source on Python 3.14: missing MSVC build tools/distutils, not
+# worth chasing unless a full Visual Studio Build Tools setup is already
+# in place). On an unsupported Python version, `pip install pygame` will
+# simply fail and this whole block no-ops -- see requirements.txt.
 try:
 	import pygame
 
@@ -136,27 +140,24 @@ if not _HAVE_PYGAME and sys.platform == 'win32':
 #   logic here -- one would either never trigger, going by that same
 #   evidence, or double up a call that already "succeeded".)
 #
-# SND_ASYNC hands the sound off to the OS and returns immediately without
-# blocking; SND_NODEFAULT means a genuine failure stays silent instead of
-# Windows substituting its own system/error sound. SND_NODEFAULT still
-# isn't airtight across every failure path on every driver -- the system
-# sound has been reported firing occasionally even with it set. Calling
-# PlaySound(None, SND_PURGE) immediately beforehand -- a separate,
-# explicit "stop anything winsound is currently doing" call, rather than
-# relying solely on a single PlaySound call's own implicit stop-and-
-# restart behavior when something's still playing -- is a known mitigation
-# for exactly this kind of intermittent winsound flakiness under repeated
-# calls. Not a guarantee (nothing short of not using winsound at all is,
-# per the comment above -- pygame doesn't have this failure mode), but a
-# real, low-risk thing to try that can only reduce how often the fallback
-# path is reached in a bad state, never increase it.
+# - A version after *that* added SND_NODEFAULT (meant to stop Windows
+#   substituting its own system/error sound on a genuine failure) and,
+#   later, an explicit PlaySound(None, SND_PURGE) call right before every
+#   play (a known mitigation for winsound flakiness under repeated
+#   calls, stopping whatever winsound is currently doing before starting
+#   the new sound). Neither actually fixed the intermittent system-sound
+#   substitution -- it was still happening with both in place. Both are
+#   removed here, back to plain SND_FILENAME | SND_ASYNC -- exactly the
+#   very first version's flags, the only configuration of this backend
+#   that was never actually reported to have this problem. Worth being
+#   honest about what this means: there's no remaining evidence any
+#   winsound flag combination fixes this reliably on every system, so
+#   this is "known to not make it worse" more than "confirmed to fix
+#   it" -- pygame remains the real fix, whenever a prebuilt wheel for
+#   your Python version is available.
 def _play_windows_fallback(path):
 	import winsound
-	winsound.PlaySound(None, winsound.SND_PURGE)
-	winsound.PlaySound(
-		path,
-		winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
-	)
+	winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
 
 
 # macOS/Linux fallback: routed through a single dedicated background

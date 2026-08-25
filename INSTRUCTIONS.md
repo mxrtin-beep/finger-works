@@ -84,20 +84,33 @@ Click **Settings** in the control bar to open a small settings window:
   regenerates `sounds/click.wav`/`sounds/key.wav` from adjustable
   parameters (rerun it after editing, then restart the program).
   Playback prefers `pygame` (`pip install pygame`; optional -- not in the
-  base install, but recommended for reliability, and everything falls
-  back to a per-platform system player automatically if it isn't
-  installed or its mixer can't start). The fallback path is what keeps
-  fast repeated triggers (e.g. quickly switching keys) from racing each
-  other and dropping a sound on macOS/Linux; on Windows it reads the WAV
-  file fresh on every play via `winsound`, which -- despite several
-  rounds of fixes, including an explicit "stop anything currently
-  playing" purge immediately before every play -- can still occasionally
-  misfire (drop a sound, or rarely substitute a Windows system sound)
-  purely due to real limitations of that legacy API, not a bug with a
-  further fix available. `pygame`, when available, doesn't have this
-  problem at all, since it talks to a real audio backend instead of
-  wrapping `PlaySound()` -- installing it is the actual fix, not another
-  winsound tweak.
+  base install, and everything falls back to a per-platform system
+  player automatically if it isn't installed or its mixer can't start).
+  `pygame` talks to a real audio backend instead of wrapping the legacy
+  `PlaySound()` WinAPI call, so it doesn't have the failure mode
+  described below at all -- but it only installs where a prebuilt wheel
+  exists for your exact Python version; on a very new Python release
+  (observed on 3.14) there may not be one yet, and building it from
+  source needs MSVC build tools most people don't have installed. If
+  `pip install pygame` fails for you, it's not worth chasing further --
+  just skip it; everything still works via the fallback below, and
+  nothing else in this project depends on it.
+
+  The fallback path is what keeps fast repeated triggers (e.g. quickly
+  switching keys) from racing each other and dropping a sound on
+  macOS/Linux; on Windows it reads the WAV file fresh on every play via
+  `winsound.PlaySound(path, SND_FILENAME | SND_ASYNC)`. Two extra flags
+  were tried and removed here (`SND_NODEFAULT`, and an explicit
+  `SND_PURGE` call before every play) aiming to stop Windows
+  occasionally substituting its own system/error sound for ours -
+  neither fixed it, so both were reverted rather than kept as
+  unproven complexity; this is deliberately the plainest version of the
+  call, matching what this project's very first sound implementation
+  used. Occasional misfires on Windows via this fallback (a dropped
+  sound, or rarely a substituted system sound) are a real, currently
+  unresolved limitation of the legacy `PlaySound()` API on some
+  driver/OS combinations, not a bug with a further winsound-side fix
+  available -- `pygame`, where it can be installed, is the actual fix.
 - **Debug mode** -- same as `--debug`, as a checkbox. Session-only,
   unlike every other setting here: it's never saved to
   `~/.finger_works_settings.json`, so it's always back off the next time
