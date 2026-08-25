@@ -632,8 +632,19 @@ class Overlay:
 			highlightthickness=2,
 			highlightbackground='#4a4a4a',
 			highlightcolor='#4a4a4a',
+			cursor='fleur',
 		)
 		self.video_canvas.pack(fill='both', expand=True)
+
+		# Movable at runtime, same as the control bar/keyboard panel -- see
+		# _bind_window_drag()'s docstring (not persisted across restarts).
+		# Unlike those two, the whole canvas is the drag handle here rather
+		# than a small dedicated grip: this window has no clickable content
+		# of its own to protect from an accidental drag (it's just a live
+		# camera preview -- update_video() below only ever draws an image
+		# to it, no buttons/keys), so there's no ambiguity a smaller grip
+		# would need to resolve.
+		_bind_window_drag(self.video_canvas, self.video_window, self.screen_width, self.screen_height)
 
 	def _destroy_video_window(self):
 		self.video_window.destroy()

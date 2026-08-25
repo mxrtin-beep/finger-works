@@ -48,6 +48,13 @@ control bar above) is draggable too -- a thin `⋮⋮⋮⋮⋮⋮` strip along i
 top, same idea: pinch-and-hold-and-move only that strip, not the keyboard
 keys beneath it. Also not remembered across restarts.
 
+The debug-mode camera preview window (see "Debug mode" below) is
+draggable too -- pinch-and-hold-and-move anywhere on it, not just a
+strip/grip. Unlike the control bar and keyboard panel, it has no
+clickable content of its own to protect from an accidental drag (it's
+just a live camera preview), so the whole window doubles as its own drag
+handle. Also not remembered across restarts.
+
 ## Settings
 
 Click **Settings** in the control bar to open a small settings window:
