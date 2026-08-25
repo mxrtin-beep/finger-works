@@ -444,31 +444,48 @@ class Overlay:
 
 	_CLICK_INDICATOR_SIZE = 20
 	_CLICK_INDICATOR_COLORS = {'left': '#2ecc71', 'right': '#f1c40f'}  # green / yellow
+	# Where the indicator sits between clicks -- off the visible desktop
+	# in both directions, so it's effectively hidden without ever calling
+	# withdraw()/deiconify() (see _create_click_indicator_window()'s
+	# docstring for why that matters).
+	_CLICK_INDICATOR_PARK_XY = (-1000, -1000)
 
 	def _create_click_indicator_window(self):
-		"""Build the (initially hidden) small indicator window show_click_
-		indicator() repositions and reveals on every click. Built once and
-		reused rather than created fresh per click, since click can fire
-		every camera frame during a drag-then-release and a fresh Toplevel
-		per click would be needless window-creation overhead on top of
-		that.
+		"""Build the small indicator window show_click_indicator()
+		repositions on every click. Built once and reused, not created
+		fresh per click.
 
-		This is a plain solid-colored square, not a ring with a
-		transparent background -- a previous version tried
-		wm_attributes('-transparentcolor', ...) (a real, documented
-		Windows-only Tk feature) to get a true ring with nothing else
-		visible, but it didn't actually take effect in practice (showing
-		up as an opaque square instead, in whatever color the canvas
-		background was set to). Rather than debug Tk's transparency
-		support blind with no way to see the actual result, this trades
-		"ring" for "guaranteed correct color, always": the whole small
-		window is just filled with the click color directly, so there's
-		no separate background color that could ever show up wrong."""
+		Two things about this version, both learned the hard way from two
+		earlier ones that didn't render correctly in practice (reported as
+		a solid black square) despite reasoning that should have worked:
+
+		1. Not a ring with a transparent background --
+		   wm_attributes('-transparentcolor', ...) (a real, documented
+		   Windows-only Tk feature) didn't actually take visible effect.
+		   The whole window is just filled with the click color directly
+		   instead, so there's no separate background color that could
+		   ever show up wrong.
+		2. Never withdrawn or deiconified after this initial setup --
+		   parked off-screen (see _CLICK_INDICATOR_PARK_XY) instead of
+		   hidden, and only ever *repositioned* on/off screen from here
+		   on. The one visual feedback approach that's actually confirmed
+		   working in practice is the control bar itself: a window that's
+		   mapped once and stays mapped, where only color/geometry change
+		   afterward -- never re-shown after being withdrawn. This mirrors
+		   that pattern instead of the withdraw()/deiconify()-per-click
+		   cycle two earlier versions used, which is suspected (though not
+		   confirmed, with no way to test directly) to be exactly what was
+		   rendering as a black square: Windows' compositor can show a
+		   freshly (re-)mapped topmost window as a blank/black placeholder
+		   for a frame or two before it's actually painted, and this
+		   window was being re-mapped on every single click.
+		"""
 		size = self._CLICK_INDICATOR_SIZE
+		park_x, park_y = self._CLICK_INDICATOR_PARK_XY
 		self._indicator_window = tk.Toplevel(self.root)
 		self._indicator_window.overrideredirect(True)
 		self._indicator_window.attributes('-topmost', True)
-		self._indicator_window.geometry(f'{size}x{size}+0+0')
+		self._indicator_window.geometry(f'{size}x{size}+{park_x}+{park_y}')
 		self._indicator_window.configure(bg=self._CLICK_INDICATOR_COLORS['left'])
 
 		self._indicator_window.update_idletasks()
@@ -478,18 +495,21 @@ class Overlay:
 		# thing that stops the indicator from ever swallowing a real
 		# click) and why there's no equivalent on macOS/Linux.
 		_make_window_clickthrough(self._indicator_window.winfo_id())
-		self._indicator_window.withdraw()
+		# Mapped once, here, and never withdrawn again -- see this
+		# method's docstring.
+		self._indicator_window.deiconify()
 
 	def set_click_indicator_enabled(self, enabled):
-		"""Settings -> "Click indicator" checkbox. Hides it immediately
-		(and cancels any pending auto-hide) if turned off mid-flash,
-		rather than leaving one last indicator stuck on screen."""
+		"""Settings -> "Click indicator" checkbox. Parks it off-screen
+		immediately (and cancels any pending auto-park) if turned off
+		mid-flash, rather than leaving one last indicator stuck on
+		screen."""
 		self.click_indicator_enabled = enabled
 		if not enabled:
 			if self._click_indicator_after_id is not None:
 				self._indicator_window.after_cancel(self._click_indicator_after_id)
 				self._click_indicator_after_id = None
-			self._indicator_window.withdraw()
+			self._park_click_indicator()
 
 	def show_click_indicator(self, kind, x, y):
 		"""Briefly show a small solid-colored square centered on (x, y) --
@@ -523,15 +543,16 @@ class Overlay:
 		self._indicator_window.geometry(
 			f'{size}x{size}+{int(x - size / 2)}+{int(y - size / 2)}'
 		)
-		self._indicator_window.deiconify()
 		self._indicator_window.lift()
 		if self._click_indicator_after_id is not None:
 			self._indicator_window.after_cancel(self._click_indicator_after_id)
-		self._click_indicator_after_id = self._indicator_window.after(150, self._hide_click_indicator)
+		self._click_indicator_after_id = self._indicator_window.after(150, self._park_click_indicator)
 
-	def _hide_click_indicator(self):
+	def _park_click_indicator(self):
 		self._click_indicator_after_id = None
-		self._indicator_window.withdraw()
+		size = self._CLICK_INDICATOR_SIZE
+		park_x, park_y = self._CLICK_INDICATOR_PARK_XY
+		self._indicator_window.geometry(f'{size}x{size}+{park_x}+{park_y}')
 
 	# --- Settings window ------------------------------------------------
 

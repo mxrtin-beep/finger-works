@@ -39,15 +39,10 @@ def get_keyboard_sounds_enabled():
 
 def _warm_file_cache(path):
 	"""Read (and discard) a file's bytes once, so the OS's file cache has
-	it in memory before playback ever needs it -- see the comment above
-	_play_blocking() for why. Deliberately doesn't change *how* playback
-	reads the file afterward (still winsound's SND_FILENAME, on Windows)
-	-- an earlier version instead switched playback itself to read from
-	an in-memory copy (SND_MEMORY), which turned out to be the wrong fix:
-	SND_MEMORY is pickier about exact WAV formatting than SND_FILENAME,
-	and it was silently falling back to a Windows system/error sound
-	instead of ours. This just warms the cache and leaves the
-	known-working playback path alone."""
+	it in memory before playback ever needs it -- a file's first-ever read
+	in this process can be slower than every read after it, which is what
+	was showing up as "the first key press doesn't seem to make a sound".
+	Doesn't change how the real plays below actually read the file."""
 	try:
 		with open(path, 'rb') as f:
 			f.read()
@@ -56,42 +51,60 @@ def _warm_file_cache(path):
 
 
 if sys.platform == 'win32':
-	# Same reasoning as before: a file's first-ever read in this process
-	# can be slower than every read after it, since the OS hasn't cached
-	# it yet -- which is what was showing up as "the first key press
-	# doesn't seem to make a sound". Doing this once here, at import time
-	# (well before any real click/keypress, while the hand-tracking model
-	# is still loading), moves that one-time cost out of the way, without
-	# touching how the real plays below actually read the file.
 	_warm_file_cache(_CLICK_PATH)
 	_warm_file_cache(_KEY_PATH)
 
 
-# Playback happens one sound at a time, from a single dedicated background
-# thread, rather than firing each one off independently -- on macOS/Linux
-# (a fresh `afplay`/`aplay` process per play) that's what stops two sounds
-# close together in time from racing to open the same audio device, where
-# the loser can fail silently instead of queuing up. On Windows a single
-# process is already naturally serialized through one winsound call at a
-# time, but routing everything through the same queue keeps this file's
-# logic the same across all three platforms.
+# Windows: winsound.PlaySound is called directly, synchronously (returns
+# immediately -- see SND_ASYNC below), right on whatever thread calls
+# play_click()/play_key(). This went through several wrong turns before
+# landing back here:
+#
+# - The very first version did exactly this and worked correctly.
+# - A later version moved every platform's playback onto a dedicated
+#   background thread with *blocking* calls (subprocess.run() on macOS/
+#   Linux, winsound.PlaySound() *without* SND_ASYNC on Windows), reasoning
+#   from a real macOS/Linux problem (two `afplay`/`aplay` processes
+#   racing for the audio device when sounds fire close together, with the
+#   loser sometimes failing silently) that never applied to Windows at
+#   all -- winsound doesn't spawn a process, and needed no such fix. That
+#   change broke Windows playback outright: it went completely silent.
+# - Another version then tried switching Windows to SND_MEMORY instead,
+#   misdiagnosing the *previous* regression as a file-caching problem --
+#   SND_MEMORY turned out to be pickier about exact WAV formatting than
+#   SND_FILENAME, so it silently substituted a Windows system/error sound
+#   instead of ours.
+#
+# The actual fix is simpler than any of those: put SND_ASYNC back and
+# stop routing Windows through the background thread at all. SND_ASYNC
+# hands the sound off to the OS and returns immediately without blocking,
+# which is also what makes two sounds fired close together not a problem
+# on Windows in the first place -- there's no process to race, and the OS
+# manages the overlap itself. SND_NODEFAULT is kept (a small genuine
+# improvement over the original): if playback ever *does* fail for some
+# other reason, Windows stays silent instead of substituting its own
+# system/error sound, which reads as "something's wrong" for a click that
+# actually worked.
+def _play_windows(path):
+	import winsound
+	winsound.PlaySound(
+		path,
+		winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
+	)
+
+
+# macOS/Linux: still routed through a single dedicated background thread,
+# one sound at a time, via subprocess.run() (which *waits* for that one
+# player process to finish) rather than firing each one off independently
+# -- this is what stops two sounds close together in time from racing to
+# open the same audio device, where the loser can fail silently instead
+# of queuing up (this is the real problem described above, genuinely
+# applicable here, just never on Windows).
 _sound_queue = queue.Queue()
 
 
 def _play_blocking(path):
-	if sys.platform == 'win32':
-		import winsound
-		# No SND_ASYNC -- this call is already on the dedicated background
-		# thread below, so blocking it until playback finishes is exactly
-		# what serializes plays through one at a time. SND_NODEFAULT is
-		# what stops Windows from substituting its own system/error sound
-		# if this ever *does* fail to play for some other reason -- better
-		# to silently do nothing than play a sound that reads as "your
-		# click didn't work" for a click that actually did.
-		winsound.PlaySound(
-			path, winsound.SND_FILENAME | winsound.SND_NODEFAULT,
-		)
-	elif sys.platform == 'darwin':
+	if sys.platform == 'darwin':
 		subprocess.run(
 			['afplay', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 		)
@@ -112,17 +125,25 @@ def _sound_worker():
 			_sound_queue.task_done()
 
 
-# Daemon thread: never blocks program exit, even mid-playback.
-threading.Thread(target=_sound_worker, daemon=True).start()
+if sys.platform != 'win32':
+	# Daemon thread: never blocks program exit, even mid-playback. Not
+	# started on Windows at all -- nothing there ever queues anything.
+	threading.Thread(target=_sound_worker, daemon=True).start()
 
 
 def _play(path):
-	"""Queue `path` to play on the background sound thread -- a missing
-	sound file is checked for here (not on the worker thread) so it's a
-	silent, immediate no-op rather than a queued failure."""
+	"""Play `path` -- immediately (Windows) or queued onto the background
+	thread (macOS/Linux). A missing sound file is a silent, immediate
+	no-op either way."""
 	if not os.path.exists(path):
 		return
-	_sound_queue.put(path)
+	if sys.platform == 'win32':
+		try:
+			_play_windows(path)
+		except Exception as exc:
+			print(f'[WARN] Could not play sound {path}: {exc}')
+	else:
+		_sound_queue.put(path)
 
 
 def play_click():
