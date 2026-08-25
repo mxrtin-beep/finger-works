@@ -82,19 +82,21 @@ Click **Settings** in the control bar to open a small settings window:
   press, respectively -- see `sounds.py`. Deliberately light rather than
   an obvious "beep"; if you want them louder/different, `generate_sounds.py`
   regenerates `sounds/click.wav`/`sounds/key.wav` from adjustable
-  parameters (rerun it after editing, then restart the program -- the WAV
-  bytes are only read once, at startup, not on every play; see below).
-  Playback needs no extra dependency: a background thread plays sounds
-  one at a time via a per-platform system player, which is what keeps
-  fast repeated triggers (e.g. quickly switching keys) from ever racing
-  each other and dropping a sound. On Windows specifically (`winsound`),
-  both WAV files' bytes are also read into memory once at import time and
-  played from memory from then on, rather than re-reading the file every
-  play -- a file's first-ever read in a process can be slower than every
-  read after it (not yet in the OS's file cache), which was showing up as
-  "the very first key press doesn't seem to make a sound".
+  parameters (rerun it after editing, then restart the program).
+  Playback prefers `pygame` (`pip install pygame`; optional -- not in the
+  base install, but recommended for reliability, and everything falls
+  back to a per-platform system player automatically if it isn't
+  installed or its mixer can't start). The fallback path is what keeps
+  fast repeated triggers (e.g. quickly switching keys) from racing each
+  other and dropping a sound on macOS/Linux; on Windows it reads the WAV
+  file fresh on every play via `winsound`, which -- despite several
+  rounds of fixes -- can still occasionally misfire (drop a sound, or
+  rarely substitute a Windows system sound) purely due to real
+  limitations of that legacy API. `pygame`, when available, doesn't have
+  this problem, since it talks to a real audio backend instead of
+  wrapping `PlaySound()`.
 - **Click indicator** -- on by default, unlike the two sound settings
-  above. A brief (~150ms) colored ring at the cursor on every left/right
+  above. A brief (~150ms) colored square at the cursor on every left/right
   click -- green for left, yellow for right -- see
   `overlay.show_click_indicator()`. This is click confirmation that
   doesn't depend on your OS/audio setup actually cooperating, unlike the

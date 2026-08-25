@@ -100,11 +100,24 @@ def _make_window_clickthrough(hwnd):
 	target beneath it. WS_EX_TRANSPARENT (combined with WS_EX_LAYERED,
 	which it requires) is the standard way to do this on Windows.
 
-	There's no equivalent public, portable way to do this from plain Tk on
-	macOS or Linux -- both would need real platform-native window-server
-	APIs (e.g. Cocoa's ignoresMouseEvents on macOS) that aren't reachable
-	from stdlib Tkinter, so this is a no-op there and the indicator is
-	just a very brief (~150ms) real window instead."""
+	Two earlier versions of the click indicator set WS_EX_LAYERED here but
+	never followed up with SetLayeredWindowAttributes -- which turns out
+	to be required, not optional: a layered window Windows was never
+	given real attributes for has *undefined* rendering, which is
+	consistent with both symptoms actually seen across those two versions
+	(a solid black square in one, fully invisible in the other) being the
+	same underlying bug manifesting differently depending on driver/
+	compositor state, rather than two unrelated problems needing two
+	different fixes. Explicitly setting full opacity (255, LWA_ALPHA)
+	below is what actually defines it, and is also *not* a step that can
+	be silently skipped -- Microsoft's own docs for WS_EX_LAYERED call
+	this out as a requirement, not a nice-to-have.
+
+	There's no equivalent public, portable way to do any of this from
+	plain Tk on macOS or Linux -- both would need real platform-native
+	window-server APIs (e.g. Cocoa's ignoresMouseEvents on macOS) that
+	aren't reachable from stdlib Tkinter, so this is a no-op there and the
+	indicator is just a very brief (~150ms) real window instead."""
 	if sys.platform != 'win32':
 		return
 	try:
@@ -112,9 +125,28 @@ def _make_window_clickthrough(hwnd):
 		GWL_EXSTYLE = -20
 		WS_EX_LAYERED = 0x00080000
 		WS_EX_TRANSPARENT = 0x00000020
+		LWA_ALPHA = 0x2
 		user32 = ctypes.windll.user32
+		# Explicit argtypes/restype, same reasoning as main_fast.py's
+		# focus-restore WinAPI calls: without these, ctypes assumes plain
+		# 32-bit ints for anything it isn't told about, which can
+		# silently truncate or misinterpret arguments on 64-bit Windows.
+		user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+		user32.GetWindowLongW.restype = ctypes.c_long
+		user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+		user32.SetWindowLongW.restype = ctypes.c_long
+		user32.SetLayeredWindowAttributes.argtypes = [
+			ctypes.c_void_p, ctypes.c_uint32, ctypes.c_ubyte, ctypes.c_uint32,
+		]
+		user32.SetLayeredWindowAttributes.restype = ctypes.c_int
+
 		style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
 		user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+		# 255 = fully opaque -- WS_EX_TRANSPARENT alone still gives the
+		# click-through behavior this function is for; this call is only
+		# what makes the layered window's *content* actually paint
+		# normally instead of being left undefined.
+		user32.SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)
 	except Exception as exc:
 		print(f'[WARN] Could not set click-through window style: {exc}')
 

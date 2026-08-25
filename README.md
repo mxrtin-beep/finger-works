@@ -49,13 +49,13 @@ like a physical keyboard. Settings persist across restarts
 back off the next time you start the program, however you left it; see
 `INSTRUCTIONS.md` for details.
 
-Every left/right click also flashes a colored ring at the cursor -- green
-for left, yellow for right -- for about 150ms, regardless of the click
-sound setting (on by default; turn it off in Settings if you'd rather not
-have it). This is meant as click confirmation you can't miss, right where
-you're already looking, and one that doesn't depend on your OS/audio setup
-actually cooperating the way the (optional, off by default) click sound
-does.
+Every left/right click also flashes a colored square at the cursor --
+green for left, yellow for right -- for about 150ms, regardless of the
+click sound setting (on by default; turn it off in Settings if you'd
+rather not have it). This is meant as click confirmation you can't miss,
+right where you're already looking, and one that doesn't depend on your
+OS/audio setup actually cooperating the way the (optional, off by
+default) click sound does.
 
 ### Does the cursor feel like it's sliding?
 

@@ -4,3 +4,10 @@ numpy
 pyautogui
 pyperclip
 Pillow
+
+# Optional: only used for Click sounds/Keyboard sounds (see sounds.py),
+# and only if it's actually importable -- everything else works fine
+# without it, and those two Settings toggles just fall back to a simpler
+# per-platform player if it's missing or fails to install. Recommended if
+# you want the click sound to play reliably every time.
+pygame
