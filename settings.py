@@ -18,13 +18,44 @@ SETTINGS_PATH = os.path.join(os.path.expanduser('~'), '.finger_works_settings.js
 DEFAULTS = {
 	'camera_device': None,
 	'sensitivity': 1.0,
+	# Session-only -- see _PERSISTED_KEYS below and save_settings(). Kept
+	# here anyway (rather than dropped from DEFAULTS entirely) so
+	# get_current_settings() etc. can still treat 'debug' like any other
+	# settings-dict key without a special case; it just never round-trips
+	# through the settings file, so every fresh run starts with it back at
+	# this default unless --debug is passed again.
 	'debug': False,
-	# False (default): typed keys go to whatever text box/app actually has
-	# OS focus, like a physical keyboard. True: keys only update the
-	# on-screen keyboard's own preview line, left for you to move
-	# elsewhere with Copy Typed/Cut Typed (the original behavior).
-	'type_in_keyboard_area': False,
+	# Multiplies constants.SCROLL_AMOUNT -- see mouse_control's
+	# set_scroll_speed_multiplier(). 1.0 would be constants.SCROLL_AMOUNT
+	# as tuned/committed; 2.3 confirmed to feel better once adjustable.
+	'scroll_speed': 2.3,
+	# Multiplies the overlay panel's (and so the on-screen keyboard's) base
+	# size -- see overlay.Overlay.set_keyboard_scale(). 1.0 = default size.
+	'keyboard_scale': 1.0,
+	# 0.0 (max smoothing, steadiest but can feel like the cursor is
+	# "sliding") to 1.0 (max snappiness, tracks the fingertip almost
+	# immediately but shows more raw hand-tracking jitter) -- see
+	# mouse_control.set_cursor_snappiness(). 0.65 felt noticeably better
+	# than this project's original (pre-Settings) hardcoded 0.15-ish value
+	# once it became adjustable.
+	'cursor_snappiness': 0.65,
+	# Both off by default -- a short, quiet tone on every left/right-click
+	# (click_sounds) or on-screen keyboard key press (keyboard_sounds); see
+	# sounds.py.
+	'click_sounds': False,
+	'keyboard_sounds': False,
+	# 0.0 (silent) to 1.0 (full volume, the level click.wav/key.wav were
+	# generated at) -- see sounds.set_volume(). Only affects click_sounds/
+	# keyboard_sounds' own audio; doesn't touch anything else on the
+	# system.
+	'sound_volume': 0.7,
 }
+
+# Settings persisted to disk across restarts -- everything in DEFAULTS
+# except 'debug', which is deliberately session-only: --debug (or the
+# Settings checkbox) should only ever affect the run you set it for, not
+# silently turn debug mode on for every future launch too.
+_PERSISTED_KEYS = [key for key in DEFAULTS if key != 'debug']
 
 
 def load_settings():
@@ -42,9 +73,12 @@ def load_settings():
 		return dict(DEFAULTS)
 
 	settings = dict(DEFAULTS)
-	for key in DEFAULTS:
+	for key in _PERSISTED_KEYS:
 		if key in data:
 			settings[key] = data[key]
+	# 'debug' is deliberately never read back from disk either, even if an
+	# older settings file (from before it became session-only) still has
+	# one -- see _PERSISTED_KEYS above.
 	return settings
 
 
@@ -54,7 +88,7 @@ def save_settings(settings):
 	falls back to defaults/CLI flags again."""
 	try:
 		with open(SETTINGS_PATH, 'w') as f:
-			json.dump({key: settings.get(key, DEFAULTS[key]) for key in DEFAULTS}, f, indent=2)
+			json.dump({key: settings.get(key, DEFAULTS[key]) for key in _PERSISTED_KEYS}, f, indent=2)
 	except OSError as exc:
 		print(f'[WARN] Could not save settings to {SETTINGS_PATH}: {exc}')
 

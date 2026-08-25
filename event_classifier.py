@@ -50,7 +50,15 @@ _was_fist = False
 _was_scissors = False
 
 
-def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
+def get_event_fast(rel_landmark_list, control_state):
+	"""`rel_landmark_list` must already be hand-scale-normalized (wrist-
+	relative, then divided by the hand's own hand_scale()) -- see
+	mouse_control.normalize_landmarks() and main_fast.py, where that
+	happens once per hand before any gesture function is called. Every
+	distance compared to a constants.py cutoff below (finger-extended,
+	pinch) is then a ratio of the hand's own size, not a raw pixel count,
+	which is what makes gesture detection work the same regardless of how
+	far your hand is from the camera."""
 	global _was_fist, _was_scissors
 
 	finger_pos = rel_landmark_list[c.FINGER_INDICES]
@@ -79,7 +87,29 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 	# frame you release the gesture is the one that "sticks". That race
 	# is what made the toggle feel unreliable, independent of which
 	# specific gesture was used.
-	is_fist = np.array_equal(finger_out_arr, np.array([False, False, False, False, False]))
+	# Thumb-to-fingertip distances, needed below for the actual click check,
+	# but computed here too -- before the fist check -- so a genuine pinch
+	# can be told apart from a genuine fist even on a frame where the raw
+	# finger-extended pose looks identical for both (see is_fist below).
+	thumb_index_dist = dist_twopoints(rel_landmark_list[c.THUMB_IDX], rel_landmark_list[c.INDEX_IDX])
+	thumb_ring_dist = dist_twopoints(rel_landmark_list[c.THUMB_IDX], rel_landmark_list[c.RING_IDX])
+	is_pinching = thumb_index_dist < c.LEFT_CLICK_CUTOFF or thumb_ring_dist < c.RIGHT_CLICK_CUTOFF
+
+	# Closed fist, *and* not currently pinching. The plain finger-out check
+	# alone isn't enough: pointing the whole hand straight at the camera
+	# foreshortens every finger in the 2D landmark projection, including an
+	# extended index finger mid-pinch, which can make finger_out_arr read as
+	# "nothing extended" -- exactly the fist pattern -- even while the
+	# thumb and index are genuinely pinched together for a click. Without
+	# this guard, that foreshortening made is_fist true first, so the
+	# function returned 'Mousing' below before the click-distance check a
+	# few lines down ever ran, and left/right-click couldn't register at
+	# all while facing the camera that way. Requiring "not pinching" here
+	# only matters for telling fist apart from a pinch that also happens to
+	# foreshorten-match the fist pose; it doesn't affect the ordinary case
+	# where a real fist is thumb-tucked-against-palm but not close enough
+	# to the index/ring fingertips specifically to read as a pinch.
+	is_fist = np.array_equal(finger_out_arr, np.array([False, False, False, False, False])) and not is_pinching
 	toggle_keyboard = is_fist and not _was_fist
 	_was_fist = is_fist
 
@@ -109,10 +139,11 @@ def get_event_fast(abs_landmark_list, rel_landmark_list, control_state):
 			return 'Cut Typed Gesture'
 		return 'Mousing'
 
-	# Clicking
-	thumb_index_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.INDEX_IDX])
-	thumb_ring_dist = dist_twopoints(abs_landmark_list[c.THUMB_IDX], abs_landmark_list[c.RING_IDX])
-
+	# Clicking -- thumb-to-fingertip distance, in hand-scale-normalized
+	# units (see this function's docstring), compared against the ratio
+	# cutoffs in constants.py. thumb_index_dist/thumb_ring_dist were
+	# already computed above (is_pinching, for the is_fist guard) -- reused
+	# here rather than recomputed.
 	if thumb_ring_dist < c.RIGHT_CLICK_CUTOFF:
 		return 'Right-Click'
 
@@ -211,6 +242,87 @@ def get_zoom_event(rel_landmark_list):
 		return 'Zoom Out', debug_text
 
 	return None, debug_text
+
+
+# --- Left hand: scroll gesture -------------------------------------------
+#
+# Point up (index finger extended and aimed upward, other four folded):
+# scroll up. Thumb down (thumb extended and aimed downward, other four
+# folded -- a "thumbs down"): scroll down. This reuses the same hand that
+# already does zoom -- zoom is your left hand's "how much" gesture, scroll
+# is its "which way" gesture -- so there's nothing new to learn for the
+# right (mouse) hand.
+#
+# Scroll-down used to be the *same* pose as scroll-up (index only,
+# pointing down instead of up), but that turned out to misfire as zoom-in
+# (all five fingers extended) in practice: pointing the index finger
+# downward is a less natural hand angle than pointing it up, and the
+# slight extra curl that takes tends to also read the other fingers as
+# "extended" right at the edge of FINGER_OUT_CUTOFF, which is exactly
+# zoom's open-hand pose. Using the thumb -- a different finger entirely,
+# with a different resting curl -- for scroll-down avoids the mode being
+# only a directional flip of another gesture that's prone to exactly this
+# confusion. (It doesn't need its own FINGER_OUT_CUTOFF-style pose-
+# confusion guard against the fist/pause gestures: those need particular
+# *other* fingers extended too, which "thumb only" never satisfies.)
+#
+# Held continuously rather than edge-triggered: unlike the fist/scissors
+# poses, a single scroll gesture needs to keep producing ticks for as long
+# as it's held, the way an actual scroll wheel does under a moving finger.
+# Pacing that down to something controllable (rather than a tick every
+# camera frame) is mouse_control.execute_scroll()'s job, not this
+# function's -- this just reports which way you're currently pointing,
+# every frame, for as long as you're pointing.
+_SCROLL_UP_POSE = np.array([False, True, False, False, False])    # index only
+_SCROLL_DOWN_POSE = np.array([True, False, False, False, False])  # thumb only
+
+
+def get_scroll_event(rel_landmark_list):
+	"""Left-hand-only scroll gesture.
+
+	Returns (direction, debug_text): direction is 'Scroll Up', 'Scroll
+	Down', or None; debug_text mirrors get_zoom_event's/get_paste_event's
+	style -- a short, always-present description of what this frame
+	actually saw.
+	"""
+	finger_pos = rel_landmark_list[c.FINGER_INDICES]
+	finger_dist = np.round((finger_pos[:, 0]**2 + finger_pos[:, 1]**2)**0.5, 1)
+	finger_out_arr = finger_dist > c.FINGER_OUT_CUTOFF
+
+	# rel_landmark_list is wrist-relative but still in camera-frame pixel
+	# axes, so y still increases *downward* (image convention) -- a
+	# fingertip aimed up on screen has a smaller/more negative y than its
+	# own base knuckle.
+	if np.array_equal(finger_out_arr, _SCROLL_UP_POSE):
+		tip = rel_landmark_list[c.INDEX_IDX]
+		base = rel_landmark_list[c.INDEX_MCP_IDX]
+		dx, dy = tip[0] - base[0], tip[1] - base[1]
+		if abs(dy) <= abs(dx):
+			# Pointing mostly sideways, not up/down -- the pose is right
+			# but the direction is ambiguous, so do nothing rather than
+			# guess.
+			return None, 'pointing (sideways)'
+		if dy < 0:
+			return 'Scroll Up', 'pointing (up) -> scrolling up'
+		# Pointing down with the index finger doesn't scroll down anymore
+		# (see the comment above this function) -- no-op rather than
+		# silently doing nothing with no explanation in the debug text.
+		return None, 'pointing (down) -- use thumb-down to scroll down'
+
+	if np.array_equal(finger_out_arr, _SCROLL_DOWN_POSE):
+		tip = rel_landmark_list[c.THUMB_IDX]
+		base = rel_landmark_list[c.THUMB_MCP_IDX]
+		dx, dy = tip[0] - base[0], tip[1] - base[1]
+		if abs(dy) <= abs(dx):
+			return None, 'thumb (sideways)'
+		if dy > 0:
+			return 'Scroll Down', 'thumb (down) -> scrolling down'
+		return None, 'thumb (up) -- unused'
+
+	out_fingers = ','.join(
+		name for name, out in zip(c.FINGER_NAMES, finger_out_arr) if out
+	) or 'none'
+	return None, f'neither ({out_fingers} out)'
 
 
 def is_zoomed_in():

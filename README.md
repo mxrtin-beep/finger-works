@@ -29,16 +29,37 @@ and what the debug output means.
 
 A small control bar always sits in the bottom-right corner of the screen
 with **Pause**/**Resume**, **Help**, **Settings**, and **Quit** -- so you
-can pause tracking, look up the gestures, change your camera/sensitivity/
-debug mode, or quit, without needing a gesture or the command line. Camera
-picking defaults to auto (the first camera that opens, same as always),
-overridable in Settings if you have more than one webcam. By default the
-on-screen keyboard types into whatever text box/app is actually focused,
-like a physical keyboard -- Settings also has a checkbox to switch it back
-to typing into the keyboard's own preview line instead (move it elsewhere
-yourself with `Copy Typed`/`Cut Typed`), if you'd rather have that.
-Settings persist across restarts (`~/.finger_works_settings.json`); see
+can pause tracking, look up the gestures, or quit, without needing a
+gesture or the command line. Both it and the keyboard/debug panel above
+it are movable: pinch-and-hold-and-drag the control bar's `⋮⋮` grip, or
+the keyboard panel's `⋮⋮⋮⋮⋮⋮` strip along its top, to reposition either
+one wherever's convenient -- neither remembers a moved position across
+restarts, both are always back at their default spot next launch.
+**Settings** covers camera, debug mode, four
+feel-tuning sliders (mouse sensitivity, cursor snappiness -- see "Does the
+cursor feel like it's sliding?" below -- scroll speed, and on-screen
+keyboard size), and two off-by-default sound toggles (a short, quiet tone on
+clicks and/or keyboard presses -- deliberately light, not an obvious
+"beep"). A **Reset to Defaults** button in Settings puts every field back to
+its shipped default (Apply afterward to actually use them). The on-screen
+keyboard always types into whatever text box/app is actually focused,
+like a physical keyboard. Settings persist across restarts
+(`~/.finger_works_settings.json`) -- except debug mode, which is always
+back off the next time you start the program, however you left it; see
 `INSTRUCTIONS.md` for details.
+
+### Does the cursor feel like it's sliding?
+
+There are two separate smoothing layers between your fingertip and the
+cursor: one damps small (likely-jitter) movements before the cursor even
+starts moving toward them, the other governs how fast the cursor then
+closes in on wherever it's currently aiming. Historically only the second
+was adjustable (`--sensitivity`, or the sensitivity slider). If the cursor
+tracks large movements fine but feels laggy/floaty on small, precise ones,
+that's almost always the first layer -- raise **Cursor snappiness** in
+Settings. Higher trades some visible raw hand-tracking jitter for a
+cursor that responds to small movements almost immediately; lower trades
+the reverse.
 
 The on-screen keyboard is laid out roughly like a physical/phone keyboard:
 `Tab`, `Caps`, and a `Shift` down the left of the QWERTY block, `Enter`
@@ -161,6 +182,30 @@ below):
 - Index + middle extended ("scissors") -- the same shape as the right
   hand's Cut-Typed gesture, but paste on this hand: a shortcut for the
   keyboard's 'Paste' key without needing the keyboard open at all.
+- Point up (index finger extended and aimed upward, other four folded):
+  scroll up. Thumb down (thumb extended and aimed downward, other four
+  folded -- a "thumbs down"): scroll down. Different fingers rather than
+  the same pose flipped upside down, since pointing the index finger
+  downward turned out to be an easy pose for zoom's open-hand gesture to
+  misfire on (see `event_classifier.py`'s scroll-gesture comment for why).
+  Keep either pose held to keep scrolling; it's sent in small ticks every
+  frame rather than infrequent big jumps, tuned to add up to the same
+  overall speed either way -- see the Settings "Scroll speed" slider, or
+  `SCROLL_AMOUNT`/`SCROLL_FRAME_INTERVAL` in `constants.py`.
+
+### Does my hand distance from the camera matter?
+
+No, by design: every gesture cutoff (pinch distance, finger-extended
+distance) is compared against your hand's own live size in the camera
+frame (its wrist-to-middle-knuckle pixel distance), not a fixed pixel
+count. A hand that's closer to the camera has both a bigger raw fingertip
+distance *and* a bigger reference size, so the ratio between them --
+what's actually compared to the cutoff -- stays the same. There's no
+"sweet spot" distance to find; move closer or farther and clicks/poses
+should keep registering the same way. See the "Distance-independent
+gesture cutoffs" comment at the top of `constants.py` for the full
+explanation, and `mouse_control.normalize_landmarks()` for where it
+happens.
 
 ### Which hand does what
 

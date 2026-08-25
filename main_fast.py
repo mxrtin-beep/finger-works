@@ -20,8 +20,9 @@ import numpy as np
 from collections import deque
 
 import mouse_control as mc
+import sounds
 from mouse_control import execute_event_fast, screenWidth, screenHeight
-from event_classifier import get_event_fast, get_zoom_event, get_paste_event, is_zoomed_in
+from event_classifier import get_event_fast, get_zoom_event, get_paste_event, get_scroll_event, is_zoomed_in
 import constants as c
 import keyboard as k
 import overlay as ov
@@ -206,6 +207,18 @@ _RIGHT_HAND_COLOR = (255, 210, 0)   # cyan-ish -- the mouse/keyboard hand
 _LEFT_HAND_COLOR = (255, 0, 220)    # magenta-ish -- the zoom/paste hand
 
 
+def _debug_event_label(event):
+	"""What to show for `event` in debug text/overlays -- everywhere except
+	the actual gesture-recognition logic, which still needs the literal
+	string 'Quit' from get_event_fast() (event_history and other code key
+	off it -- see event_classifier.get_event_fast()'s docstring for why
+	it's still called that internally). Only the on-screen label is
+	misleading as 'Quit' now that the gesture pauses instead of quitting,
+	so it's translated to 'Pause' here, right before display, rather than
+	renaming the event itself everywhere it's produced/consumed."""
+	return 'Pause' if event == 'Quit' else event
+
+
 def draw_hand_debug_overlay(image, abs_landmark_list, label, color):
 	"""Trace a hand's skeleton and label its current gesture directly onto
 	`image` (mutated in place) -- shown in the --debug live camera window.
@@ -288,21 +301,25 @@ def type_char(typed_char, typed_text, type_in_keyboard_area=False, shift_active=
 	"""Handle one on-screen keyboard key, and return the updated local
 	preview-text string shown on the overlay.
 
-	`type_in_keyboard_area` (Settings -> "Type into the keyboard's own
-	area") decides where ordinary character keys, Space, Backspace, and
-	Paste actually go:
+	`type_in_keyboard_area` decides where ordinary character keys, Space,
+	Backspace, and Paste actually go. Always False now -- main_fast.py no
+	longer exposes a Settings toggle for this (it was a confusing extra
+	option; typing into whatever's really focused is what everyone
+	actually wants) -- but the parameter and its True branch are kept
+	rather than ripped out, since the behavior is still simple,
+	self-contained, and easy to resurrect if that turns out wrong:
 
-	- False (default): a real keystroke is sent to whatever window has OS
-	  focus -- exactly like a physical keyboard -- and the overlay's own
-	  preview line is just an echo/log for feedback, not the real
-	  destination.
-	- True: nothing is sent to the OS at all; those keys only build up the
-	  overlay's own preview line, which you then move elsewhere yourself
-	  with Copy Typed/Cut Typed. This is the original behavior, kept as an
-	  option for anyone who'd rather type somewhere quarantined from
-	  whatever's focused and move it over deliberately.
+	- False (always, currently): a real keystroke is sent to whatever
+	  window has OS focus -- exactly like a physical keyboard -- and the
+	  overlay's own preview line is just an echo/log for feedback, not the
+	  real destination.
+	- True (unreachable via the UI right now): nothing is sent to the OS
+	  at all; those keys only build up the overlay's own preview line,
+	  which you then move elsewhere yourself with Copy Typed/Cut Typed.
+	  This was the original behavior, before typing into the real focused
+	  window existed at all.
 
-	Copy/Cut always send their real hotkey regardless of this setting --
+	Copy/Cut always send their real hotkey regardless of this parameter --
 	they act on the focused app's current selection, which there's no
 	"keyboard area" equivalent for.
 
@@ -433,6 +450,12 @@ def main(settings):
 	debug = settings['debug']
 
 	mc.set_sensitivity_multiplier(mouse_sensitivity)
+	mc.set_scroll_speed_multiplier(settings.get('scroll_speed', 2.3))
+	mc.set_cursor_snappiness(settings.get('cursor_snappiness', 0.65))
+	sounds.set_click_sounds_enabled(settings.get('click_sounds', False))
+	sounds.set_keyboard_sounds_enabled(settings.get('keyboard_sounds', False))
+	sounds.set_volume(settings.get('sound_volume', 0.7))
+	keyboard_scale = settings.get('keyboard_scale', 1.0)
 
 	cap_width = width
 	cap_height = height
@@ -448,11 +471,13 @@ def main(settings):
 	# on, unless the user explicitly chose one.
 	camera_device_setting = settings.get('camera_device')
 
-	# Whether on-screen keyboard keys type into whatever's really focused
-	# (False, default) or stay confined to the overlay's own preview line
-	# (True) -- see type_char()'s docstring. Mutable via Settings ->
-	# Apply, hence a plain local rather than baked into a closure.
-	type_in_keyboard_area = settings.get('type_in_keyboard_area', False)
+	# On-screen keyboard keys always type into whatever's really focused,
+	# like a physical keyboard -- see type_char()'s docstring. (There used
+	# to be a Settings toggle to instead confine typing to the overlay's
+	# own preview line; removed since typing into the real focused window
+	# is what everyone actually wants, and it was just adding a confusing
+	# extra option.)
+	type_in_keyboard_area = False
 
 	print(
 		f'FingerWorks v{__version__} -- started '
@@ -501,13 +526,25 @@ def main(settings):
 		return True
 
 	def handle_settings_changed(new_settings):
-		nonlocal cap_device, camera_device_setting, type_in_keyboard_area
+		nonlocal cap_device, camera_device_setting, button_list
 		fw_settings.save_settings(new_settings)
 
 		mc.set_sensitivity_multiplier(new_settings['sensitivity'])
 		overlay.set_sensitivity(new_settings['sensitivity'])
 		overlay.set_debug(new_settings['debug'])
-		type_in_keyboard_area = new_settings.get('type_in_keyboard_area', False)
+		mc.set_scroll_speed_multiplier(new_settings.get('scroll_speed', 2.3))
+		mc.set_cursor_snappiness(new_settings.get('cursor_snappiness', 0.65))
+		sounds.set_click_sounds_enabled(new_settings.get('click_sounds', False))
+		sounds.set_keyboard_sounds_enabled(new_settings.get('keyboard_sounds', False))
+		sounds.set_volume(new_settings.get('sound_volume', 0.7))
+
+		overlay.set_keyboard_scale(new_settings.get('keyboard_scale', 1.0))
+		# The keyboard's button layout is sized off the overlay panel's
+		# pixel dimensions (see keyboard.get_button_list), so a keyboard-
+		# size change needs it rebuilt against the new panel size -- same
+		# as when the letters/symbols page toggles, just triggered from
+		# here instead.
+		button_list = k.get_button_list(overlay.panel_width, overlay.panel_height, page=keyboard_page)
 
 		resolved_device = fw_settings.pick_camera_device(new_settings)
 		if resolved_device != cap_device:
@@ -522,7 +559,12 @@ def main(settings):
 			'camera_device': camera_device_setting,
 			'sensitivity': overlay.mouse_sensitivity,
 			'debug': overlay.debug,
-			'type_in_keyboard_area': type_in_keyboard_area,
+			'scroll_speed': mc.get_scroll_speed_multiplier(),
+			'cursor_snappiness': mc.get_cursor_snappiness(),
+			'keyboard_scale': overlay.keyboard_scale,
+			'click_sounds': sounds.get_click_sounds_enabled(),
+			'keyboard_sounds': sounds.get_keyboard_sounds_enabled(),
+			'sound_volume': sounds.get_volume(),
 		}
 
 	_startup_t0 = time.time()
@@ -559,6 +601,7 @@ def main(settings):
 
 	overlay = ov.Overlay(
 		screenWidth, screenHeight, debug=debug, mouse_sensitivity=mouse_sensitivity,
+		keyboard_scale=keyboard_scale,
 		on_settings_changed=handle_settings_changed,
 		get_settings=get_current_settings,
 		get_available_cameras=fw_settings.list_cameras,
@@ -598,7 +641,7 @@ def main(settings):
 					# keep the UI responsive and, in debug mode, still show the
 					# raw camera feed so it's clear the camera itself is still
 					# working.
-					overlay.draw(event, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
+					overlay.draw(_debug_event_label(event), control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
 					if overlay.debug:
 						overlay.draw_video(image)
 					overlay.pump()
@@ -631,6 +674,17 @@ def main(settings):
 						abs_landmark_list = np.array(calc_landmark_list(image, hand_landmarks))
 						rel_landmark_list = np.array(pre_process_landmark(abs_landmark_list.tolist()))
 
+						# Normalize by this hand's own live size (wrist-to-
+						# middle-knuckle pixel distance) before any gesture
+						# is read off it, so the ratio cutoffs in
+						# constants.py (FINGER_OUT_CUTOFF, LEFT_CLICK_CUTOFF,
+						# RIGHT_CLICK_CUTOFF) work the same regardless of how
+						# far this hand is from the camera -- see
+						# mouse_control.normalize_landmarks().
+						rel_landmark_list = mc.normalize_landmarks(
+							rel_landmark_list, mc.hand_scale(abs_landmark_list),
+						)
+
 						raw_label = results.handedness[hand_idx][0].category_name
 						if c.SWAP_LABELED_HANDS:
 							raw_label = 'Left' if raw_label == 'Right' else 'Right'
@@ -655,14 +709,20 @@ def main(settings):
 								# without needing the keyboard open at all.
 								typed_text = type_char('Paste', typed_text, type_in_keyboard_area)
 
+							scroll_event, scroll_debug_text = get_scroll_event(rel_landmark_list)
+							mc.execute_scroll(scroll_event)
+
 							debug_parts.append(
-								f'Left [Zoom: {zoom_debug_text}] [Paste: {paste_debug_text}]'
+								f'Left [Zoom: {zoom_debug_text}] [Paste: {paste_debug_text}] '
+								f'[Scroll: {scroll_debug_text}]'
 							)
 
 							if overlay.debug:
 								draw_hand_debug_overlay(
 									image, abs_landmark_list,
-									f'Zoom: {zoom_debug_text.split(" -> ")[0]}  Paste: {paste_debug_text.split(" -> ")[0]}',
+									f'Zoom: {zoom_debug_text.split(" -> ")[0]}  '
+									f'Paste: {paste_debug_text.split(" -> ")[0]}  '
+									f'Scroll: {scroll_debug_text.split(" -> ")[0]}',
 									_LEFT_HAND_COLOR,
 								)
 
@@ -676,9 +736,18 @@ def main(settings):
 							debug_parts.append('Right [ignored]')
 							continue
 						mouse_assigned = True
-						debug_parts.append('Right [Mouse]')
+						# scale=NNN is the live wrist-to-knuckle pixel size
+						# gesture cutoffs are normalized against this frame
+						# (see mouse_control.hand_scale()) -- shown so
+						# HAND_SCALE_TUNING_REFERENCE in constants.py can be
+						# calibrated by reading this number off while your
+						# hand is where things register reliably, instead of
+						# guessing at it.
+						debug_parts.append(
+							f'Right [Mouse, scale={mc.hand_scale(abs_landmark_list):.0f}]'
+						)
 
-						event = get_event_fast(abs_landmark_list, rel_landmark_list, control_state)
+						event = get_event_fast(rel_landmark_list, control_state)
 
 						event_history.append(event)
 
@@ -716,6 +785,13 @@ def main(settings):
 								event, mouse_screen_pos, overlay.origin(),
 								(overlay.panel_width, overlay.panel_height), button_list,
 							)
+
+							if typed_char is not None:
+								# Every key press, whatever it does (a
+								# letter, Shift/Caps, page-switch, ...) --
+								# one place covers all the branches below,
+								# rather than repeating this in each of them.
+								sounds.play_key()
 
 							# Case/page keys are handled here rather than inside
 							# type_char() -- they change local keyboard state
@@ -775,7 +851,7 @@ def main(settings):
 
 						if overlay.debug:
 							draw_hand_debug_overlay(
-								image, abs_landmark_list, event, _RIGHT_HAND_COLOR,
+								image, abs_landmark_list, _debug_event_label(event), _RIGHT_HAND_COLOR,
 							)
 
 					hand_debug_text = f'  [{", ".join(debug_parts)}]'
@@ -794,7 +870,7 @@ def main(settings):
 				# to the current action, so you can see at a glance whether
 				# it's routing your hands the way you expect (see
 				# constants.SWAP_LABELED_HANDS if it isn't).
-				overlay.draw(event + hand_debug_text, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
+				overlay.draw(_debug_event_label(event) + hand_debug_text, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
 
 				if overlay.debug:
 					# Purely cosmetic: the live camera feed with each hand's

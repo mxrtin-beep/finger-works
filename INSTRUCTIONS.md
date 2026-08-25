@@ -24,6 +24,12 @@ screen, regardless of Mouse/Keyboard mode or debug state -- so there's
 always a way to pause, get help, or quit without needing a free hand to
 gesture with, or to already know a gesture at all:
 
+- A `⋮⋮` grip at the very left -- pinch-and-hold-and-move it (a Left-Click
+  pinch, held, dragged like anywhere else) to reposition the whole bar.
+  Only that grip is draggable, not the buttons next to it, so an aimed
+  click at Pause/Help/Settings/Quit is never mistaken for a drag. Not
+  remembered across restarts -- it's always back at the default
+  bottom-right corner next time you start the program.
 - A status dot + label -- green **FingerWorks** when active, orange
   **Paused** when paused.
 - **Pause / Resume** -- stops all hand tracking and gesture processing
@@ -37,6 +43,11 @@ gesture with, or to already know a gesture at all:
   so quitting always needs a deliberate click/Escape, never an accidental
   gesture mid-use.)
 
+The overlay panel (the keyboard/debug-text panel, separate from the
+control bar above) is draggable too -- a thin `⋮⋮⋮⋮⋮⋮` strip along its very
+top, same idea: pinch-and-hold-and-move only that strip, not the keyboard
+keys beneath it. Also not remembered across restarts.
+
 ## Settings
 
 Click **Settings** in the control bar to open a small settings window:
@@ -48,19 +59,96 @@ Click **Settings** in the control bar to open a small settings window:
   one) -- it stays pinned across restarts until you set it back to Auto.
   Changing it applies immediately, no restart needed.
 - **Mouse sensitivity** -- same multiplier as `--sensitivity`, as a
-  slider.
-- **Debug mode** -- same as `--debug`, as a checkbox; applies immediately.
-- **Type into the keyboard's own area** -- off by default. Off, the
-  on-screen keyboard types into whatever text box/app actually has OS
-  focus, just like a physical keyboard. On, keys only build up the
-  keyboard's own preview line instead (the original behavior), which you
-  then move elsewhere yourself with the `Copy Typed`/`Cut Typed` keys.
-  Applies immediately.
+  slider. Governs how fast the cursor closes the gap to wherever it's
+  currently aiming (`constants.MOUSE_SPEED`).
+- **Cursor snappiness** -- a slider from 0.0 (max smoothing -- steadiest,
+  but small precise movements can feel like the cursor is "sliding"/
+  lagging behind your fingertip) to 1.0 (max snappiness -- tracks small
+  movements almost immediately, at the cost of more visible raw hand-
+  tracking jitter). A separate knob from Mouse sensitivity above: that one
+  governs how fast the cursor closes in on an already-computed target
+  position; this one governs how readily small fingertip movements even
+  *move* that target in the first place, which is what mainly reads as
+  "sliding" when it's too heavily smoothed. See
+  `constants.JITTER_ALPHA_MIN`/`JITTER_ALPHA_MAX`.
+- **Scroll speed** -- multiplies `constants.SCROLL_AMOUNT` for the
+  left-hand scroll gesture (see "Left hand -- zoom, paste & scroll"
+  below).
+- **Keyboard size** -- scales the overlay panel (and so the on-screen
+  keyboard drawn on it) up or down. The panel repositions itself to stay
+  clear of the control bar at any size.
+- **Click sounds** / **Keyboard sounds** -- both off by default. A short,
+  quiet tone on every left/right-click, or every on-screen keyboard key
+  press, respectively -- see `sounds.py`. Deliberately light rather than
+  an obvious "beep"; if you want them louder/different, `generate_sounds.py`
+  regenerates `sounds/click.wav`/`sounds/key.wav` from adjustable
+  parameters (rerun it after editing, then restart the program).
+  Playback prefers `pygame` (`pip install pygame`; optional -- not in the
+  base install, and everything falls back to a per-platform system
+  player automatically if it isn't installed or its mixer can't start).
+  `pygame` talks to a real audio backend instead of wrapping the legacy
+  `PlaySound()` WinAPI call, so it doesn't have the failure mode
+  described below at all -- but it only installs where a prebuilt wheel
+  exists for your exact Python version; on a very new Python release
+  (observed on 3.14) there may not be one yet, and building it from
+  source needs MSVC build tools most people don't have installed. If
+  `pip install pygame` fails for you, it's not worth chasing further --
+  just skip it; everything still works via the fallback below, and
+  nothing else in this project depends on it.
 
-Hit **Apply** to save and apply, or **Cancel**/close the window to discard.
-Settings are saved to `~/.finger_works_settings.json` and persist across
-restarts; a `--sensitivity`/`--debug` command-line flag overrides the
-saved value for that run (and re-saves it).
+  The fallback path is what keeps fast repeated triggers (e.g. quickly
+  switching keys) from racing each other and dropping a sound on
+  macOS/Linux; on Windows it reads the WAV file fresh on every play via
+  `winsound.PlaySound(path, SND_FILENAME | SND_ASYNC)`. Two extra flags
+  were tried and removed here (`SND_NODEFAULT`, and an explicit
+  `SND_PURGE` call before every play) aiming to stop Windows
+  occasionally substituting its own system/error sound for ours -
+  neither fixed it, so both were reverted rather than kept as
+  unproven complexity; this is deliberately the plainest version of the
+  call, matching what this project's very first sound implementation
+  used. Occasional misfires on Windows via this fallback (a dropped
+  sound, or rarely a substituted system sound) are a real, currently
+  unresolved limitation of the legacy `PlaySound()` API on some
+  driver/OS combinations, not a bug with a further winsound-side fix
+  available -- `pygame`, where it can be installed, is the actual fix.
+
+  A separate issue was reported on Windows without `pygame` installed:
+  the OS's own "ding" playing on every keypress *while Keyboard sounds
+  was off*, and not playing at all once Keyboard sounds was turned on.
+  Nothing in this codebase calls `winsound` (or anything else that plays
+  a sound) while that setting is off, so the ding itself isn't one of
+  this project's own sounds -- the working theory is a genuine
+  Windows-level beep from elsewhere in the real-keystroke pipeline that
+  happens to go silent whenever our own key sound is also using
+  `winsound`'s legacy playback channel at the same moment. This isn't
+  confirmed root-caused. As a low-risk mitigation (and a way to test the
+  theory), the Windows fallback path now still plays the key sound even
+  with Keyboard sounds off, just scaled down to near-silent rather than
+  skipped entirely -- see `sounds.play_key()`'s docstring. If the ding
+  keeps happening anyway, this mitigation isn't the fix and should be
+  reverted rather than layered with more guesses.
+- **Sound volume** -- 0 (silent) to 1 (full volume, the level
+  `click.wav`/`key.wav` were generated at), applied to both Click sounds
+  and Keyboard sounds. Via `pygame`, this is a real per-sound volume;
+  via the Windows/macOS fallback there's no native volume argument to
+  hand `winsound`/`aplay`, so the WAV samples are pre-scaled instead --
+  see `sounds._scaled_wav_path()`. `afplay` (macOS) takes a `-v` flag
+  directly. Plain `aplay` (Linux) has no per-play volume control at all,
+  so this slider doesn't affect Linux fallback playback yet.
+- **Debug mode** -- same as `--debug`, as a checkbox. Session-only,
+  unlike every other setting here: it's never saved to
+  `~/.finger_works_settings.json`, so it's always back off the next time
+  you start the program even if you leave it checked now.
+
+**Reset to Defaults** resets every field in this window back to its
+default value (without applying or saving anything by itself -- hit
+**Apply** afterward to actually use them, or **Cancel** to back out of
+the reset too). Hit **Apply** to save and apply everything else, or
+**Cancel**/close the window to discard. Settings (other than Debug mode)
+are saved to `~/.finger_works_settings.json` and persist across restarts;
+a `--sensitivity`/`--debug` command-line flag overrides the in-memory
+value for that run (`--sensitivity` is then also re-saved; `--debug`
+never persists either way).
 
 ## Debug mode
 
@@ -80,9 +168,13 @@ With `--debug`:
   (`Mousing`, `Left-Click`, ...), the active control state (`Mouse` or
   `Keyboard`), the current mouse-sensitivity multiplier (`Sensitivity:
   1.0x`, from `--sensitivity`), and -- next to the action text -- which
-  detected hand is doing what, e.g. `Mousing  [Right [Mouse]]`, or with a
-  left hand also in frame, `Mousing  [Right [Mouse], Left [Zoom: open,
-  normal] [Paste: neither (none out)]]`.
+  detected hand is doing what, e.g. `Mousing  [Right [Mouse, scale=228]]`,
+  or with a left hand also in frame, `Mousing  [Right [Mouse, scale=228],
+  Left [Zoom: open, normal] [Paste: neither (none out)] [Scroll: neither
+  (none out)]]`. The `scale=NNN` next to `Right [Mouse` is the live
+  wrist-to-knuckle pixel size gesture cutoffs are normalized against this
+  frame -- see "Hand-to-camera distance" below for calibrating
+  `HAND_SCALE_TUNING_REFERENCE` off it.
 - A second always-on-top window (top-left corner) shows the **live camera
   feed**, with each detected hand's skeleton traced over it in real time
   and its current gesture labeled right next to it (cyan for the right/
@@ -100,6 +192,12 @@ With `--debug`:
   - The `Left [Paste: ...]` bracket shows the paste gesture's live pose
     (`scissors`/`neither (<fingers> out)`); `-> sent paste` is appended the
     instant paste actually fires.
+  - The `Left [Scroll: ...]` bracket shows the scroll gesture's live pose
+    -- `pointing (up)`/`pointing (sideways)` for the index-up pose,
+    `thumb (down)`/`thumb (sideways)`/`thumb (up)` for the thumb-down
+    pose, or `neither (<fingers> out)` if neither pose is held; `->
+    scrolling up`/`-> scrolling down` is appended while it's actively
+    driving a scroll.
   - This is meant to answer "why isn't X working" directly: if a pose
     never reads as expected, detection isn't recognizing it (check
     lighting/framing, or `FINGER_OUT_CUTOFF`); if the pose registers but
@@ -127,7 +225,7 @@ cursor isn't currently over one of the keyboard's own buttons -- so you can
 type something, then click elsewhere (e.g. confirm a rename, or click into
 another field) without closing the keyboard first.
 
-### Left hand -- zoom & paste
+### Left hand -- zoom, paste & scroll
 
 The left hand is dedicated to zoom and paste, so the right hand isn't stuck
 doing everything. Routing is strict, by hand identity (MediaPipe's own
@@ -140,6 +238,23 @@ back to mouse control.
 | Open hand, all five fingers extended | Zoom in (drives the OS's own screen magnifier). Does nothing if already zoomed in. |
 | Closed fist | Zoom back out. Does nothing if not currently zoomed in. |
 | Index + middle extended, others folded ("scissors") | Paste -- shortcut for the on-screen keyboard's `Paste` key, without needing the keyboard open at all. Reads the OS clipboard and types its contents as real keystrokes. |
+| Index finger extended and aimed upward, others folded | Scroll up. Held continuously -- keeps scrolling for as long as the pose and direction are held, sent in small ticks every `SCROLL_FRAME_INTERVAL` frame(s) rather than infrequent big jumps, so it reads as a smooth, controlled scroll rather than a choppy or disorientating one. |
+| Thumb extended and aimed downward, others folded ("thumbs down") | Scroll down. Deliberately a different finger from scroll-up, not the same pose pointed the other way -- see below. |
+
+Each scroll direction's finger has its own angle read separately: index's
+fingertip relative to its own base knuckle for scroll-up, thumb's fingertip
+relative to its own base knuckle for scroll-down. Pointing mostly sideways
+does nothing rather than guessing a direction, for either one.
+
+Scroll-down used to be the same pose as scroll-up (index only, pointed
+down instead of up), but that turned out to misfire as zoom's open-hand
+gesture in practice: aiming the index finger downward is a less natural
+hand angle than aiming it up, and the slight extra curl that takes was
+enough to also read the other fingers as "extended" right at
+`FINGER_OUT_CUTOFF`'s edge -- which is exactly zoom's pose. Using the
+thumb instead (a different finger, with a different resting curl) avoids
+scroll-down being only a directional flip of a gesture that's prone to
+that particular confusion.
 
 Zoom holds a single on/off level, not a repeatable "tick": forming the
 zoom-in pose while already zoomed in does nothing (close to a fist first),
@@ -154,6 +269,27 @@ see below), and restored the moment you zoom back out.
 For the OS-level zoom hotkey used per platform (Windows Magnifier,
 macOS Zoom, Linux Ctrl+Scroll fallback) and how to set "Lens" view so zoom
 follows your cursor, see `README.md`.
+
+## Hand-to-camera distance
+
+Gesture cutoffs (`FINGER_OUT_CUTOFF`, `LEFT_CLICK_CUTOFF`,
+`RIGHT_CLICK_CUTOFF`) are compared against every landmark position only
+*after* it's been divided by the hand's own live wrist-to-middle-knuckle
+pixel distance (`mouse_control.hand_scale()` /
+`mouse_control.normalize_landmarks()`, applied once per hand per frame in
+`main_fast.py`) -- so they're unitless ratios of the hand's own size, not
+raw pixel counts. A hand that's closer to the camera has both a bigger raw
+fingertip distance *and* a bigger reference size, so the ratio stays the
+same either way. In short: there's no "optimal distance" to find -- move
+closer or farther and gestures should keep registering the same way.
+
+Each cutoff's value in `constants.py` is still derived from (divided by
+150 against) the old pixel-tuned numbers, so the *feel* at a typical
+webcam distance is unchanged from before this normalization existed --
+only the requirement to stay at roughly that one distance is gone. If
+gestures still feel off for your hand/camera/lighting, retune the ratios
+directly the same way the old pixel values were documented as needing
+retuning -- see each constant's comment.
 
 ### On-screen keyboard keys
 
@@ -195,10 +331,14 @@ special-casing for each character.
 
 | Parameter | Meaning |
 |---|---|
-| `FINGER_OUT_CUTOFF` | Wrist-relative pixel distance above which a fingertip counts as "extended" rather than folded. Drives every pose gesture (fist, scissors, zoom's open-hand/fist). Raise if poses aren't registering as extended when they should; lower if folded fingers are misread as extended. |
-| `LEFT_CLICK_CUTOFF` | Max thumb-to-index pixel distance that counts as a left-click pinch. Higher = a lighter tap triggers a click; too high risks false clicks from your hand's normal resting/aiming pose. |
+| `FINGER_OUT_CUTOFF` | Wrist-relative distance, as a ratio of the hand's own live size (see "Hand-to-camera distance" above), above which a fingertip counts as "extended" rather than folded. Drives every pose gesture (fist, scissors, zoom's open-hand/fist, scroll's point-up/down). Raise if poses aren't registering as extended when they should; lower if folded fingers are misread as extended. |
+| `LEFT_CLICK_CUTOFF` | Max thumb-to-index distance (same hand-scale-relative ratio) that counts as a left-click pinch. Higher = a lighter tap triggers a click; too high risks false clicks from your hand's normal resting/aiming pose. |
 | `RIGHT_CLICK_CUTOFF` | Same, for thumb-to-ring (right-click pinch). |
-| `SCROLL_VEL_CUTOFF` | (Reserved for scroll-gesture velocity threshold.) |
+| `SCROLL_VEL_CUTOFF` | (Reserved; unused now that scrolling is pose-based -- see `INDEX_MCP_IDX`/`THUMB_MCP_IDX`/`SCROLL_AMOUNT`/`SCROLL_FRAME_INTERVAL`.) |
+| `INDEX_MCP_IDX` | Landmark index for the index finger's base knuckle -- used with `INDEX_IDX` to read the index finger's pointing direction for scroll-up. |
+| `THUMB_MCP_IDX` | Same idea, for the thumb's base knuckle -- used with `THUMB_IDX` to read the thumb's pointing direction for scroll-down. |
+| `SCROLL_AMOUNT` | How far one scroll tick moves (in `pyautogui.scroll()` units) while a scroll gesture is held, sent every `SCROLL_FRAME_INTERVAL` frame(s). Tuned together with `SCROLL_FRAME_INTERVAL` (a smaller amount sent more often at the same overall amount/interval ratio scrolls just as fast but smoother; the same total delivered in fewer, bigger ticks reads as choppy) -- retune both together, or leave this alone and use the Settings "Scroll speed" slider instead. |
+| `SCROLL_FRAME_INTERVAL` | Send a scroll tick only every this-many-th held frame, instead of every camera frame. See `SCROLL_AMOUNT` above -- these two are a pair. |
 | `MOUSE_X_SENS` / `MOUSE_Y_SENS` | Per-axis scale applied when mapping the fingertip's position in the camera frame onto screen coordinates. |
 | `MOUSE_SPEED` | Fraction of the remaining distance to the target the cursor closes each frame (exponential smoothing). Higher tracks the fingertip more tightly; lower is smoother but laggier. Also scaled by `--sensitivity` at runtime. |
 | `ZOOMED_MOUSE_SPEED_FACTOR` | Multiplies `MOUSE_SPEED` while the zoom gesture has the screen zoomed in, since the same hand movement then covers much more of the visible area. |

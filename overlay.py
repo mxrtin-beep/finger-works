@@ -2,6 +2,8 @@
 import sys
 import tkinter as tk
 
+import settings as fw_settings
+
 
 # Maps a button's logical state (set by keyboard.execute_event_keyboard) to
 # a fill color for drawing. Kept as plain state names rather than raw color
@@ -46,6 +48,8 @@ LEFT HAND -- zoom & paste
  ✋  Open hand, all 5 fingers out -- zoom in
  ✊  Closed fist -- zoom out
  ✌  Index + middle out ("scissors") -- paste
+ \U0001F446  Point up (index only, aimed up) -- scroll up
+ \U0001F44E  Thumb down (thumb only, aimed down) -- scroll down
 
 
 See INSTRUCTIONS.md in the project folder for the full
@@ -93,6 +97,50 @@ def _make_flat_button(parent, text, command, bg='#3a3a3a'):
 	)
 
 
+def _bind_window_drag(handle_widget, window, screen_width, screen_height):
+	"""Make dragging `handle_widget` (press and move, e.g. a pinch-hold-
+	move -- the same real OS mouse events driven by a Left-Click pinch
+	elsewhere in this app, so this works from a gesture exactly like it
+	would from a physical mouse) reposition `window`.
+
+	Position is intentionally *not* persisted anywhere -- every window
+	still starts at its normal default spot each launch; dragging only
+	ever affects the current run.
+
+	Clamped so the window can't be dragged fully off-screen and become
+	unreachable: at least a `_MIN_ONSCREEN` margin of it stays visible on
+	every edge.
+	"""
+	_MIN_ONSCREEN = 40
+	drag_state = {}
+
+	def on_press(event):
+		drag_state['x_root'] = event.x_root
+		drag_state['y_root'] = event.y_root
+		drag_state['win_x'] = window.winfo_x()
+		drag_state['win_y'] = window.winfo_y()
+
+	def on_motion(event):
+		if 'x_root' not in drag_state:
+			return
+		dx = event.x_root - drag_state['x_root']
+		dy = event.y_root - drag_state['y_root']
+		new_x = drag_state['win_x'] + dx
+		new_y = drag_state['win_y'] + dy
+		w = window.winfo_width()
+		h = window.winfo_height()
+		new_x = max(_MIN_ONSCREEN - w, min(new_x, screen_width - _MIN_ONSCREEN))
+		new_y = max(0, min(new_y, screen_height - _MIN_ONSCREEN))
+		window.geometry(f'+{new_x}+{new_y}')
+
+	def on_release(_event):
+		drag_state.clear()
+
+	handle_widget.bind('<ButtonPress-1>', on_press)
+	handle_widget.bind('<B1-Motion>', on_motion)
+	handle_widget.bind('<ButtonRelease-1>', on_release)
+
+
 class Overlay:
 	"""A fixed, always-on-top panel docked in the corner of the screen.
 
@@ -110,7 +158,7 @@ class Overlay:
 	"""
 
 	def __init__(self, screen_width, screen_height, panel_width=None, panel_height=None, margin=None,
-				debug=False, mouse_sensitivity=1.0,
+				debug=False, mouse_sensitivity=1.0, keyboard_scale=1.0,
 				on_settings_changed=None, get_settings=None, get_available_cameras=None):
 		self.screen_width = screen_width
 		self.screen_height = screen_height
@@ -156,15 +204,27 @@ class Overlay:
 
 		self.paused = False
 
-		self.panel_width = panel_width or int(screen_width * 0.42)
-		self.panel_height = panel_height or int(screen_height * 0.34)
+		# Base (keyboard_scale == 1.0) panel fractions, kept around so
+		# set_keyboard_scale() can recompute panel_width/height from scratch
+		# rather than compounding scale factors onto an already-scaled size.
+		self._base_panel_width = int(screen_width * 0.42)
+		self._base_panel_height = int(screen_height * 0.34)
+
+		self.keyboard_scale = keyboard_scale
+		self.panel_width = panel_width or round(self._base_panel_width * keyboard_scale)
+		self.panel_height = panel_height or round(self._base_panel_height * keyboard_scale)
 
 		# The control bar sits in the actual bottom-right corner; the main
 		# panel (keyboard/debug text) sits directly above it, so the two
-		# never overlap regardless of which is currently visible. Wide
-		# enough that "Settings" (the longest button label) doesn't get
-		# clipped, at any of the clamped sizes below.
-		self.control_width = scaled(screen_width, 0.18, 260, 420)
+		# never overlap regardless of which is currently visible.
+		#
+		# control_width itself is set later, in _build_control_bar(), sized
+		# to fit its actual buttons/labels rather than guessed as a screen
+		# fraction here -- a fixed fraction wide enough for the longest
+		# label ('Settings') left visible empty space to the right of Quit
+		# on most screens. origin_y below only depends on control_height,
+		# which is still a screen fraction (nothing to fit it to), so
+		# nothing here needs control_width's later, more-accurate value.
 		self.control_height = scaled(screen_height, 0.032, 36, 56)
 
 		# pyautogui.size() (screen_width/height here) reports the full
@@ -210,6 +270,20 @@ class Overlay:
 		)
 		self.canvas.pack(fill='both', expand=True)
 
+		# Drag handle for this panel: only a thin strip at the very top
+		# (drawn each frame in draw(), see _PANEL_GRIP_HEIGHT) actually
+		# starts a drag -- checked by y-position in _on_panel_drag_press()
+		# below, since the canvas is one single widget doing its own
+		# hit-testing for the keyboard's buttons (via main_fast.py polling
+		# the cursor position, not Tk click events), so it can't have only
+		# part of itself draggable via separate widgets the way the
+		# control bar's dedicated grip label can. Not persisted across
+		# restarts, like the control bar's drag -- see _bind_window_drag().
+		self._panel_drag_state = None
+		self.canvas.bind('<ButtonPress-1>', self._on_panel_drag_press)
+		self.canvas.bind('<B1-Motion>', self._on_panel_drag_motion)
+		self.canvas.bind('<ButtonRelease-1>', self._on_panel_drag_release)
+
 		# Tracks whether the main panel is currently mapped, so draw() only
 		# calls withdraw()/deiconify() on an actual change instead of every
 		# frame (redundant, but also deiconify() steals focus back on some
@@ -240,16 +314,13 @@ class Overlay:
 	# --- Control bar --------------------------------------------------
 
 	def _build_control_bar(self):
-		cx = self.screen_width - self.control_width - self._margin
-		cy = self.screen_height - self.control_height - self._bottom_clearance
-
 		self.control_window = tk.Toplevel(self.root)
 		self.control_window.title('finger-works -- controls')
 		self.control_window.overrideredirect(True)
 		self.control_window.attributes('-topmost', True)
-		self.control_window.geometry(
-			f'{self.control_width}x{self.control_height}+{cx}+{cy}'
-		)
+		# No explicit size yet -- set below, after the buttons are packed,
+		# to whatever width they actually need (see the update_idletasks()
+		# call at the end of this method).
 		self.control_window.configure(bg='#1e1e1e')
 		self.control_window.bind('<Escape>', lambda _event: self._quit())
 		self.control_window.protocol('WM_DELETE_WINDOW', self._quit)
@@ -263,6 +334,18 @@ class Overlay:
 		inner = tk.Frame(frame, bg='#1e1e1e')
 		inner.pack(fill='both', expand=True, padx=6, pady=4)
 		frame = inner
+
+		# Drag handle: pinch-and-hold-and-move this (not any other part of
+		# the bar, so an aimed click at Pause/Help/Settings/Quit right
+		# next to it is never mistaken for a drag) to move the whole
+		# control bar. See _bind_window_drag()'s docstring -- the new
+		# position only lasts for this run, not remembered on restart.
+		grip = tk.Label(
+			frame, text='⋮⋮', fg='#777777', bg='#1e1e1e',
+			font=('Segoe UI', 9), cursor='fleur',
+		)
+		grip.pack(side='left', padx=(4, 4))
+		_bind_window_drag(grip, self.control_window, self.screen_width, self.screen_height)
 
 		self.status_canvas = tk.Canvas(
 			frame, width=14, height=14, bg='#1e1e1e', highlightthickness=0,
@@ -282,7 +365,19 @@ class Overlay:
 		_make_flat_button(frame, 'Settings', self._open_settings).pack(side='left', padx=2)
 		_make_flat_button(frame, 'Quit', self._quit, bg='#7a2e2e').pack(side='left', padx=2)
 
+		# Now that every button/label is packed, size the window to what
+		# it actually needs -- a floor still applies so it can't shrink to
+		# something absurd if the content here ever changes drastically,
+		# but there's no longer a fixed-fraction ceiling leaving empty
+		# space past the last button.
 		self.control_window.update_idletasks()
+		self.control_width = max(200, self.control_window.winfo_reqwidth())
+		cx = self.screen_width - self.control_width - self._margin
+		cy = self.screen_height - self.control_height - self._bottom_clearance
+		self.control_window.geometry(
+			f'{self.control_width}x{self.control_height}+{cx}+{cy}'
+		)
+
 		_make_window_noactivate(self.control_window.winfo_id())
 
 		self._refresh_pause_ui()
@@ -359,30 +454,77 @@ class Overlay:
 			highlightthickness=0, length=180, showvalue=True,
 		).grid(row=1, column=1, sticky='ew', padx=10, pady=4)
 
+		# How readily the cursor responds to small fingertip movements --
+		# low = steadier but can feel like it's "sliding"/lagging behind
+		# small precise movements; high = tracks almost immediately but
+		# shows more raw hand-tracking jitter. See constants.JITTER_ALPHA_MIN/
+		# MAX and mouse_control.set_cursor_snappiness().
+		tk.Label(win, text='Cursor snappiness', **label_opts).grid(
+			row=2, column=0, sticky='w', padx=10, pady=4)
+		snappiness_var = tk.DoubleVar(value=current.get('cursor_snappiness', 0.65))
+		tk.Scale(
+			win, from_=0.0, to=1.0, resolution=0.05, orient='horizontal',
+			variable=snappiness_var, bg='#1e1e1e', fg='#dddddd', troughcolor='#3a3a3a',
+			highlightthickness=0, length=180, showvalue=True,
+		).grid(row=2, column=1, sticky='ew', padx=10, pady=4)
+
+		tk.Label(win, text='Scroll speed', **label_opts).grid(
+			row=3, column=0, sticky='w', padx=10, pady=4)
+		scroll_speed_var = tk.DoubleVar(value=current.get('scroll_speed', 2.3))
+		tk.Scale(
+			win, from_=0.25, to=3.0, resolution=0.05, orient='horizontal',
+			variable=scroll_speed_var, bg='#1e1e1e', fg='#dddddd', troughcolor='#3a3a3a',
+			highlightthickness=0, length=180, showvalue=True,
+		).grid(row=3, column=1, sticky='ew', padx=10, pady=4)
+
+		tk.Label(win, text='Keyboard size', **label_opts).grid(
+			row=4, column=0, sticky='w', padx=10, pady=4)
+		keyboard_scale_var = tk.DoubleVar(value=current.get('keyboard_scale', 1.0))
+		tk.Scale(
+			win, from_=0.7, to=1.5, resolution=0.05, orient='horizontal',
+			variable=keyboard_scale_var, bg='#1e1e1e', fg='#dddddd', troughcolor='#3a3a3a',
+			highlightthickness=0, length=180, showvalue=True,
+		).grid(row=4, column=1, sticky='ew', padx=10, pady=4)
+
+		# Both off by default -- a short, quiet tone (see sounds.py), not
+		# meant to be intrusive/annoying, so they're opt-in rather than
+		# something everyone hears the first time they click or type.
+		click_sounds_var = tk.BooleanVar(value=current.get('click_sounds', False))
+		tk.Checkbutton(
+			win, text='Click sounds', variable=click_sounds_var,
+			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
+			activebackground='#1e1e1e', activeforeground='#dddddd',
+		).grid(row=5, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+
+		keyboard_sounds_var = tk.BooleanVar(value=current.get('keyboard_sounds', False))
+		tk.Checkbutton(
+			win, text='Keyboard sounds', variable=keyboard_sounds_var,
+			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
+			activebackground='#1e1e1e', activeforeground='#dddddd',
+		).grid(row=6, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+
+		# Controls both click_sounds and keyboard_sounds' own audio -- see
+		# sounds.set_volume(). Shown/usable regardless of whether either
+		# sound toggle above is currently on, same as a real volume slider,
+		# so it's already where you want it once you do turn one on.
+		tk.Label(win, text='Sound volume', **label_opts).grid(
+			row=7, column=0, sticky='w', padx=10, pady=4)
+		sound_volume_var = tk.DoubleVar(value=current.get('sound_volume', 0.7))
+		tk.Scale(
+			win, from_=0.0, to=1.0, resolution=0.05, orient='horizontal',
+			variable=sound_volume_var, bg='#1e1e1e', fg='#dddddd', troughcolor='#3a3a3a',
+			highlightthickness=0, length=180, showvalue=True,
+		).grid(row=7, column=1, sticky='ew', padx=10, pady=4)
+
+		# Debug mode is deliberately excluded from "remembered for next
+		# time" (see settings.py's _PERSISTED_KEYS) -- it only ever applies
+		# to the run you turn it on for.
 		debug_var = tk.BooleanVar(value=current.get('debug', False))
 		tk.Checkbutton(
 			win, text='Debug mode (event text + live camera view)', variable=debug_var,
 			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
 			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=2, column=0, columnspan=2, sticky='w', padx=10, pady=4)
-
-		# Off (default) = type into whatever text box/app has real OS
-		# focus, same as a physical keyboard. On = keep typing confined to
-		# the on-screen keyboard's own preview line instead (the old
-		# behavior), which you then move elsewhere with the Copy
-		# Typed/Cut Typed keys.
-		type_in_keyboard_area_var = tk.BooleanVar(value=current.get('type_in_keyboard_area', False))
-		tk.Checkbutton(
-			win, text="Type into the keyboard's own area (instead of your\nselected text box)",
-			variable=type_in_keyboard_area_var, justify='left',
-			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
-			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=3, column=0, columnspan=2, sticky='w', padx=10, pady=4)
-
-		tk.Label(
-			win, text='Camera and debug changes apply immediately.\nAll settings are remembered for next time.',
-			fg='#999999', bg='#1e1e1e', font=('Segoe UI', 8), justify='left',
-		).grid(row=4, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
+		).grid(row=8, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
 
 		def apply_and_close():
 			chosen = camera_var.get()
@@ -391,16 +533,37 @@ class Overlay:
 				'camera_device': camera_device,
 				'sensitivity': round(sens_var.get(), 2),
 				'debug': debug_var.get(),
-				'type_in_keyboard_area': type_in_keyboard_area_var.get(),
+				'cursor_snappiness': round(snappiness_var.get(), 2),
+				'scroll_speed': round(scroll_speed_var.get(), 2),
+				'keyboard_scale': round(keyboard_scale_var.get(), 2),
+				'click_sounds': click_sounds_var.get(),
+				'keyboard_sounds': keyboard_sounds_var.get(),
+				'sound_volume': round(sound_volume_var.get(), 2),
 			}
 			if self.on_settings_changed:
 				self.on_settings_changed(new_settings)
 			close()
 
+		def reset_to_defaults():
+			# Only resets what's shown in this window -- doesn't apply or
+			# save anything by itself, so Cancel still discards a reset you
+			# didn't mean to make, same as any other change here.
+			d = fw_settings.DEFAULTS
+			camera_var.set('Auto (recommended)')
+			sens_var.set(d['sensitivity'])
+			snappiness_var.set(d['cursor_snappiness'])
+			scroll_speed_var.set(d['scroll_speed'])
+			keyboard_scale_var.set(d['keyboard_scale'])
+			click_sounds_var.set(d['click_sounds'])
+			keyboard_sounds_var.set(d['keyboard_sounds'])
+			sound_volume_var.set(d['sound_volume'])
+			debug_var.set(d['debug'])
+
 		btn_frame = tk.Frame(win, bg='#1e1e1e')
-		btn_frame.grid(row=5, column=0, columnspan=2, pady=(0, 10))
+		btn_frame.grid(row=9, column=0, columnspan=2, pady=(0, 10))
 		_make_flat_button(btn_frame, 'Apply', apply_and_close, bg='#2ecc71').pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Cancel', close).pack(side='left', padx=4)
+		_make_flat_button(btn_frame, 'Reset to Defaults', reset_to_defaults).pack(side='left', padx=4)
 
 		win.update_idletasks()
 		_make_window_noactivate(win.winfo_id())
@@ -497,6 +660,37 @@ class Overlay:
 		multiplier, set separately by whoever calls this (main_fast.py)."""
 		self.mouse_sensitivity = sensitivity
 
+	def set_keyboard_scale(self, scale):
+		"""Resize the overlay panel (and so the on-screen keyboard drawn on
+		it) to `scale` times its base size, at runtime -- e.g. from the
+		Settings window's "Keyboard size" slider. No-op if unchanged.
+
+		Only resizes/repositions the panel window and canvas here; the
+		keyboard's actual button layout is a separate, static computation
+		(keyboard.get_button_list) that main_fast.py must rebuild against
+		the new self.panel_width/self.panel_height after calling this --
+		this method doesn't do that itself since it has no reference to the
+		current button list or keyboard page."""
+		if scale == self.keyboard_scale:
+			return
+		self.keyboard_scale = scale
+		self.panel_width = round(self._base_panel_width * scale)
+		self.panel_height = round(self._base_panel_height * scale)
+
+		# The panel sits directly above the control bar (see __init__), so
+		# a taller panel needs to shift up to stay clear of it -- only
+		# origin_y depends on panel_height; the control bar's own position
+		# is independent of panel size and doesn't need to move.
+		self.origin_x = self.screen_width - self.panel_width - self._margin
+		self.origin_y = (
+			self.screen_height - self.panel_height - self.control_height
+			- self._margin - self._bottom_clearance
+		)
+		self.root.geometry(
+			f'{self.panel_width}x{self.panel_height}+{self.origin_x}+{self.origin_y}'
+		)
+		self.canvas.config(width=self.panel_width, height=self.panel_height)
+
 	def draw_video(self, frame_rgb):
 		"""Show one camera frame (an RGB numpy array, already annotated with
 		hand skeleton/gesture labels by the caller) in the debug video
@@ -515,6 +709,43 @@ class Overlay:
 
 	def _quit(self):
 		self.should_quit = True
+
+	# Height, in canvas pixels, of the draggable strip at the top of this
+	# panel -- drawn each frame in draw() (a thin bar with a grip glyph),
+	# and checked against event.y in _on_panel_drag_press() below to
+	# decide whether a press starts a drag or is just an ordinary press
+	# somewhere else on the canvas.
+	_PANEL_GRIP_HEIGHT = 14
+
+	def _on_panel_drag_press(self, event):
+		if event.y > self._PANEL_GRIP_HEIGHT:
+			return
+		self._panel_drag_state = {
+			'x_root': event.x_root, 'y_root': event.y_root,
+			'win_x': self.root.winfo_x(), 'win_y': self.root.winfo_y(),
+		}
+
+	def _on_panel_drag_motion(self, event):
+		state = self._panel_drag_state
+		if state is None:
+			return
+		dx = event.x_root - state['x_root']
+		dy = event.y_root - state['y_root']
+		min_onscreen = 40
+		new_x = max(min_onscreen - self.panel_width, min(
+			state['win_x'] + dx, self.screen_width - min_onscreen,
+		))
+		new_y = max(0, min(state['win_y'] + dy, self.screen_height - min_onscreen))
+		# Keep in sync with the real window position -- k.execute_event_
+		# keyboard() converts the OS cursor position into this panel's
+		# local coordinate space using exactly these two values (see
+		# origin() below), so keyboard hit-testing would silently
+		# misalign against the dragged panel if they went stale.
+		self.origin_x, self.origin_y = new_x, new_y
+		self.root.geometry(f'+{new_x}+{new_y}')
+
+	def _on_panel_drag_release(self, _event):
+		self._panel_drag_state = None
 
 	def origin(self):
 		"""(x, y) of this panel's top-left corner, in real screen coordinates.
@@ -552,6 +783,19 @@ class Overlay:
 
 		c = self.canvas
 		c.delete('all')
+
+		# Drag grip -- a thin strip along the very top, redrawn every
+		# frame like everything else here (delete('all') above wipes it
+		# too). See _PANEL_GRIP_HEIGHT/_on_panel_drag_press() for the
+		# matching hit-test.
+		c.create_rectangle(
+			0, 0, self.panel_width, self._PANEL_GRIP_HEIGHT,
+			fill='#2a2a2a', outline='',
+		)
+		c.create_text(
+			self.panel_width / 2, self._PANEL_GRIP_HEIGHT / 2,
+			fill='#777777', font=('Segoe UI', 8), text='⋮⋮⋮⋮⋮⋮',
+		)
 
 		if self.debug:
 			c.create_text(

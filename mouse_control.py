@@ -5,6 +5,7 @@ import time
 import pyautogui
 import constants as c
 import numpy as np
+import sounds
 
 # pyautogui's default is to sleep 0.1s after *every* call it makes (moveTo,
 # click, press, ...). We call several of these per camera frame, so at the
@@ -36,6 +37,43 @@ def set_sensitivity_multiplier(multiplier):
 	>1 faster, <1 slower). See main_fast.py's --sensitivity option."""
 	global _sensitivity_multiplier
 	_sensitivity_multiplier = multiplier
+
+
+# Multiplies constants.SCROLL_AMOUNT -- set from the Settings window's
+# "Scroll speed" slider, same pattern as _sensitivity_multiplier above.
+_scroll_speed_multiplier = 1.0
+
+
+def set_scroll_speed_multiplier(multiplier):
+	global _scroll_speed_multiplier
+	_scroll_speed_multiplier = multiplier
+
+
+def get_scroll_speed_multiplier():
+	return _scroll_speed_multiplier
+
+
+# The jitter-smoothing alpha _smooth_fingertip() actually uses -- set from
+# the Settings window's "Cursor snappiness" slider (see
+# set_cursor_snappiness()) via a value between constants.JITTER_ALPHA_MIN
+# and constants.JITTER_ALPHA_MAX. Starts at the low/smooth end, matching
+# this project's original (pre-Settings) hardcoded behavior.
+_jitter_alpha = c.JITTER_ALPHA_MIN
+
+
+def set_cursor_snappiness(snappiness):
+	"""`snappiness` is 0.0 (max smoothing) to 1.0 (max snappiness) -- see
+	constants.JITTER_ALPHA_MIN/MAX for what this actually changes and why."""
+	global _jitter_alpha
+	snappiness = min(max(snappiness, 0.0), 1.0)
+	_jitter_alpha = c.JITTER_ALPHA_MIN + snappiness * (c.JITTER_ALPHA_MAX - c.JITTER_ALPHA_MIN)
+
+
+def get_cursor_snappiness():
+	"""Inverse of set_cursor_snappiness() -- used to prefill the Settings
+	window with whatever's currently in effect."""
+	span = c.JITTER_ALPHA_MAX - c.JITTER_ALPHA_MIN
+	return (_jitter_alpha - c.JITTER_ALPHA_MIN) / span if span else 0.0
 
 
 def set_zoomed(is_zoomed_in):
@@ -110,8 +148,9 @@ _filtered_x = None
 _filtered_y = None
 
 _JITTER_RADIUS_FRAC = 0.01   # frame-widths; deltas below this count as noise
-_JITTER_ALPHA = 0.15         # smoothing factor applied to jitter-sized movement
-_INTENT_ALPHA = 0.9          # smoothing factor applied to larger, intentional movement
+# The jitter-sized-movement alpha is a module-level variable (_jitter_alpha,
+# defined above near set_cursor_snappiness()), not a constant here -- it's
+# what the Settings window's "Cursor snappiness" slider actually changes.
 
 
 def _smooth_fingertip(raw_x, raw_y, frame_width):
@@ -123,7 +162,7 @@ def _smooth_fingertip(raw_x, raw_y, frame_width):
 
 	jitter_radius = frame_width * _JITTER_RADIUS_FRAC
 	delta = ((raw_x - _filtered_x) ** 2 + (raw_y - _filtered_y) ** 2) ** 0.5
-	alpha = _JITTER_ALPHA if delta < jitter_radius else _INTENT_ALPHA
+	alpha = _jitter_alpha if delta < jitter_radius else c.INTENT_ALPHA
 
 	_filtered_x += alpha * (raw_x - _filtered_x)
 	_filtered_y += alpha * (raw_y - _filtered_y)
@@ -172,6 +211,7 @@ def execute_click(event):
 	if is_left_pinch and not _left_button_down:
 		pyautogui.mouseDown(button='left')
 		_left_button_down = True
+		sounds.play_click()
 	elif not is_left_pinch and _left_button_down:
 		pyautogui.mouseUp(button='left')
 		_left_button_down = False
@@ -179,6 +219,7 @@ def execute_click(event):
 	is_right_pinch = (event == 'Right-Click')
 	if is_right_pinch and not _was_right_click:
 		pyautogui.click(button='right')
+		sounds.play_click()
 	_was_right_click = is_right_pinch
 
 
@@ -250,6 +291,79 @@ def execute_zoom(direction):
 			pyautogui.scroll(200 if direction == 'in' else -200)
 		finally:
 			pyautogui.keyUp('ctrl')
+
+
+# Counts consecutive held frames of the current scroll direction, so
+# execute_scroll() can only actually send a tick every SCROLL_FRAME_INTERVAL
+# frames instead of every single one -- see constants.SCROLL_FRAME_INTERVAL.
+# Reset (not just left to keep counting) whenever the gesture isn't held or
+# switches direction, so a fresh point-up/point-down always sends its first
+# tick promptly rather than picking up mid-cycle.
+_scroll_frame_counter = 0
+_last_scroll_direction = None
+
+
+def execute_scroll(direction):
+	"""Send a scroll tick for the held left-hand point-up/point-down
+	gesture, paced to one real scroll every SCROLL_FRAME_INTERVAL frames
+	rather than one per camera frame (see that constant's comment for why
+	-- an unpaced tick every frame reads as a fast, disorientating flick
+	rather than a controlled scroll).
+
+	`direction` is 'Scroll Up', 'Scroll Down', or None (gesture not
+	currently held) -- as returned by event_classifier.get_scroll_event().
+	"""
+	global _scroll_frame_counter, _last_scroll_direction
+
+	if direction is None:
+		_scroll_frame_counter = 0
+		_last_scroll_direction = None
+		return
+
+	if direction != _last_scroll_direction:
+		# Just started (or switched direction): send this first tick right
+		# away rather than making it wait out a stale counter.
+		_scroll_frame_counter = 0
+		_last_scroll_direction = direction
+
+	if _scroll_frame_counter % c.SCROLL_FRAME_INTERVAL == 0:
+		amount = round(c.SCROLL_AMOUNT * _scroll_speed_multiplier)
+		if direction == 'Scroll Down':
+			amount = -amount
+		pyautogui.scroll(amount)
+
+	_scroll_frame_counter += 1
+
+
+def hand_scale(abs_landmark_list):
+	"""Wrist-to-middle-knuckle pixel distance for this frame's hand -- a
+	stand-in for "how big does the hand look right now" (and so, how close
+	it is to the camera) that stays roughly constant across hand poses,
+	unlike a fingertip-based measurement.
+
+	main_fast.py divides every landmark's wrist-relative position by this
+	before handing it to event_classifier, which is what makes gesture
+	detection (FINGER_OUT_CUTOFF, LEFT_CLICK_CUTOFF, RIGHT_CLICK_CUTOFF --
+	see constants.py) work the same regardless of how far your hand is
+	from the camera, instead of only at one specific distance."""
+	wrist = abs_landmark_list[0]
+	middle_mcp = abs_landmark_list[9]
+	return ((wrist[0] - middle_mcp[0]) ** 2 + (wrist[1] - middle_mcp[1]) ** 2) ** 0.5
+
+
+def normalize_landmarks(rel_landmark_list, scale):
+	"""Scale a hand's wrist-relative landmark positions (rel_landmark_list,
+	as produced by main_fast.pre_process_landmark) down by `scale` (its
+	hand_scale()) so every gesture cutoff in constants.py can be a
+	distance-independent ratio instead of a raw pixel count. `scale` is
+	floored well above zero so a degenerate near-zero measurement (wrist
+	and middle knuckle landmarks reported on top of each other) can't blow
+	this up into huge, spuriously "extended" finger distances."""
+	safe_scale = max(scale, 1.0)
+	normalized = rel_landmark_list.copy()
+	normalized[:, 0] /= safe_scale
+	normalized[:, 1] /= safe_scale
+	return normalized
 
 
 def execute_event_fast(event, abs_landmark_list, event_history, frame_width, frame_height, allow_click):
