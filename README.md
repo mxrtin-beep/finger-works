@@ -38,24 +38,15 @@ restarts, both are always back at their default spot next launch.
 **Settings** covers camera, debug mode, four
 feel-tuning sliders (mouse sensitivity, cursor snappiness -- see "Does the
 cursor feel like it's sliding?" below -- scroll speed, and on-screen
-keyboard size), two off-by-default sound toggles (a short, quiet tone on
+keyboard size), and two off-by-default sound toggles (a short, quiet tone on
 clicks and/or keyboard presses -- deliberately light, not an obvious
-"beep"), and an on-by-default **Click indicator** toggle (see just below).
-A **Reset to Defaults** button in Settings puts every field back to its
-shipped default (Apply afterward to actually use them). The on-screen
+"beep"). A **Reset to Defaults** button in Settings puts every field back to
+its shipped default (Apply afterward to actually use them). The on-screen
 keyboard always types into whatever text box/app is actually focused,
 like a physical keyboard. Settings persist across restarts
 (`~/.finger_works_settings.json`) -- except debug mode, which is always
 back off the next time you start the program, however you left it; see
 `INSTRUCTIONS.md` for details.
-
-Every left/right click also flashes a colored square at the cursor --
-green for left, yellow for right -- for about 150ms, regardless of the
-click sound setting (on by default; turn it off in Settings if you'd
-rather not have it). This is meant as click confirmation you can't miss,
-right where you're already looking, and one that doesn't depend on your
-OS/audio setup actually cooperating the way the (optional, off by
-default) click sound does.
 
 ### Does the cursor feel like it's sliding?
 

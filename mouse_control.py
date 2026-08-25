@@ -182,20 +182,6 @@ _left_button_down = False
 # pinch for multiple frames would fire a real right-click every frame.
 _was_right_click = False
 
-# Called with ('left' | 'right', x, y) -- x, y the OS cursor position at
-# the moment a click actually fires -- the instant a click actually fires
-# (same edge-trigger moment as sounds.play_click() below). Wired to
-# overlay.show_click_indicator() by main_fast.py once the overlay exists,
-# so this module doesn't need to import overlay (a heavy GUI class) just
-# for this. None (the default, e.g. before the overlay exists yet, or in
-# a test) means no visual feedback is given, silently.
-_click_feedback_callback = None
-
-
-def set_click_feedback_callback(callback):
-	global _click_feedback_callback
-	_click_feedback_callback = callback
-
 
 def execute_click(event):
 	"""Translate the current gesture event into real OS mouse-button state.
@@ -226,8 +212,6 @@ def execute_click(event):
 		pyautogui.mouseDown(button='left')
 		_left_button_down = True
 		sounds.play_click()
-		if _click_feedback_callback:
-			_click_feedback_callback('left', *pyautogui.position())
 	elif not is_left_pinch and _left_button_down:
 		pyautogui.mouseUp(button='left')
 		_left_button_down = False
@@ -236,8 +220,6 @@ def execute_click(event):
 	if is_right_pinch and not _was_right_click:
 		pyautogui.click(button='right')
 		sounds.play_click()
-		if _click_feedback_callback:
-			_click_feedback_callback('right', *pyautogui.position())
 	_was_right_click = is_right_pinch
 
 

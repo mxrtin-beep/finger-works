@@ -90,18 +90,14 @@ Click **Settings** in the control bar to open a small settings window:
   fast repeated triggers (e.g. quickly switching keys) from racing each
   other and dropping a sound on macOS/Linux; on Windows it reads the WAV
   file fresh on every play via `winsound`, which -- despite several
-  rounds of fixes -- can still occasionally misfire (drop a sound, or
-  rarely substitute a Windows system sound) purely due to real
-  limitations of that legacy API. `pygame`, when available, doesn't have
-  this problem, since it talks to a real audio backend instead of
-  wrapping `PlaySound()`.
-- **Click indicator** -- on by default, unlike the two sound settings
-  above. A brief (~150ms) colored square at the cursor on every left/right
-  click -- green for left, yellow for right -- see
-  `overlay.show_click_indicator()`. This is click confirmation that
-  doesn't depend on your OS/audio setup actually cooperating, unlike the
-  (optional) click sound; it's on by default since it replaces what used
-  to be an always-on control-bar border flash.
+  rounds of fixes, including an explicit "stop anything currently
+  playing" purge immediately before every play -- can still occasionally
+  misfire (drop a sound, or rarely substitute a Windows system sound)
+  purely due to real limitations of that legacy API, not a bug with a
+  further fix available. `pygame`, when available, doesn't have this
+  problem at all, since it talks to a real audio backend instead of
+  wrapping `PlaySound()` -- installing it is the actual fix, not another
+  winsound tweak.
 - **Debug mode** -- same as `--debug`, as a checkbox. Session-only,
   unlike every other setting here: it's never saved to
   `~/.finger_works_settings.json`, so it's always back off the next time

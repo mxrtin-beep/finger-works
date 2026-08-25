@@ -455,7 +455,6 @@ def main(settings):
 	sounds.set_click_sounds_enabled(settings.get('click_sounds', False))
 	sounds.set_keyboard_sounds_enabled(settings.get('keyboard_sounds', False))
 	keyboard_scale = settings.get('keyboard_scale', 1.0)
-	click_indicator_enabled = settings.get('click_indicator', True)
 
 	cap_width = width
 	cap_height = height
@@ -536,7 +535,6 @@ def main(settings):
 		mc.set_cursor_snappiness(new_settings.get('cursor_snappiness', 0.65))
 		sounds.set_click_sounds_enabled(new_settings.get('click_sounds', False))
 		sounds.set_keyboard_sounds_enabled(new_settings.get('keyboard_sounds', False))
-		overlay.set_click_indicator_enabled(new_settings.get('click_indicator', True))
 
 		overlay.set_keyboard_scale(new_settings.get('keyboard_scale', 1.0))
 		# The keyboard's button layout is sized off the overlay panel's
@@ -564,7 +562,6 @@ def main(settings):
 			'keyboard_scale': overlay.keyboard_scale,
 			'click_sounds': sounds.get_click_sounds_enabled(),
 			'keyboard_sounds': sounds.get_keyboard_sounds_enabled(),
-			'click_indicator': overlay.click_indicator_enabled,
 		}
 
 	_startup_t0 = time.time()
@@ -601,12 +598,11 @@ def main(settings):
 
 	overlay = ov.Overlay(
 		screenWidth, screenHeight, debug=debug, mouse_sensitivity=mouse_sensitivity,
-		keyboard_scale=keyboard_scale, click_indicator_enabled=click_indicator_enabled,
+		keyboard_scale=keyboard_scale,
 		on_settings_changed=handle_settings_changed,
 		get_settings=get_current_settings,
 		get_available_cameras=fw_settings.list_cameras,
 	)
-	mc.set_click_feedback_callback(overlay.show_click_indicator)
 
 	# Keyboard case/page state. 'letters' (QWERTY) or 'symbols'
 	# (punctuation/math), toggled by the on-screen '123'/'ABC' key --

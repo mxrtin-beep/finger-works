@@ -138,10 +138,21 @@ if not _HAVE_PYGAME and sys.platform == 'win32':
 #
 # SND_ASYNC hands the sound off to the OS and returns immediately without
 # blocking; SND_NODEFAULT means a genuine failure stays silent instead of
-# Windows substituting its own system/error sound (though, per above,
-# that's not a hard guarantee across every failure path).
+# Windows substituting its own system/error sound. SND_NODEFAULT still
+# isn't airtight across every failure path on every driver -- the system
+# sound has been reported firing occasionally even with it set. Calling
+# PlaySound(None, SND_PURGE) immediately beforehand -- a separate,
+# explicit "stop anything winsound is currently doing" call, rather than
+# relying solely on a single PlaySound call's own implicit stop-and-
+# restart behavior when something's still playing -- is a known mitigation
+# for exactly this kind of intermittent winsound flakiness under repeated
+# calls. Not a guarantee (nothing short of not using winsound at all is,
+# per the comment above -- pygame doesn't have this failure mode), but a
+# real, low-risk thing to try that can only reduce how often the fallback
+# path is reached in a bad state, never increase it.
 def _play_windows_fallback(path):
 	import winsound
+	winsound.PlaySound(None, winsound.SND_PURGE)
 	winsound.PlaySound(
 		path,
 		winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT,

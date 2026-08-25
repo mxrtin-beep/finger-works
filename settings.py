@@ -44,14 +44,6 @@ DEFAULTS = {
 	# sounds.py.
 	'click_sounds': False,
 	'keyboard_sounds': False,
-	# On by default (opt-out, unlike the sound settings above) -- a brief
-	# colored ring at the cursor on every left/right click (green/yellow).
-	# See overlay.Overlay.show_click_indicator(). On by default since it's
-	# the direct replacement for what used to be an always-on, non-
-	# optional control-bar flash; the sound settings stay opt-in since
-	# they're a genuinely new, potentially-unwanted addition rather than a
-	# replacement for something already always on.
-	'click_indicator': True,
 }
 
 # Settings persisted to disk across restarts -- everything in DEFAULTS
