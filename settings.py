@@ -44,6 +44,11 @@ DEFAULTS = {
 	# sounds.py.
 	'click_sounds': False,
 	'keyboard_sounds': False,
+	# 0.0 (silent) to 1.0 (full volume, the level click.wav/key.wav were
+	# generated at) -- see sounds.set_volume(). Only affects click_sounds/
+	# keyboard_sounds' own audio; doesn't touch anything else on the
+	# system.
+	'sound_volume': 0.7,
 }
 
 # Settings persisted to disk across restarts -- everything in DEFAULTS

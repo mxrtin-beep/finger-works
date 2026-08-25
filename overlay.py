@@ -503,6 +503,19 @@ class Overlay:
 			activebackground='#1e1e1e', activeforeground='#dddddd',
 		).grid(row=6, column=0, columnspan=2, sticky='w', padx=10, pady=4)
 
+		# Controls both click_sounds and keyboard_sounds' own audio -- see
+		# sounds.set_volume(). Shown/usable regardless of whether either
+		# sound toggle above is currently on, same as a real volume slider,
+		# so it's already where you want it once you do turn one on.
+		tk.Label(win, text='Sound volume', **label_opts).grid(
+			row=7, column=0, sticky='w', padx=10, pady=4)
+		sound_volume_var = tk.DoubleVar(value=current.get('sound_volume', 0.7))
+		tk.Scale(
+			win, from_=0.0, to=1.0, resolution=0.05, orient='horizontal',
+			variable=sound_volume_var, bg='#1e1e1e', fg='#dddddd', troughcolor='#3a3a3a',
+			highlightthickness=0, length=180, showvalue=True,
+		).grid(row=7, column=1, sticky='ew', padx=10, pady=4)
+
 		# Debug mode is deliberately excluded from "remembered for next
 		# time" (see settings.py's _PERSISTED_KEYS) -- it only ever applies
 		# to the run you turn it on for.
@@ -511,7 +524,7 @@ class Overlay:
 			win, text='Debug mode (event text + live camera view)', variable=debug_var,
 			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
 			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=7, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
+		).grid(row=8, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
 
 		def apply_and_close():
 			chosen = camera_var.get()
@@ -525,6 +538,7 @@ class Overlay:
 				'keyboard_scale': round(keyboard_scale_var.get(), 2),
 				'click_sounds': click_sounds_var.get(),
 				'keyboard_sounds': keyboard_sounds_var.get(),
+				'sound_volume': round(sound_volume_var.get(), 2),
 			}
 			if self.on_settings_changed:
 				self.on_settings_changed(new_settings)
@@ -542,10 +556,11 @@ class Overlay:
 			keyboard_scale_var.set(d['keyboard_scale'])
 			click_sounds_var.set(d['click_sounds'])
 			keyboard_sounds_var.set(d['keyboard_sounds'])
+			sound_volume_var.set(d['sound_volume'])
 			debug_var.set(d['debug'])
 
 		btn_frame = tk.Frame(win, bg='#1e1e1e')
-		btn_frame.grid(row=8, column=0, columnspan=2, pady=(0, 10))
+		btn_frame.grid(row=9, column=0, columnspan=2, pady=(0, 10))
 		_make_flat_button(btn_frame, 'Apply', apply_and_close, bg='#2ecc71').pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Cancel', close).pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Reset to Defaults', reset_to_defaults).pack(side='left', padx=4)

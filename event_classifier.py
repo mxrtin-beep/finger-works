@@ -87,7 +87,29 @@ def get_event_fast(rel_landmark_list, control_state):
 	# frame you release the gesture is the one that "sticks". That race
 	# is what made the toggle feel unreliable, independent of which
 	# specific gesture was used.
-	is_fist = np.array_equal(finger_out_arr, np.array([False, False, False, False, False]))
+	# Thumb-to-fingertip distances, needed below for the actual click check,
+	# but computed here too -- before the fist check -- so a genuine pinch
+	# can be told apart from a genuine fist even on a frame where the raw
+	# finger-extended pose looks identical for both (see is_fist below).
+	thumb_index_dist = dist_twopoints(rel_landmark_list[c.THUMB_IDX], rel_landmark_list[c.INDEX_IDX])
+	thumb_ring_dist = dist_twopoints(rel_landmark_list[c.THUMB_IDX], rel_landmark_list[c.RING_IDX])
+	is_pinching = thumb_index_dist < c.LEFT_CLICK_CUTOFF or thumb_ring_dist < c.RIGHT_CLICK_CUTOFF
+
+	# Closed fist, *and* not currently pinching. The plain finger-out check
+	# alone isn't enough: pointing the whole hand straight at the camera
+	# foreshortens every finger in the 2D landmark projection, including an
+	# extended index finger mid-pinch, which can make finger_out_arr read as
+	# "nothing extended" -- exactly the fist pattern -- even while the
+	# thumb and index are genuinely pinched together for a click. Without
+	# this guard, that foreshortening made is_fist true first, so the
+	# function returned 'Mousing' below before the click-distance check a
+	# few lines down ever ran, and left/right-click couldn't register at
+	# all while facing the camera that way. Requiring "not pinching" here
+	# only matters for telling fist apart from a pinch that also happens to
+	# foreshorten-match the fist pose; it doesn't affect the ordinary case
+	# where a real fist is thumb-tucked-against-palm but not close enough
+	# to the index/ring fingertips specifically to read as a pinch.
+	is_fist = np.array_equal(finger_out_arr, np.array([False, False, False, False, False])) and not is_pinching
 	toggle_keyboard = is_fist and not _was_fist
 	_was_fist = is_fist
 
@@ -119,10 +141,9 @@ def get_event_fast(rel_landmark_list, control_state):
 
 	# Clicking -- thumb-to-fingertip distance, in hand-scale-normalized
 	# units (see this function's docstring), compared against the ratio
-	# cutoffs in constants.py.
-	thumb_index_dist = dist_twopoints(rel_landmark_list[c.THUMB_IDX], rel_landmark_list[c.INDEX_IDX])
-	thumb_ring_dist = dist_twopoints(rel_landmark_list[c.THUMB_IDX], rel_landmark_list[c.RING_IDX])
-
+	# cutoffs in constants.py. thumb_index_dist/thumb_ring_dist were
+	# already computed above (is_pinching, for the is_fist guard) -- reused
+	# here rather than recomputed.
 	if thumb_ring_dist < c.RIGHT_CLICK_CUTOFF:
 		return 'Right-Click'
 

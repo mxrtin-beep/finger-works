@@ -454,6 +454,7 @@ def main(settings):
 	mc.set_cursor_snappiness(settings.get('cursor_snappiness', 0.65))
 	sounds.set_click_sounds_enabled(settings.get('click_sounds', False))
 	sounds.set_keyboard_sounds_enabled(settings.get('keyboard_sounds', False))
+	sounds.set_volume(settings.get('sound_volume', 0.7))
 	keyboard_scale = settings.get('keyboard_scale', 1.0)
 
 	cap_width = width
@@ -535,6 +536,7 @@ def main(settings):
 		mc.set_cursor_snappiness(new_settings.get('cursor_snappiness', 0.65))
 		sounds.set_click_sounds_enabled(new_settings.get('click_sounds', False))
 		sounds.set_keyboard_sounds_enabled(new_settings.get('keyboard_sounds', False))
+		sounds.set_volume(new_settings.get('sound_volume', 0.7))
 
 		overlay.set_keyboard_scale(new_settings.get('keyboard_scale', 1.0))
 		# The keyboard's button layout is sized off the overlay panel's
@@ -562,6 +564,7 @@ def main(settings):
 			'keyboard_scale': overlay.keyboard_scale,
 			'click_sounds': sounds.get_click_sounds_enabled(),
 			'keyboard_sounds': sounds.get_keyboard_sounds_enabled(),
+			'sound_volume': sounds.get_volume(),
 		}
 
 	_startup_t0 = time.time()

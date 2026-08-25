@@ -111,6 +111,30 @@ Click **Settings** in the control bar to open a small settings window:
   unresolved limitation of the legacy `PlaySound()` API on some
   driver/OS combinations, not a bug with a further winsound-side fix
   available -- `pygame`, where it can be installed, is the actual fix.
+
+  A separate issue was reported on Windows without `pygame` installed:
+  the OS's own "ding" playing on every keypress *while Keyboard sounds
+  was off*, and not playing at all once Keyboard sounds was turned on.
+  Nothing in this codebase calls `winsound` (or anything else that plays
+  a sound) while that setting is off, so the ding itself isn't one of
+  this project's own sounds -- the working theory is a genuine
+  Windows-level beep from elsewhere in the real-keystroke pipeline that
+  happens to go silent whenever our own key sound is also using
+  `winsound`'s legacy playback channel at the same moment. This isn't
+  confirmed root-caused. As a low-risk mitigation (and a way to test the
+  theory), the Windows fallback path now still plays the key sound even
+  with Keyboard sounds off, just scaled down to near-silent rather than
+  skipped entirely -- see `sounds.play_key()`'s docstring. If the ding
+  keeps happening anyway, this mitigation isn't the fix and should be
+  reverted rather than layered with more guesses.
+- **Sound volume** -- 0 (silent) to 1 (full volume, the level
+  `click.wav`/`key.wav` were generated at), applied to both Click sounds
+  and Keyboard sounds. Via `pygame`, this is a real per-sound volume;
+  via the Windows/macOS fallback there's no native volume argument to
+  hand `winsound`/`aplay`, so the WAV samples are pre-scaled instead --
+  see `sounds._scaled_wav_path()`. `afplay` (macOS) takes a `-v` flag
+  directly. Plain `aplay` (Linux) has no per-play volume control at all,
+  so this slider doesn't affect Linux fallback playback yet.
 - **Debug mode** -- same as `--debug`, as a checkbox. Session-only,
   unlike every other setting here: it's never saved to
   `~/.finger_works_settings.json`, so it's always back off the next time

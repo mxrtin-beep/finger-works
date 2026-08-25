@@ -1,9 +1,12 @@
 
 import os
 import queue
+import struct
 import subprocess
 import sys
+import tempfile
 import threading
+import wave
 
 # Two short, soft WAV files (sounds/click.wav, sounds/key.wav) -- see
 # generate_sounds.py for how they were made and why they're shaped the way
@@ -17,6 +20,17 @@ _KEY_PATH = os.path.join(_SOUNDS_DIR, 'key.wav')
 
 _click_sounds_enabled = False
 _keyboard_sounds_enabled = False
+
+# 0.0 (silent) to 1.0 (full volume, the level click.wav/key.wav were
+# generated at) -- see settings.py's 'sound_volume' and set_volume() below.
+_volume = 1.0
+
+# Windows fallback only (see _play_windows_fallback below): the near-silent
+# volume a key sound is still played at even while Settings -> "Keyboard
+# sounds" is off, as a mitigation for the Windows system "ding" reported
+# happening in exactly that state. See play_key()'s comment for the full
+# reasoning/caveats -- this is a best-effort mitigation, not a confirmed fix.
+_SUPPRESS_VOLUME = 0.02
 
 
 def set_click_sounds_enabled(enabled):
@@ -35,6 +49,19 @@ def get_click_sounds_enabled():
 
 def get_keyboard_sounds_enabled():
 	return _keyboard_sounds_enabled
+
+
+def set_volume(volume):
+	"""0.0 (silent) to 1.0 (full volume). Applied to every future
+	play_click()/play_key() call -- see settings.py's 'sound_volume' and
+	main_fast.py's handle_settings_changed(), which calls this whenever the
+	Settings window's volume slider changes."""
+	global _volume
+	_volume = max(0.0, min(1.0, volume))
+
+
+def get_volume():
+	return _volume
 
 
 # --- Preferred backend: pygame.mixer --------------------------------------
@@ -78,10 +105,15 @@ except Exception:
 _pygame_sounds = {}
 
 
-def _play_pygame(path):
+def _play_pygame(path, volume):
 	if path not in _pygame_sounds:
 		_pygame_sounds[path] = pygame.mixer.Sound(path)
-	_pygame_sounds[path].play()
+	sound = _pygame_sounds[path]
+	# set_volume() takes effect on the *next* play() call, not retroactively
+	# on one already playing -- fine here since play() always follows it
+	# immediately below, on the same call.
+	sound.set_volume(volume)
+	sound.play()
 
 
 # --- Fallback backend: per-platform system player --------------------------
@@ -155,9 +187,54 @@ if not _HAVE_PYGAME and sys.platform == 'win32':
 #   this is "known to not make it worse" more than "confirmed to fix
 #   it" -- pygame remains the real fix, whenever a prebuilt wheel for
 #   your Python version is available.
-def _play_windows_fallback(path):
+# winsound.PlaySound has no volume parameter at all -- the only way to make
+# it play quieter is to hand it audio data that's already quieter. Rather
+# than rewrite each play, the scaled-down samples are written out to a
+# temp WAV file once per (source file, rounded volume) combination and
+# reused after that -- click.wav/key.wav only have two possible source
+# paths, and the volume slider only changes occasionally, so this cache
+# stays tiny in practice. Assumes 16-bit PCM, which is exactly what
+# generate_sounds.py produces (see its write_wav()); anything else falls
+# back to the unscaled original file rather than risk corrupting the
+# audio.
+_scaled_wav_cache = {}
+
+
+def _scaled_wav_path(path, volume):
+	if volume >= 0.999:
+		return path
+	bucket = round(volume, 2)
+	key = (path, bucket)
+	if key in _scaled_wav_cache:
+		return _scaled_wav_cache[key]
+
+	try:
+		with wave.open(path, 'rb') as wf:
+			params = wf.getparams()
+			frames = wf.readframes(wf.getnframes())
+		if params.sampwidth != 2:
+			raise ValueError(f'unsupported sample width {params.sampwidth}')
+		sample_count = len(frames) // 2
+		samples = struct.unpack(f'<{sample_count}h', frames)
+		scaled = [max(-32768, min(32767, int(s * bucket))) for s in samples]
+		out_frames = struct.pack(f'<{sample_count}h', *scaled)
+
+		fd, out_path = tempfile.mkstemp(suffix='.wav', prefix='fw_snd_')
+		os.close(fd)
+		with wave.open(out_path, 'wb') as wf_out:
+			wf_out.setparams(params)
+			wf_out.writeframes(out_frames)
+	except Exception as exc:
+		print(f'[WARN] Could not scale volume for {path}: {exc}')
+		return path
+
+	_scaled_wav_cache[key] = out_path
+	return out_path
+
+
+def _play_windows_fallback(path, volume):
 	import winsound
-	winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+	winsound.PlaySound(_scaled_wav_path(path, volume), winsound.SND_FILENAME | winsound.SND_ASYNC)
 
 
 # macOS/Linux fallback: routed through a single dedicated background
@@ -169,12 +246,20 @@ def _play_windows_fallback(path):
 _fallback_queue = queue.Queue()
 
 
-def _play_blocking_fallback(path):
+def _play_blocking_fallback(path, volume):
 	if sys.platform == 'darwin':
+		# afplay's -v takes 0.0-1.0 directly, so no pre-scaling needed here
+		# (unlike winsound, which has no volume argument at all -- see
+		# _scaled_wav_path above).
 		subprocess.run(
-			['afplay', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+			['afplay', '-v', str(volume), path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 		)
 	else:
+		# Plain `aplay` has no per-play volume flag (it plays raw to the
+		# configured ALSA/PulseAudio mixer level) -- Linux keyboard/click
+		# sounds play at whatever volume is baked into the WAV file itself
+		# regardless of the Settings slider until this has a real ALSA/
+		# PulseAudio volume call behind it.
 		subprocess.run(
 			['aplay', '-q', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 		)
@@ -182,9 +267,9 @@ def _play_blocking_fallback(path):
 
 def _fallback_worker():
 	while True:
-		path = _fallback_queue.get()
+		path, volume = _fallback_queue.get()
 		try:
-			_play_blocking_fallback(path)
+			_play_blocking_fallback(path, volume)
 		except Exception as exc:
 			print(f'[WARN] Could not play sound {path}: {exc}')
 		finally:
@@ -198,40 +283,70 @@ if not _HAVE_PYGAME and sys.platform != 'win32':
 	threading.Thread(target=_fallback_worker, daemon=True).start()
 
 
-def _play_fallback(path):
+def _play_fallback(path, volume):
 	if sys.platform == 'win32':
 		try:
-			_play_windows_fallback(path)
+			_play_windows_fallback(path, volume)
 		except Exception as exc:
 			print(f'[WARN] Could not play sound {path}: {exc}')
 	else:
-		_fallback_queue.put(path)
+		_fallback_queue.put((path, volume))
 
 
-def _play(path):
-	"""Play `path` via pygame if available, else the per-platform
-	fallback. A missing sound file is a silent, immediate no-op either
-	way."""
-	if not os.path.exists(path):
+def _play(path, volume):
+	"""Play `path` at `volume` (0.0-1.0) via pygame if available, else the
+	per-platform fallback. A missing sound file is a silent, immediate
+	no-op either way."""
+	if volume <= 0.0 or not os.path.exists(path):
 		return
 	if _HAVE_PYGAME:
 		try:
-			_play_pygame(path)
+			_play_pygame(path, volume)
 			return
 		except Exception as exc:
 			print(f'[WARN] pygame playback failed for {path}, falling back: {exc}')
-	_play_fallback(path)
+	_play_fallback(path, volume)
 
 
 def play_click():
 	"""Call on every left/right-click press (the edge-trigger moment, not
 	held/dragging) -- no-op unless Settings -> "Click sounds" is on."""
 	if _click_sounds_enabled:
-		_play(_CLICK_PATH)
+		_play(_CLICK_PATH, _volume)
 
 
 def play_key():
 	"""Call on every on-screen keyboard key press -- no-op unless
-	Settings -> "Keyboard sounds" is on."""
+	Settings -> "Keyboard sounds" is on.
+
+	Reported issue this also addresses: with Keyboard sounds off, typing
+	was producing the Windows system "ding" on every key; with Keyboard
+	sounds on, the ding didn't happen at all. Nothing in this codebase
+	calls winsound (or anything else that plays a sound) when keyboard
+	sounds are off and this branch wasn't reached -- so that ding isn't
+	coming from a call this file makes; it's most likely a genuine
+	Windows-level beep from elsewhere in the real-keystroke pipeline
+	(winsound.PlaySound's legacy WinMM channel is well known to silently
+	"steal" a concurrent system beep on some driver setups), which just
+	happens to go audibly silent whenever *any* other winsound play is
+	already using that channel -- i.e. whenever our own key sound plays.
+	That's consistent with "on = no ding, off = ding" without the ding
+	actually being one of our own sounds.
+	This isn't confirmed root-caused (a genuine WinMM-level fix would need
+	to find and silence whatever's issuing the real beep, and there's no
+	such call anywhere in this codebase to point to) -- but it gives a
+	concrete way to test the theory and a low-risk mitigation either way:
+	a key sound still plays here even with Keyboard sounds off, just
+	scaled down to near-silent (_SUPPRESS_VOLUME) rather than skipped, on
+	the Windows fallback path specifically (pygame goes through a real
+	audio backend, not WinMM, so it was never a suspect here). If the
+	ding stops happening, that confirms the theory; if it doesn't, this
+	mitigation is harmless (near-silent, not audible) and should be
+	reverted rather than escalated with more winsound flags -- that
+	guessing game already burned several rounds on the click-sound issue
+	earlier and isn't worth repeating without better evidence.
+	"""
 	if _keyboard_sounds_enabled:
-		_play(_KEY_PATH)
+		_play(_KEY_PATH, _volume)
+	elif sys.platform == 'win32' and not _HAVE_PYGAME:
+		_play(_KEY_PATH, _SUPPRESS_VOLUME)
