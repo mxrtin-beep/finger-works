@@ -59,7 +59,14 @@ FINGER_OUT_CUTOFF = 280 / HAND_SCALE_TUNING_REFERENCE   # extended-finger cutoff
 # but too high risks false clicks from your hand's normal resting pose
 # while just aiming/hovering. This is a fine line and worth retuning for
 # your own hand/camera setup if it still feels off in either direction.
-LEFT_CLICK_CUTOFF = 70 / HAND_SCALE_TUNING_REFERENCE    # was 70px
+#
+# LEFT_CLICK_CUTOFF was lowered again, from 70px to 45px -- 70 turned out
+# too loose: a left-click could fire with the thumb and index still
+# roughly a centimeter apart, well short of an actual pinch. 45 still
+# isn't "touching" (some slack for hand-tracking jitter is still worth
+# keeping) but needs a much closer approach than 70 did. Retune this one
+# specifically if it now feels too strict/too loose for your own hand.
+LEFT_CLICK_CUTOFF = 45 / HAND_SCALE_TUNING_REFERENCE    # was 45px
 RIGHT_CLICK_CUTOFF = 60 / HAND_SCALE_TUNING_REFERENCE   # was 60px
 
 SCROLL_VEL_CUTOFF = 5
