@@ -27,6 +27,20 @@ with each hand's skeleton traced and its current gesture labeled in real
 time -- see `INSTRUCTIONS.md` for the full rundown of gestures, parameters,
 and what the debug output means.
 
+If you're running a packaged `.exe` build (Windows) rather than
+`python main_fast.py` directly, its console window is hidden the same way
+by default (no debug text there either), and reappears automatically the
+moment debug mode is turned on -- either at startup (`--debug`) or live
+from the Settings window's debug checkbox. This applies no matter how the
+exe was launched, including from an already-open PowerShell/cmd window --
+so testing it from a terminal without `--debug` will hide that window too,
+not just a double-clicked one; pass `--debug` (or turn it on in Settings)
+to keep it visible while you're working with it that way. If FingerWorks
+fails to start at all, its console is always shown regardless of debug
+mode, with the error printed there and the window kept open until you
+press Enter -- so a startup failure is never silent, just because debug
+mode happened to be off.
+
 A small control bar always sits in the bottom-right corner of the screen
 with **Pause**/**Resume**, **Help**, **Settings**, and **Quit** -- so you
 can pause tracking, look up the gestures, or quit, without needing a

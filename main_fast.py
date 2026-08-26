@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 import urllib.request
 
 import cv2
@@ -137,6 +138,55 @@ if sys.platform == 'win32':
 	_user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
 	_user32.AttachThreadInput.restype = wintypes.BOOL
 	_kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+	_kernel32.GetConsoleWindow.restype = wintypes.HWND
+
+
+def _set_console_visible(visible):
+	"""Best-effort, Windows only: show/hide this process's own console
+	window.
+
+	FingerWorks prints a fair amount of startup/diagnostic output (see
+	main()) that's genuinely useful while actually working on/debugging
+	the program, but is really only noise -- an intimidating black window
+	full of scrolling text -- to someone just using the packaged .exe.
+	Windows always creates a console for a console-subsystem executable
+	(what a plain `pyinstaller --onefile` build produces) whether or not
+	anything's ever printed to it, so hiding it after the fact (this
+	function) is what lets that printed output still exist for debug mode
+	without also requiring a *separate*, `--windowed`-built exe for normal
+	use: a `--windowed` build leaves sys.stdout/stderr as None on Windows,
+	which would crash the very first print() call anywhere in this
+	codebase (there are many) rather than just going unseen.
+
+	Called once at startup with the effective `debug` setting (see the
+	bottom of this file) -- before anything's been printed yet, so a
+	non-debug run never shows so much as a flash of the console -- and
+	again live from the Settings window's debug checkbox (see
+	handle_settings_changed() below), so toggling debug mode shows/hides
+	the console immediately rather than only taking effect on next
+	launch.
+
+	Always acts on whatever console this process is attached to, with no
+	attempt to detect "is this console shared with an already-open
+	terminal" first (an earlier version tried that, via
+	GetConsoleProcessList's attached-process count) -- that check reliably
+	misfired for exactly the case this exists for: a PyInstaller --onefile
+	build on Windows runs as a bootloader process that extracts the
+	payload and launches the real program as a *second*, child process,
+	both attached to the very same console, which always made the count
+	come out as "shared" and left the console visible even on a plain
+	double-click. Net effect: running the packaged exe from an existing
+	PowerShell/cmd window without --debug will now hide that window too,
+	not just a double-click-spawned one -- pass --debug (or turn it on in
+	Settings) when testing from a terminal to keep it visible."""
+	if sys.platform != 'win32':
+		return
+	try:
+		hwnd = _kernel32.GetConsoleWindow()
+		if hwnd:
+			_user32.ShowWindow(hwnd, 5 if visible else 0)  # SW_SHOW / SW_HIDE
+	except Exception as exc:
+		print(f'[WARN] Could not show/hide console window: {exc}')
 
 
 def capture_focused_window():
@@ -654,6 +704,7 @@ def main(settings):
 		mc.set_sensitivity_multiplier(new_settings['sensitivity'])
 		overlay.set_sensitivity(new_settings['sensitivity'])
 		overlay.set_debug(new_settings['debug'])
+		_set_console_visible(new_settings['debug'])
 		mc.set_scroll_speed_multiplier(new_settings.get('scroll_speed', 2.3))
 		mc.set_cursor_snappiness(new_settings.get('cursor_snappiness', 0.65))
 		sounds.set_click_sounds_enabled(new_settings.get('click_sounds', False))
@@ -1157,5 +1208,33 @@ if __name__ == '__main__':
 	if args.debug is not None:
 		settings['debug'] = args.debug
 
-	main(settings)
+	# As early as possible -- before main() prints its startup banner --
+	# so a non-debug run never shows so much as a flash of the console.
+	# See _set_console_visible()'s docstring for why this hides the
+	# console after the fact rather than the exe being built without one.
+	_set_console_visible(settings['debug'])
+
+	try:
+		main(settings)
+	except Exception:
+		# A per-frame hiccup is already caught and logged without crashing
+		# (see main()'s own try/except around each frame) -- reaching here
+		# means something failed at startup, before that loop even began
+		# (e.g. the camera-open/permission failures main() now raises a
+		# clear RuntimeError for). That's exactly the kind of failure a
+		# hidden console would otherwise swallow completely, silently
+		# undoing the point of raising a clear error in the first place --
+		# so show the console again (a no-op if it was never hidden, e.g.
+		# already in debug mode or launched from a terminal) and print the
+		# traceback there. input() afterward is what keeps a double-
+		# clicked .exe's console open long enough to actually read that,
+		# rather than the window closing itself the instant the process
+		# exits, same as any other console app's window would.
+		_set_console_visible(True)
+		traceback.print_exc()
+		try:
+			input('\nFingerWorks failed to start (see the error above). Press Enter to close...')
+		except Exception:
+			pass
+		sys.exit(1)
 
