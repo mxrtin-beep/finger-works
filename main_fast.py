@@ -597,6 +597,15 @@ def main(settings):
 
 	event = ''
 	control_state = 'Mouse'	# Mouse or Keyboard
+
+	# Timestamp when a hand most recently *started* being labeled 'Left'
+	# without interruption -- reset to None the instant a frame goes by
+	# without any hand carrying that label. Zoom is only allowed to fire
+	# once this streak has lasted HAND_LABEL_STABLE_SECONDS, so a glove (or
+	# any other cause of a flickering Left/Right label) can't trigger a
+	# zoom off a misclassification that lasts only a frame or two. See
+	# constants.HAND_LABEL_STABLE_SECONDS.
+	left_hand_label_since = None
 	typed_text = '>'
 
 	overlay = ov.Overlay(
@@ -652,6 +661,7 @@ def main(settings):
 				results = landmarker.detect_for_video(mp_image, timestamp_ms)
 
 				hand_debug_text = ''
+				left_hand_seen_this_frame = False
 
 				if results.hand_landmarks:
 
@@ -690,8 +700,25 @@ def main(settings):
 							raw_label = 'Left' if raw_label == 'Right' else 'Right'
 
 						if raw_label == 'Left':
+							left_hand_seen_this_frame = True
+							if left_hand_label_since is None:
+								left_hand_label_since = time.time()
+							label_is_stable = (
+								time.time() - left_hand_label_since >= c.HAND_LABEL_STABLE_SECONDS
+							)
+
 							zoom_event, zoom_debug_text = get_zoom_event(rel_landmark_list)
-							if zoom_event == 'Zoom In':
+							if not label_is_stable:
+								# This hand hasn't held the 'Left' label long
+								# enough yet (see constants.HAND_LABEL_STABLE_
+								# SECONDS) -- most likely a glove or a bad
+								# angle making the Left/Right classification
+								# flicker, rather than a hand genuinely raised
+								# to zoom. Read the gesture (for the debug
+								# overlay) but don't act on it.
+								if zoom_event in ('Zoom In', 'Zoom Out'):
+									zoom_debug_text += ' -> ignored (label not stable yet)'
+							elif zoom_event == 'Zoom In':
 								mc.execute_zoom('in')
 								mc.set_zoomed(True)
 								zoom_debug_text += ' -> sent zoom-in'
@@ -855,6 +882,14 @@ def main(settings):
 							)
 
 					hand_debug_text = f'  [{", ".join(debug_parts)}]'
+
+				if not left_hand_seen_this_frame:
+					# No hand carried the 'Left' label this frame (no hands
+					# at all, or the visible hand(s) all read as 'Right') --
+					# the streak is broken, so the next 'Left' reading has to
+					# earn HAND_LABEL_STABLE_SECONDS all over again before it
+					# can fire a zoom.
+					left_hand_label_since = None
 
 				# Persistently highlight Shift/Caps while toggled on, the same
 				# way a phone keyboard does -- only when nothing else (hover/

@@ -172,3 +172,15 @@ MIN_TRACKING_CONFIDENCE = 0.5
 # than digging into main_fast.py -- it swaps the label for every
 # detected hand, every frame.
 SWAP_LABELED_HANDS = True
+
+# A glove (or a bare hand at a bad angle) makes MediaPipe's Left/Right
+# handedness label flicker frame to frame -- the same physical hand gets
+# read as "Right" for a few frames, then "Left", then back again. Since
+# the left-hand label is what triggers the zoom gesture (see main_fast.py),
+# that flicker used to read as "raise a gloved hand, and it randomly zooms
+# in/out" even when you never meant to. Requiring a hand to have carried
+# the 'Left' label continuously for at least this long before its pose is
+# allowed to fire a zoom fixes that: a momentary misclassification no
+# longer reaches execute_zoom, while a genuinely-raised left hand still
+# zooms after a short, barely-noticeable delay.
+HAND_LABEL_STABLE_SECONDS = 1.0
