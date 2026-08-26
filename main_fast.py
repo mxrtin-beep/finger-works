@@ -315,6 +315,20 @@ def current_word_prefix(typed_text):
 	return tail
 
 
+def previous_word(typed_text):
+	"""The word just before the cursor that's already finished (followed by
+	whitespace, or the whole buffer if it ends in whitespace) -- used to
+	look up likely *next*-word suggestions (see word_predictions.
+	get_suggestions()) once current_word_prefix() above is empty, i.e.
+	there's no partial word left to complete and it's time to suggest
+	what's likely to come next instead."""
+	content = typed_text[1:] if typed_text.startswith('>') else typed_text
+	stripped = content.rstrip()
+	if not stripped:
+		return ''
+	return stripped.rsplit(None, 1)[-1]
+
+
 def apply_suggestion(word, typed_text, type_in_keyboard_area=False):
 	"""Handle a tap on one of the three word-suggestion buttons: complete
 	the current word with `word` (only typing whatever's left of it beyond
@@ -863,7 +877,9 @@ def main(settings):
 							# same way an iPhone's suggestion bar updates as
 							# you type each letter, not just when the page/
 							# scale changes like the letter grid below.
-							suggestions = wp.get_suggestions(current_word_prefix(typed_text))
+							suggestions = wp.get_suggestions(
+								current_word_prefix(typed_text), previous_word(typed_text),
+							)
 							suggestion_buttons = k.get_suggestion_buttons(
 								overlay.panel_width, overlay.panel_height, suggestions,
 							)
