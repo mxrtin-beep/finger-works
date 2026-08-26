@@ -44,8 +44,24 @@ def ensure_model_downloaded(model_path=MODEL_PATH, model_url=MODEL_URL):
 	return model_path
 
 
-width = 1440
-height = 900
+# Camera capture resolution -- fed straight into MediaPipe's HandLandmarker
+# every frame with no downscaling, so this directly sets how much work both
+# the camera driver and the hand-tracking model do per frame. Lowered from
+# the previous 1440x900: MediaPipe's own examples and most real-time
+# hand-tracking demos run comfortably at 640x480, which is more than enough
+# resolution for landmark detection (gesture cutoffs are already
+# normalized against the hand's own on-screen size, see constants.py's
+# "Distance-independent gesture cutoffs" comment, so this doesn't affect
+# gesture accuracy). 1440x900 is ~4.2x as many pixels, which was adding
+# real per-frame latency to both the camera read and the model's inference
+# -- since the cursor only actually moves once per fully-processed frame,
+# a slower/less steady frame rate here is what mainly reads as "choppy"
+# mouse movement, not the smoothing math in mouse_control.py (already
+# tuned in earlier commits to remove a blocking per-frame easing tween
+# that used to cause the same symptom). Screen/overlay/cursor coordinates
+# are unaffected -- those come from pyautogui.size(), a separate value.
+width = 640
+height = 480
 
 play_audio = False
 history_length = 8
@@ -571,15 +587,17 @@ def main(settings):
 
 	# Same idea as the camera above: the on-screen keyboard's word-prediction
 	# model (see word_predictions.py) is either loaded from a small cached
-	# file or, on a first run, built from NLTK's Brown corpus (downloading
-	# it first if needed) -- either can take a moment, so it's kicked off
-	# now rather than waiting until the keyboard is actually opened, which
-	# would otherwise stall the first suggestion lookup. Not joined before
-	# the main loop starts (unlike camera_thread) since nothing early on
-	# depends on it being ready yet -- word_predictions.get_suggestions()
-	# calls ensure_model_loaded() itself, which is a no-op once this thread
-	# has already finished.
-	threading.Thread(target=wp.ensure_model_loaded, daemon=True).start()
+	# file or, on a first run, built from two NLTK corpora (downloading them
+	# first if needed) -- either can take a moment (up to a few seconds on a
+	# first run), so it's kicked off now rather than waiting until the
+	# keyboard is actually opened. Not joined before the main loop starts
+	# (unlike camera_thread) since nothing early on depends on it being
+	# ready yet: word_predictions.get_suggestions() never blocks waiting for
+	# it (see that function's docstring) -- it just returns no suggestions
+	# for the few frames, if any, between the keyboard opening and this
+	# finishing, so a fast open right at startup can't freeze the whole
+	# program the way blocking on it here would.
+	wp.preload_async()
 
 	def reopen_camera(new_device):
 		"""Swap the live camera device at runtime (Settings window ->

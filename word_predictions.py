@@ -273,6 +273,39 @@ def ensure_model_loaded():
 			_index_unigrams()
 
 
+# Guards preload_async() below so it only ever kicks off one loader thread
+# total, whether it's called once at startup (see main_fast.py's main()) or
+# repeatedly as a get_suggestions() fallback (every frame the keyboard is
+# open, until the model's ready).
+_background_load_started = False
+
+
+def is_model_ready():
+	"""True once the model (real or fallback) is loaded and get_suggestions()
+	can answer immediately. False means a lookup right now would either
+	have to block (bad -- see get_suggestions()) or come back empty."""
+	return _unigram_counts is not None
+
+
+def preload_async():
+	"""Kick off ensure_model_loaded() on a daemon thread if it isn't
+	already loading, without blocking the caller. main_fast.py calls this
+	once at startup (alongside its camera-open/hand-model threads) so the
+	model is normally already loaded well before the keyboard's ever
+	opened; get_suggestions() also calls it as a fallback in case that
+	preload hasn't happened yet, so the model still starts loading even
+	then. Both share this one guard, so only one loader thread ever runs
+	no matter how many times/where this is called."""
+	global _background_load_started
+	if _background_load_started:
+		return
+	with _lock:
+		if _background_load_started:
+			return
+		_background_load_started = True
+		threading.Thread(target=ensure_model_loaded, daemon=True).start()
+
+
 def _score(word, bigram_continuations, bigram_total):
 	"""How good a suggestion `word` is, blending "how often this specific
 	word followed the previous one" with "how common this word is overall"
@@ -332,8 +365,21 @@ def get_suggestions(current_word, previous_word='', max_suggestions=3):
 	Tapping the same (top) suggestion repeatedly walks the resulting
 	bigram chain one likely word at a time, which is what lets this spell
 	out a plausible short sentence rather than looping on the same word.
+
+	Never blocks: if the model isn't loaded yet (main_fast.py's background
+	preload thread hasn't finished -- see main()), this returns an empty
+	list immediately rather than waiting for it. This matters because
+	get_suggestions() runs on the same real-time thread that reads the
+	camera and drives the cursor/clicks (see main_fast.py's main loop) --
+	blocking it here would freeze the whole program for however long is
+	left of that (up to a few seconds on a first run building the model
+	from scratch) every time the keyboard happens to be opened before
+	preloading finishes, not just delay the suggestion bar. It also makes
+	sure loading is at least underway, in case nothing already started it.
 	"""
-	ensure_model_loaded()
+	if not is_model_ready():
+		preload_async()
+		return []
 
 	prev_key = previous_word.lower() if previous_word else None
 	bigram_continuations = _bigram_counts.get(prev_key) if prev_key else None
