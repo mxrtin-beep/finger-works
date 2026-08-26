@@ -9,3 +9,12 @@ hand_landmarker.task
 # automatically at runtime from the NLTK Brown corpus, same as the
 # MediaPipe model above.
 .word_model_cache.pkl
+
+# PyInstaller build output -- generated locally by `pyinstaller`/
+# `python -m PyInstaller`, not something to commit. build/ is scratch
+# work, dist/ is where the actual .exe lands, and the .spec file is a
+# generated build config (regenerate it with a fresh `pyinstaller` run
+# rather than committing one that'll go stale).
+build/
+dist/
+*.spec
