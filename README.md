@@ -31,14 +31,15 @@ If you're running a packaged `.exe` build (Windows) rather than
 `python main_fast.py` directly, its console window is hidden the same way
 by default (no debug text there either), and reappears automatically the
 moment debug mode is turned on -- either at startup (`--debug`) or live
-from the Settings window's debug checkbox. It's only ever hidden when
-Windows created that console solely for this program (e.g. double-clicking
-the exe); running it from an already-open PowerShell/cmd window never
-hides that window, since it's your terminal, not just this program's
-output. If FingerWorks fails to start at all, its console is always shown
-regardless of debug mode, with the error printed there and the window kept
-open until you press Enter -- so a startup failure is never silent, just
-because debug mode happened to be off.
+from the Settings window's debug checkbox. This applies no matter how the
+exe was launched, including from an already-open PowerShell/cmd window --
+so testing it from a terminal without `--debug` will hide that window too,
+not just a double-clicked one; pass `--debug` (or turn it on in Settings)
+to keep it visible while you're working with it that way. If FingerWorks
+fails to start at all, its console is always shown regardless of debug
+mode, with the error printed there and the window kept open until you
+press Enter -- so a startup failure is never silent, just because debug
+mode happened to be off.
 
 A small control bar always sits in the bottom-right corner of the screen
 with **Pause**/**Resume**, **Help**, **Settings**, and **Quit** -- so you

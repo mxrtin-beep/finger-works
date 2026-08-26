@@ -139,36 +139,6 @@ if sys.platform == 'win32':
 	_user32.AttachThreadInput.restype = wintypes.BOOL
 	_kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 	_kernel32.GetConsoleWindow.restype = wintypes.HWND
-	_kernel32.GetConsoleProcessList.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
-	_kernel32.GetConsoleProcessList.restype = wintypes.DWORD
-
-
-def _console_shared_with_parent():
-	"""Windows only: True if this process's console window is also
-	attached to another process -- i.e. it was launched from an already-
-	open terminal (PowerShell/cmd), which shares that terminal's console
-	window rather than getting a fresh one of its own. Double-clicking the
-	.exe directly, by contrast, makes Windows create a console solely for
-	this process (attached-process count of 1).
-
-	Used by _set_console_visible() below to never hide a shared console:
-	that window IS the person's PowerShell/cmd session, so hiding it would
-	yank their whole terminal out from under them, not just this program's
-	output -- surprising and unwanted for anyone deliberately running it
-	from a terminal (e.g. while debugging). Only a console Windows created
-	just for this one process is safe to hide.
-
-	Errs toward True (treat as shared, don't hide) if the check itself
-	fails for any reason -- an accidentally-hidden console is a much worse
-	failure mode than an accidentally-visible one."""
-	if sys.platform != 'win32':
-		return True
-	try:
-		buf = (wintypes.DWORD * 4)()
-		attached_count = _kernel32.GetConsoleProcessList(buf, len(buf))
-		return attached_count != 1
-	except Exception:
-		return True
 
 
 def _set_console_visible(visible):
@@ -194,14 +164,24 @@ def _set_console_visible(visible):
 	again live from the Settings window's debug checkbox (see
 	handle_settings_changed() below), so toggling debug mode shows/hides
 	the console immediately rather than only taking effect on next
-	launch. Never hides a console shared with an already-open terminal
-	(see _console_shared_with_parent()) -- only ever a console Windows
-	created solely for this process."""
+	launch.
+
+	Always acts on whatever console this process is attached to, with no
+	attempt to detect "is this console shared with an already-open
+	terminal" first (an earlier version tried that, via
+	GetConsoleProcessList's attached-process count) -- that check reliably
+	misfired for exactly the case this exists for: a PyInstaller --onefile
+	build on Windows runs as a bootloader process that extracts the
+	payload and launches the real program as a *second*, child process,
+	both attached to the very same console, which always made the count
+	come out as "shared" and left the console visible even on a plain
+	double-click. Net effect: running the packaged exe from an existing
+	PowerShell/cmd window without --debug will now hide that window too,
+	not just a double-click-spawned one -- pass --debug (or turn it on in
+	Settings) when testing from a terminal to keep it visible."""
 	if sys.platform != 'win32':
 		return
 	try:
-		if not visible and _console_shared_with_parent():
-			return
 		hwnd = _kernel32.GetConsoleWindow()
 		if hwnd:
 			_user32.ShowWindow(hwnd, 5 if visible else 0)  # SW_SHOW / SW_HIDE
