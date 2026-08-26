@@ -69,6 +69,23 @@ FINGER_OUT_CUTOFF = 280 / HAND_SCALE_TUNING_REFERENCE   # extended-finger cutoff
 LEFT_CLICK_CUTOFF = 55 / HAND_SCALE_TUNING_REFERENCE    # was 55px
 RIGHT_CLICK_CUTOFF = 60 / HAND_SCALE_TUNING_REFERENCE   # was 60px
 
+# How long (seconds) the cursor stays frozen in place right after a
+# left-click pinch closes, before hand movement is allowed to start
+# dragging it. The middle finger aims the cursor (see hand_scale()'s
+# docstring/execute_event_fast()) at the same time the thumb and index
+# are pinching to click -- and pinching naturally tugs the whole hand,
+# middle finger included, a little. Without this delay that tug reads as
+# "click, then immediately start dragging", turning an intended plain
+# click into an accidental drag/selection. A quick pinch-and-release
+# (an ordinary click) now finishes inside this window, before the cursor
+# ever moves, so it can't drag anything; keep the pinch closed past this
+# window and the cursor resumes tracking your finger normally, starting
+# a real drag from wherever it's drifted to. A per-frame debounce on the
+# *release* was tried instead (see execute_click()'s docstring) and made
+# every click feel laggy -- freezing movement instead of the button
+# state avoids that.
+LEFT_CLICK_DRAG_DELAY_SECONDS = 0.15
+
 SCROLL_VEL_CUTOFF = 5
 
 # Landmark index for the index finger's base knuckle (MCP joint), used

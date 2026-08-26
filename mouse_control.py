@@ -177,6 +177,12 @@ def _smooth_fingertip(raw_x, raw_y, frame_width):
 # makes this a drag rather than a repeated click).
 _left_button_down = False
 
+# When the left button most recently went down (time.time()), or None
+# while it's up. execute_event_fast() uses this to freeze the cursor for
+# constants.LEFT_CLICK_DRAG_DELAY_SECONDS right after the pinch closes --
+# see that constant's docstring for why.
+_left_button_down_at = None
+
 # Edge-trigger state for right-click, same idea as the fist/scissors
 # gestures in event_classifier -- without it, holding the right-click
 # pinch for multiple frames would fire a real right-click every frame.
@@ -205,16 +211,18 @@ def execute_click(event):
 	thumb-index distance signal rather than the button state) is the
 	right way back to that, if it comes up again.
 	"""
-	global _left_button_down, _was_right_click
+	global _left_button_down, _left_button_down_at, _was_right_click
 
 	is_left_pinch = (event == 'Left-Click')
 	if is_left_pinch and not _left_button_down:
 		pyautogui.mouseDown(button='left')
 		_left_button_down = True
+		_left_button_down_at = time.time()
 		sounds.play_click()
 	elif not is_left_pinch and _left_button_down:
 		pyautogui.mouseUp(button='left')
 		_left_button_down = False
+		_left_button_down_at = None
 
 	is_right_pinch = (event == 'Right-Click')
 	if is_right_pinch and not _was_right_click:
@@ -231,10 +239,21 @@ def release_all():
 	consumed as a keypress instead) -- so a drag started in Mouse mode
 	can't get stuck "down" forever once control switches away from it.
 	"""
-	global _left_button_down
+	global _left_button_down, _left_button_down_at
 	if _left_button_down:
 		pyautogui.mouseUp(button='left')
 		_left_button_down = False
+		_left_button_down_at = None
+
+
+def _cursor_frozen_for_drag_delay():
+	"""True while the left button is down and still inside the post-pinch
+	freeze window (see constants.LEFT_CLICK_DRAG_DELAY_SECONDS) -- i.e. too
+	soon to tell a plain click from the start of a drag, so the cursor
+	shouldn't move yet."""
+	if not _left_button_down or _left_button_down_at is None:
+		return False
+	return (time.time() - _left_button_down_at) < c.LEFT_CLICK_DRAG_DELAY_SECONDS
 
 
 def execute_zoom(direction):
@@ -428,6 +447,15 @@ def execute_event_fast(event, abs_landmark_list, event_history, frame_width, fra
 		# hand jitter, closing the gap gradually via MOUSE_SPEED) already
 		# happens above and in _smooth_fingertip(); an additional
 		# blocking tween on top of it was redundant as well as slow.
-		pyautogui.moveTo(dest_x, dest_y)
+		#
+		# Skipped for a brief window right after a left-click pinch closes
+		# (see _cursor_frozen_for_drag_delay()/constants.
+		# LEFT_CLICK_DRAG_DELAY_SECONDS) -- the fingertip position keeps
+		# being tracked/smoothed above as normal, so there's no jump once
+		# movement resumes, but the cursor itself holds still just long
+		# enough that pinching (which naturally tugs the middle finger a
+		# little) can't turn a quick click into an accidental drag.
+		if not _cursor_frozen_for_drag_delay():
+			pyautogui.moveTo(dest_x, dest_y)
 
 
