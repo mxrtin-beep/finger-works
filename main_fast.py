@@ -30,7 +30,7 @@ import settings as fw_settings
 import word_predictions as wp
 
 
-__version__ = '0.2.0'
+__version__ = '1.0'
 
 # Force line-buffered stdout/stderr. A normal `python main_fast.py` run
 # already gets this for free (a real terminal is line-buffered by

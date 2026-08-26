@@ -55,6 +55,8 @@ LEFT HAND -- zoom & paste
 
  ✋  Open hand, all 5 fingers out -- zoom in
  ✊  Closed fist -- zoom out
+   (Zoom drives your OS's screen magnifier. If it isn't
+   already open, the first zoom-in gesture opens it for you.)
  ✌  Index + middle out ("scissors") -- paste
  \U0001F446  Point up (index only, aimed up) -- scroll up
  \U0001F44E  Thumb down (thumb only, aimed down) -- scroll down
