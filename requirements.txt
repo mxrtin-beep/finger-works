@@ -4,6 +4,7 @@ numpy
 pyautogui
 pyperclip
 Pillow
+nltk
 
 # pygame is deliberately NOT listed here: it's only used for Click sounds/
 # Keyboard sounds (see sounds.py), and only if it's actually importable --

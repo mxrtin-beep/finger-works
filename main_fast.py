@@ -569,6 +569,18 @@ def main(settings):
 	camera_thread = threading.Thread(target=_open_camera_in_background, daemon=True)
 	camera_thread.start()
 
+	# Same idea as the camera above: the on-screen keyboard's word-prediction
+	# model (see word_predictions.py) is either loaded from a small cached
+	# file or, on a first run, built from NLTK's Brown corpus (downloading
+	# it first if needed) -- either can take a moment, so it's kicked off
+	# now rather than waiting until the keyboard is actually opened, which
+	# would otherwise stall the first suggestion lookup. Not joined before
+	# the main loop starts (unlike camera_thread) since nothing early on
+	# depends on it being ready yet -- word_predictions.get_suggestions()
+	# calls ensure_model_loaded() itself, which is a no-op once this thread
+	# has already finished.
+	threading.Thread(target=wp.ensure_model_loaded, daemon=True).start()
+
 	def reopen_camera(new_device):
 		"""Swap the live camera device at runtime (Settings window ->
 		Apply), without restarting the program. Keeps the old camera

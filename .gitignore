@@ -4,3 +4,8 @@ __pycache__/
 
 # Downloaded MediaPipe Tasks model (fetched automatically at runtime)
 hand_landmarker.task
+
+# Cached word-prediction model (see word_predictions.py) -- built
+# automatically at runtime from the NLTK Brown corpus, same as the
+# MediaPipe model above.
+.word_model_cache.pkl
