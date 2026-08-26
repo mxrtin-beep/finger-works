@@ -14,6 +14,14 @@ _STATE_COLORS = {
 	'active': '#e74c3c',
 }
 
+# Idle fill for the three word-suggestion buttons specifically -- a lighter,
+# bluer shade than a regular idle key (_STATE_COLORS['idle']) so the
+# suggestion bar reads visually as its own strip (like an iPhone's
+# predictive-text bar) rather than three more keys blending into the grid.
+# Only applies at 'idle'; hover/active still use the same feedback colors as
+# every other button, so tapping one still looks/feels consistent.
+_SUGGESTION_IDLE_COLOR = '#39507a'
+
 # These keyboard labels get a somewhat larger font than other
 # multi-character labels (see draw()) -- they're the widest/most
 # prominent keys (the physical-keyboard-style structural keys, Space, and
@@ -827,7 +835,10 @@ class Overlay:
 			for button in button_list:
 				x, y = button.pos
 				w, h = button.size
-				fill = _STATE_COLORS.get(button.color, _STATE_COLORS['idle'])
+				if button.color == 'idle' and getattr(button, 'is_suggestion', False):
+					fill = _SUGGESTION_IDLE_COLOR
+				else:
+					fill = _STATE_COLORS.get(button.color, _STATE_COLORS['idle'])
 				c.create_rectangle(
 					x, y, x + w, y + h, fill=fill, outline='#666666', width=1.5,
 				)
@@ -869,7 +880,15 @@ class Overlay:
 				# larger size those multi-character labels looked
 				# oversized/cramped against their own buttons, which is
 				# what this reverts.
-				if len(button.text) == 1:
+				if getattr(button, 'is_suggestion', False):
+					# Suggestion buttons are short words on a wide, shallow
+					# button (the whole strip is only one row tall) -- sized
+					# off the button's own height like the other buckets
+					# above/below, just with a higher ceiling since there's
+					# plenty of horizontal room and a single word reads
+					# better a bit larger than a small utility label would.
+					font_size = max(11, min(18, int(h / 1.6)))
+				elif len(button.text) == 1:
 					font_size = max(10, min(20, int(h / 2.2)))
 				elif button.text in _EMPHASIZED_LABELS:
 					font_size = max(9, min(16, int(h / 3.2)))
