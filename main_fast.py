@@ -530,7 +530,7 @@ def main(settings):
 	sounds.set_click_sounds_enabled(settings.get('click_sounds', False))
 	sounds.set_keyboard_sounds_enabled(settings.get('keyboard_sounds', False))
 	sounds.set_volume(settings.get('sound_volume', 0.7))
-	keyboard_scale = settings.get('keyboard_scale', 1.0)
+	keyboard_scale = settings.get('keyboard_scale', 1.2)
 
 	cap_width = width
 	cap_height = height
@@ -627,7 +627,7 @@ def main(settings):
 		sounds.set_keyboard_sounds_enabled(new_settings.get('keyboard_sounds', False))
 		sounds.set_volume(new_settings.get('sound_volume', 0.7))
 
-		overlay.set_keyboard_scale(new_settings.get('keyboard_scale', 1.0))
+		overlay.set_keyboard_scale(new_settings.get('keyboard_scale', 1.2))
 		# The keyboard's button layout is sized off the overlay panel's
 		# pixel dimensions (see keyboard.get_button_list), so a keyboard-
 		# size change needs it rebuilt against the new panel size -- same

@@ -226,7 +226,20 @@ def get_button_list(panel_width, panel_height, page='letters'):
 	# labels), counted here as worth 1.3 letter-rows each.
 	cell_h = usable_height / (num_letter_rows + 1.3 * num_utility_rows)
 	button_h = cell_h * 0.85
-	utility_button_h = cell_h * 1.3 * 0.85
+
+	# The vertical gap between any two consecutive rows is whatever's left
+	# over in a letter row's slot (cell_h) once its button (button_h) is
+	# placed -- cell_h - button_h. Utility rows get a taller slot
+	# (cell_h * 1.3, above) for their longer/wrapped labels, but the gap
+	# below one should still match that same amount, not scale up with the
+	# taller slot -- sizing utility_button_h the same way button_h is sized
+	# (as a flat 0.85 fraction of its own, bigger slot) was leaving a
+	# visibly larger gap specifically between the two utility rows
+	# (row_space and row_actions) than every other row-to-row gap on the
+	# keyboard. Subtracting the same fixed gap from the taller slot instead
+	# keeps every gap -- letter-letter, letter-utility, utility-utility --
+	# equal.
+	utility_button_h = cell_h * 1.3 - (cell_h - button_h)
 
 	buttonList = []
 

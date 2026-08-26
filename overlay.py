@@ -166,7 +166,7 @@ class Overlay:
 	"""
 
 	def __init__(self, screen_width, screen_height, panel_width=None, panel_height=None, margin=None,
-				debug=False, mouse_sensitivity=1.0, keyboard_scale=1.0,
+				debug=False, mouse_sensitivity=1.0, keyboard_scale=fw_settings.DEFAULTS['keyboard_scale'],
 				on_settings_changed=None, get_settings=None, get_available_cameras=None):
 		self.screen_width = screen_width
 		self.screen_height = screen_height
@@ -487,7 +487,7 @@ class Overlay:
 
 		tk.Label(win, text='Keyboard size', **label_opts).grid(
 			row=4, column=0, sticky='w', padx=10, pady=4)
-		keyboard_scale_var = tk.DoubleVar(value=current.get('keyboard_scale', 1.0))
+		keyboard_scale_var = tk.DoubleVar(value=current.get('keyboard_scale', fw_settings.DEFAULTS['keyboard_scale']))
 		tk.Scale(
 			win, from_=0.7, to=1.5, resolution=0.05, orient='horizontal',
 			variable=keyboard_scale_var, bg='#1e1e1e', fg='#dddddd', troughcolor='#3a3a3a',
