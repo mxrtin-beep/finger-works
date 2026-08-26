@@ -4,17 +4,16 @@ numpy
 pyautogui
 pyperclip
 Pillow
+nltk
 
-# Optional: only used for Click sounds/Keyboard sounds (see sounds.py),
-# and only if it's actually importable -- everything else works fine
-# without it, and those two Settings toggles just fall back to a simpler
-# per-platform player if it's missing or fails to install. Recommended if
-# you want those sounds to play reliably every time -- but only actually
-# installable where a prebuilt wheel exists for your Python version; it
-# has no prebuilt wheel yet for very new Python releases (observed
-# failing to build from source on Python 3.14, missing MSVC build
-# tools/distutils -- not worth chasing unless you already have a full
-# Visual Studio Build Tools setup). Safe to leave commented out/removed
-# from this file entirely if `pip install pygame` fails for you; nothing
-# else in this project depends on it.
-pygame
+# pygame is deliberately NOT listed here: it's only used for Click sounds/
+# Keyboard sounds (see sounds.py), and only if it's actually importable --
+# everything else works fine without it, and those two Settings toggles
+# just fall back to a simpler per-platform player if it's missing. It's
+# also only installable where a prebuilt wheel exists for your Python
+# version; it has no prebuilt wheel yet for very new Python releases (e.g.
+# fails to build from source on Python 3.14, missing MSVC build
+# tools/distutils) -- not worth chasing unless you already have a full
+# Visual Studio Build Tools setup. If you want it and your Python version
+# has a wheel for it, `pip install pygame` separately; nothing else in
+# this project depends on it.

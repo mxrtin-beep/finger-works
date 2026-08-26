@@ -27,6 +27,7 @@ import constants as c
 import keyboard as k
 import overlay as ov
 import settings as fw_settings
+import word_predictions as wp
 
 
 __version__ = '0.2.0'
@@ -43,8 +44,24 @@ def ensure_model_downloaded(model_path=MODEL_PATH, model_url=MODEL_URL):
 	return model_path
 
 
-width = 1440
-height = 900
+# Camera capture resolution -- fed straight into MediaPipe's HandLandmarker
+# every frame with no downscaling, so this directly sets how much work both
+# the camera driver and the hand-tracking model do per frame. Lowered from
+# the previous 1440x900: MediaPipe's own examples and most real-time
+# hand-tracking demos run comfortably at 640x480, which is more than enough
+# resolution for landmark detection (gesture cutoffs are already
+# normalized against the hand's own on-screen size, see constants.py's
+# "Distance-independent gesture cutoffs" comment, so this doesn't affect
+# gesture accuracy). 1440x900 is ~4.2x as many pixels, which was adding
+# real per-frame latency to both the camera read and the model's inference
+# -- since the cursor only actually moves once per fully-processed frame,
+# a slower/less steady frame rate here is what mainly reads as "choppy"
+# mouse movement, not the smoothing math in mouse_control.py (already
+# tuned in earlier commits to remove a blocking per-frame easing tween
+# that used to cause the same symptom). Screen/overlay/cursor coordinates
+# are unaffected -- those come from pyautogui.size(), a separate value.
+width = 640
+height = 480
 
 play_audio = False
 history_length = 8
@@ -297,6 +314,64 @@ def copy_or_cut_typed_buffer(typed_text, should_clear):
 	return '>' if should_clear else typed_text
 
 
+def current_word_prefix(typed_text):
+	"""Whatever's been typed of the "current word" so far -- the run of
+	non-whitespace characters right at the end of typed_text -- or '' if
+	the cursor is right after a space/newline/tab (or at the very start),
+	same as an iPhone's suggestion bar treating "just finished a word" the
+	same as "haven't started one yet".
+
+	Used both to fetch suggestions for the word in progress
+	(word_predictions.get_suggestions) and to figure out how much of a
+	tapped suggestion still needs to be typed (see apply_suggestion())."""
+	content = typed_text[1:] if typed_text.startswith('>') else typed_text
+	if not content or content[-1].isspace():
+		return ''
+	tail = content.rsplit(None, 1)[-1]
+	return tail
+
+
+def previous_word(typed_text):
+	"""The word just before the cursor that's already finished (followed by
+	whitespace, or the whole buffer if it ends in whitespace) -- used to
+	look up likely *next*-word suggestions (see word_predictions.
+	get_suggestions()) once current_word_prefix() above is empty, i.e.
+	there's no partial word left to complete and it's time to suggest
+	what's likely to come next instead."""
+	content = typed_text[1:] if typed_text.startswith('>') else typed_text
+	stripped = content.rstrip()
+	if not stripped:
+		return ''
+	return stripped.rsplit(None, 1)[-1]
+
+
+def apply_suggestion(word, typed_text, type_in_keyboard_area=False):
+	"""Handle a tap on one of the three word-suggestion buttons: complete
+	the current word with `word` (only typing whatever's left of it beyond
+	what's already been typed, like an iPhone does -- not the whole word
+	again from scratch) and follow it with a space, ready for the next
+	word.
+
+	Returns the updated local preview-text string, same contract as
+	type_char()."""
+	prefix = current_word_prefix(typed_text)
+	if prefix and word.lower().startswith(prefix.lower()):
+		remainder = word[len(prefix):]
+	else:
+		# The suggestion no longer matches what's actually been typed (can
+		# happen if the button was tapped on the same frame the word
+		# changed) -- fall back to the whole word rather than typing
+		# something that doesn't start with what's already there.
+		remainder = word
+	to_type = remainder + ' '
+
+	if not type_in_keyboard_area:
+		restore_focus()
+		pyautogui.typewrite(to_type)
+
+	return typed_text + to_type
+
+
 def type_char(typed_char, typed_text, type_in_keyboard_area=False, shift_active=False):
 	"""Handle one on-screen keyboard key, and return the updated local
 	preview-text string shown on the overlay.
@@ -455,7 +530,7 @@ def main(settings):
 	sounds.set_click_sounds_enabled(settings.get('click_sounds', False))
 	sounds.set_keyboard_sounds_enabled(settings.get('keyboard_sounds', False))
 	sounds.set_volume(settings.get('sound_volume', 0.7))
-	keyboard_scale = settings.get('keyboard_scale', 1.0)
+	keyboard_scale = settings.get('keyboard_scale', 1.2)
 
 	cap_width = width
 	cap_height = height
@@ -510,6 +585,20 @@ def main(settings):
 	camera_thread = threading.Thread(target=_open_camera_in_background, daemon=True)
 	camera_thread.start()
 
+	# Same idea as the camera above: the on-screen keyboard's word-prediction
+	# model (see word_predictions.py) is either loaded from a small cached
+	# file or, on a first run, built from two NLTK corpora (downloading them
+	# first if needed) -- either can take a moment (up to a few seconds on a
+	# first run), so it's kicked off now rather than waiting until the
+	# keyboard is actually opened. Not joined before the main loop starts
+	# (unlike camera_thread) since nothing early on depends on it being
+	# ready yet: word_predictions.get_suggestions() never blocks waiting for
+	# it (see that function's docstring) -- it just returns no suggestions
+	# for the few frames, if any, between the keyboard opening and this
+	# finishing, so a fast open right at startup can't freeze the whole
+	# program the way blocking on it here would.
+	wp.preload_async()
+
 	def reopen_camera(new_device):
 		"""Swap the live camera device at runtime (Settings window ->
 		Apply), without restarting the program. Keeps the old camera
@@ -538,7 +627,7 @@ def main(settings):
 		sounds.set_keyboard_sounds_enabled(new_settings.get('keyboard_sounds', False))
 		sounds.set_volume(new_settings.get('sound_volume', 0.7))
 
-		overlay.set_keyboard_scale(new_settings.get('keyboard_scale', 1.0))
+		overlay.set_keyboard_scale(new_settings.get('keyboard_scale', 1.2))
 		# The keyboard's button layout is sized off the overlay panel's
 		# pixel dimensions (see keyboard.get_button_list), so a keyboard-
 		# size change needs it rebuilt against the new panel size -- same
@@ -631,6 +720,11 @@ def main(settings):
 	# not every frame.
 	button_list = k.get_button_list(overlay.panel_width, overlay.panel_height, page=keyboard_page)
 
+	# The word-suggestion strip's own buttons -- rebuilt every frame from the
+	# current word (see below), unlike button_list above. Starts empty so
+	# there's nothing to draw/hit-test before the first frame computes it.
+	suggestion_buttons = []
+
 	try:
 		while not overlay.should_quit:
 
@@ -650,7 +744,7 @@ def main(settings):
 					# keep the UI responsive and, in debug mode, still show the
 					# raw camera feed so it's clear the camera itself is still
 					# working.
-					overlay.draw(_debug_event_label(event), control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
+					overlay.draw(_debug_event_label(event), control_state, typed_text, suggestion_buttons + button_list, shift_active=(shift_once or caps_lock))
 					if overlay.debug:
 						overlay.draw_video(image)
 					overlay.pump()
@@ -807,17 +901,38 @@ def main(settings):
 						hit_button = None
 						over_panel = False
 						if control_state == 'Keyboard':
-							mouse_screen_pos = pyautogui.position()
-							button_list, typed_char, hit_button, over_panel = k.execute_event_keyboard(
-								event, mouse_screen_pos, overlay.origin(),
-								(overlay.panel_width, overlay.panel_height), button_list,
+							# Rebuilt every frame from whatever's currently
+							# typed -- cheap (at most 3 small buttons), and
+							# it needs to track the current word live, the
+							# same way an iPhone's suggestion bar updates as
+							# you type each letter, not just when the page/
+							# scale changes like the letter grid below.
+							suggestions = wp.get_suggestions(
+								current_word_prefix(typed_text), previous_word(typed_text),
 							)
+							suggestion_buttons = k.get_suggestion_buttons(
+								overlay.panel_width, overlay.panel_height, suggestions,
+							)
+
+							mouse_screen_pos = pyautogui.position()
+							combined_buttons, typed_char, hit_button, over_panel = k.execute_event_keyboard(
+								event, mouse_screen_pos, overlay.origin(),
+								(overlay.panel_width, overlay.panel_height),
+								suggestion_buttons + button_list,
+							)
+							# Split back apart: the letter grid's own button
+							# list persists across frames (only rebuilt on a
+							# page/scale change), while suggestion_buttons is
+							# thrown away and rebuilt fresh next frame from
+							# the (possibly now-different) current word.
+							button_list = combined_buttons[len(suggestion_buttons):]
 
 							if typed_char is not None:
 								# Every key press, whatever it does (a
-								# letter, Shift/Caps, page-switch, ...) --
-								# one place covers all the branches below,
-								# rather than repeating this in each of them.
+								# letter, Shift/Caps, page-switch, a tapped
+								# suggestion, ...) -- one place covers all
+								# the branches below, rather than repeating
+								# this in each of them.
 								sounds.play_key()
 
 							# Case/page keys are handled here rather than inside
@@ -825,7 +940,15 @@ def main(settings):
 							# (which page is showing, whether Shift/Caps is on)
 							# rather than sending anything to the OS or the
 							# typed-text preview.
-							if typed_char in ('123', 'ABC'):
+							if hit_button is not None and hit_button.is_suggestion and typed_char is not None:
+								# Tapped one of the three suggested words --
+								# complete the current word with it (see
+								# apply_suggestion()) instead of falling
+								# through to type_char(), which would just
+								# type the suggestion's label literally on
+								# top of whatever's already there.
+								typed_text = apply_suggestion(typed_char, typed_text, type_in_keyboard_area)
+							elif typed_char in ('123', 'ABC'):
 								keyboard_page = 'symbols' if keyboard_page == 'letters' else 'letters'
 								button_list = k.get_button_list(
 									overlay.panel_width, overlay.panel_height, page=keyboard_page,
@@ -905,7 +1028,7 @@ def main(settings):
 				# to the current action, so you can see at a glance whether
 				# it's routing your hands the way you expect (see
 				# constants.SWAP_LABELED_HANDS if it isn't).
-				overlay.draw(_debug_event_label(event) + hand_debug_text, control_state, typed_text, button_list, shift_active=(shift_once or caps_lock))
+				overlay.draw(_debug_event_label(event) + hand_debug_text, control_state, typed_text, suggestion_buttons + button_list, shift_active=(shift_once or caps_lock))
 
 				if overlay.debug:
 					# Purely cosmetic: the live camera feed with each hand's

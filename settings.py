@@ -30,8 +30,11 @@ DEFAULTS = {
 	# as tuned/committed; 2.3 confirmed to feel better once adjustable.
 	'scroll_speed': 2.3,
 	# Multiplies the overlay panel's (and so the on-screen keyboard's) base
-	# size -- see overlay.Overlay.set_keyboard_scale(). 1.0 = default size.
-	'keyboard_scale': 1.0,
+	# size -- see overlay.Overlay.set_keyboard_scale(). 1.0 would be the
+	# panel's own unscaled base size; 1.2 (a bit larger) is the actual
+	# shipped default, since the base size read a little small/cramped for
+	# comfortably aiming clicks at individual keys.
+	'keyboard_scale': 1.2,
 	# 0.0 (max smoothing, steadiest but can feel like the cursor is
 	# "sliding") to 1.0 (max snappiness, tracks the fingertip almost
 	# immediately but shows more raw hand-tracking jitter) -- see

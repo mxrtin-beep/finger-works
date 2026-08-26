@@ -5,11 +5,16 @@ import os
 import constants as c
 
 class Button():
-	def __init__(self, pos, text, size=[85, 85]):
+	def __init__(self, pos, text, size=[85, 85], is_suggestion=False):
 		self.pos = pos
 		self.size = size
 		self.text = text
 		self.color = 'idle'  # 'idle' | 'hover' | 'active' -- overlay.py maps this to a fill color
+		# Set on the three word-suggestion buttons (see get_suggestion_buttons)
+		# so callers can tell "tapped a suggested word" apart from "tapped a
+		# same-labeled real key" -- clicking a suggestion completes the
+		# current word instead of typing its label literally.
+		self.is_suggestion = is_suggestion
 
 
 def say_key_pressed(typed_char):
@@ -91,6 +96,66 @@ _ROW_BOTTOM_SYMBOLS = [
 LETTER_CHARS = frozenset('QWERTYUIOPASDFGHJKLZXCVBNM')
 
 
+def _layout_margins(panel_width, panel_height):
+	"""Shared geometry between get_button_list() and get_suggestion_buttons()
+	-- both need to agree on where the letter grid starts so the word-
+	suggestion bar has its own reserved strip above it instead of overlapping
+	the QWERTY rows or the debug text.
+
+	Returns (margin_x, debug_margin_top, suggestion_bar_height,
+	grid_margin_top, margin_bottom):
+	  - debug_margin_top: same "leave room for the debug text" margin
+	    get_button_list always used, kept as its own value since the
+	    suggestion bar sits directly below it.
+	  - suggestion_bar_height: height of the word-suggestion strip, always
+	    reserved (the bar is always shown while the keyboard is open) --
+	    floored in pixels so it stays usable on a small/scaled-down panel.
+	  - grid_margin_top: where the letter grid itself starts -- debug_margin_top
+	    plus the suggestion bar's height.
+	"""
+	margin_x = panel_width * 0.05
+	debug_margin_top = max(panel_height * 0.20, 100)
+	suggestion_bar_height = max(panel_height * 0.09, 34)
+	grid_margin_top = debug_margin_top + suggestion_bar_height
+	margin_bottom = panel_height * 0.10
+	return margin_x, debug_margin_top, suggestion_bar_height, grid_margin_top, margin_bottom
+
+
+def get_suggestion_buttons(panel_width, panel_height, suggestions):
+	"""Build the (up to 3) word-suggestion buttons shown in their own strip
+	above the letter grid -- the on-screen-keyboard equivalent of an
+	iPhone's predictive-text bar. `suggestions` is the list of words to
+	show (see word_predictions.get_suggestions()), left-to-right in the
+	order given.
+
+	Rebuilt fresh every time the current word changes (see main_fast.py)
+	rather than folded into get_button_list()'s letter grid, since the grid
+	itself doesn't need to change when suggestions do.
+	"""
+	margin_x, debug_margin_top, suggestion_bar_height, _, _ = _layout_margins(panel_width, panel_height)
+
+	buttons = []
+	if not suggestions:
+		return buttons
+
+	usable_width = panel_width - 2 * margin_x
+	gap = max(3, round(panel_width * 0.006))
+	cell_w = usable_width / len(suggestions)
+	button_h = suggestion_bar_height * 0.8
+	y = debug_margin_top + (suggestion_bar_height - button_h) / 2
+
+	last_idx = len(suggestions) - 1
+	for idx, word in enumerate(suggestions):
+		left_inset = 0 if idx == 0 else gap / 2
+		right_inset = 0 if idx == last_idx else gap / 2
+		x = margin_x + idx * cell_w
+		pos = [int(x + left_inset), int(y)]
+		size = [int(cell_w - left_inset - right_inset), int(button_h)]
+		buttons.append(Button(pos, word, size=size, is_suggestion=True))
+
+	return buttons
+
+
 def get_button_list(panel_width, panel_height, page='letters'):
 	"""Build the on-screen keyboard, laid out as a fraction of the overlay
 	panel's (fixed) size -- unlike the old video-frame-based layout, this
@@ -150,9 +215,9 @@ def get_button_list(panel_width, panel_height, page='letters'):
 	# draw()), which run down to roughly y=82 -- floored at 100px (rather
 	# than a pure fraction of panel_height) so the keyboard's top row still
 	# clears it on shorter panels instead of drawing underneath it.
-	margin_x = panel_width * 0.05
-	margin_top = max(panel_height * 0.20, 100)
-	margin_bottom = panel_height * 0.10
+	margin_x, _debug_margin_top, _suggestion_bar_height, margin_top, margin_bottom = _layout_margins(
+		panel_width, panel_height,
+	)
 
 	usable_width = panel_width - 2 * margin_x
 	usable_height = panel_height - margin_top - margin_bottom
@@ -161,7 +226,20 @@ def get_button_list(panel_width, panel_height, page='letters'):
 	# labels), counted here as worth 1.3 letter-rows each.
 	cell_h = usable_height / (num_letter_rows + 1.3 * num_utility_rows)
 	button_h = cell_h * 0.85
-	utility_button_h = cell_h * 1.3 * 0.85
+
+	# The vertical gap between any two consecutive rows is whatever's left
+	# over in a letter row's slot (cell_h) once its button (button_h) is
+	# placed -- cell_h - button_h. Utility rows get a taller slot
+	# (cell_h * 1.3, above) for their longer/wrapped labels, but the gap
+	# below one should still match that same amount, not scale up with the
+	# taller slot -- sizing utility_button_h the same way button_h is sized
+	# (as a flat 0.85 fraction of its own, bigger slot) was leaving a
+	# visibly larger gap specifically between the two utility rows
+	# (row_space and row_actions) than every other row-to-row gap on the
+	# keyboard. Subtracting the same fixed gap from the taller slot instead
+	# keeps every gap -- letter-letter, letter-utility, utility-utility --
+	# equal.
+	utility_button_h = cell_h * 1.3 - (cell_h - button_h)
 
 	buttonList = []
 
