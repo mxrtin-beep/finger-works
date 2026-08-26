@@ -32,6 +32,26 @@ import word_predictions as wp
 
 __version__ = '0.2.0'
 
+# Force line-buffered stdout/stderr. A normal `python main_fast.py` run
+# already gets this for free (a real terminal is line-buffered by
+# default), but a PyInstaller --onefile .exe's console can end up fully
+# block-buffered instead -- which means every print() below (the startup
+# banner, camera-opened/model-loaded timings, download progress, [WARN]
+# messages, even an unhandled traceback) sits in a buffer and never
+# actually reaches the console until it fills up or the process exits.
+# That's what makes a packaged build look like it's hanging with a
+# permanently blank black window, even while it's actually starting up
+# (or has already crashed) behind the scenes. Best-effort: some
+# environments (no console at all, e.g. a future --windowed build) leave
+# sys.stdout/stderr as None or without reconfigure(), so this can't
+# assume either exists.
+for _stream in (sys.stdout, sys.stderr):
+	if _stream is not None and hasattr(_stream, 'reconfigure'):
+		try:
+			_stream.reconfigure(line_buffering=True)
+		except Exception:
+			pass
+
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hand_landmarker.task')
 MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
 
@@ -579,8 +599,21 @@ def main(settings):
 
 	def _open_camera_in_background():
 		t0 = time.time()
-		_camera_result['cap'] = _open_camera(cap_device, cap_width, cap_height)
-		print(f'Camera opened in {time.time() - t0:.1f}s')
+		try:
+			_camera_result['cap'] = _open_camera(cap_device, cap_width, cap_height)
+			print(f'Camera opened in {time.time() - t0:.1f}s')
+		except Exception as exc:
+			# An exception raised on this background thread doesn't
+			# propagate anywhere on its own -- without catching it here,
+			# 'cap' key never gets set in _camera_result, and the main
+			# thread's `cap = _camera_result['cap']` right after
+			# camera_thread.join() below would fail with an opaque
+			# KeyError that gives no hint the *camera* is what actually
+			# failed (e.g. no camera present, or the OS blocking camera
+			# access for this app -- Windows: Settings > Privacy &
+			# security > Camera > "Let desktop apps access your camera").
+			_camera_result['error'] = exc
+			print(f'[ERROR] Could not open the camera: {exc}')
 
 	camera_thread = threading.Thread(target=_open_camera_in_background, daemon=True)
 	camera_thread.start()
@@ -679,7 +712,30 @@ def main(settings):
 	# finished (it usually has, since model loading above tends to take
 	# longer than opening a camera).
 	camera_thread.join()
+	if 'error' in _camera_result:
+		raise RuntimeError(
+			f'Could not open the camera ({_camera_result["error"]}). '
+			'Check that a camera is connected and that this app is allowed '
+			'to use it (Windows: Settings > Privacy & security > Camera > '
+			'"Let desktop apps access your camera").'
+		) from _camera_result['error']
 	cap = _camera_result['cap']
+	if not cap.isOpened():
+		# cv2.VideoCapture(device) doesn't raise just because the device
+		# couldn't actually be opened (no camera present, already in use by
+		# another app, wrong index, ...) -- it returns a capture object
+		# regardless, which just then fails every read() from here on. Left
+		# unchecked, that reads as the program starting up fine and then
+		# doing nothing at all, since the main loop's very first `if not
+		# ret: break` (see below) would exit the whole program silently on
+		# the first frame.
+		raise RuntimeError(
+			f'Camera (device {cap_device}) did not open. Check that a '
+			'camera is connected, not already in use by another app, and '
+			'that this app is allowed to use it (Windows: Settings > '
+			'Privacy & security > Camera > "Let desktop apps access your '
+			'camera").'
+		)
 
 	# detect_for_video requires monotonically increasing timestamps.
 	start_time_ms = int(time.time() * 1000)
