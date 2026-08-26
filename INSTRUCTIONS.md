@@ -242,7 +242,7 @@ back to mouse control.
 
 | Gesture | Action |
 |---|---|
-| Open hand, all five fingers extended | Zoom in (drives the OS's own screen magnifier). Does nothing if already zoomed in. |
+| Open hand, all five fingers extended | Zoom in (drives the OS's own screen magnifier -- if it isn't already running, this gesture opens it for you). Does nothing if already zoomed in. |
 | Closed fist | Zoom back out. Does nothing if not currently zoomed in. |
 | Index + middle extended, others folded ("scissors") | Paste -- shortcut for the on-screen keyboard's `Paste` key, without needing the keyboard open at all. Reads the OS clipboard and types its contents as real keystrokes. |
 | Index finger extended and aimed upward, others folded | Scroll up. Held continuously -- keeps scrolling for as long as the pose and direction are held, sent in small ticks every `SCROLL_FRAME_INTERVAL` frame(s) rather than infrequent big jumps, so it reads as a smooth, controlled scroll rather than a choppy or disorientating one. |
