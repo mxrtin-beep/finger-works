@@ -1,6 +1,7 @@
-# finger-works
+# 🖐️ FingerWorks
 
-A program to allow you to control your computer without touching it. It uses your webcam to track your finger movements and pick up commands.
+Control your computer using hand gestures recognized by your webcam --
+no touching required.
 
 ## License
 
@@ -9,23 +10,47 @@ or redistributing it requires the copyright holder's permission. (Its
 open-source dependencies -- OpenCV, MediaPipe, NumPy, PyAutoGUI,
 PyPerClip -- keep their own separate licenses.)
 
-## Running it
+## Getting Started
+
+**Windows:** download and run `FingerWorks.exe` from the
+[latest release](https://github.com/mxrtin-beep/finger-works/releases/latest) --
+no Python install needed.
+
+**From source:**
 
     python main_fast.py [--sensitivity MULTIPLIER] [--debug]
 
-`--sensitivity` scales overall cursor speed. It defaults to `1.0` (the
-program's normal speed, unchanged); `1.5` moves the cursor faster, `0.5`
-slower. It's a multiplier on top of `constants.MOUSE_SPEED`, so you don't
-need to edit that file just to try a faster or slower feel.
+A small control bar (**Pause**, **Help**, **Settings**, **Quit**) sits in
+the bottom-right corner of the screen at all times, so you can pause
+tracking, look up the gestures, or quit without needing a gesture or the
+command line. Minimize the console once it's running.
 
-`--debug` is off by default. Without it, the overlay panel stays hidden
-except while the on-screen keyboard is toggled on, and no debug text is
-drawn. With it, the panel is always visible and shows the debug text
+Demo: https://www.youtube.com/watch?v=EUsH5B4Lh8c&feature=youtu.be
+
+## Basic Gestures
+
+**Right hand**
+- ✋ Move your hand → moves the cursor (follows middle finger)
+- 🤏 Pinch thumb + index → left click (hold to drag)
+- 🤏 Pinch thumb + ring → right click
+- ✊ Closed fist → toggle the on-screen keyboard
+- 🤙 Hang Ten sign (thumb and pinky out) → pause
+
+**Left hand**
+- ✋ Open palm → zoom in · ✊ Fist → zoom out
+- ☝️ Index finger pointing up → scroll up
+- 👎 Thumb pointing down → scroll down
+
+Click **Help** in the control bar any time for the full gesture list, or
+see the [Gestures](#gestures) section below for the complete rundown.
+
+## 🐞 Debug Mode
+
+Off by default. Turn it on in **Settings** (or run with `--debug`) to see
+a live camera feed with your hand tracking overlaid, plus diagnostic text
 (current event, mouse sensitivity, which hand is doing what, live
-zoom/paste gesture state), and a second window shows the live camera feed
-with each hand's skeleton traced and its current gesture labeled in real
-time -- see `INSTRUCTIONS.md` for the full rundown of gestures, parameters,
-and what the debug output means.
+zoom/paste gesture state) -- see `INSTRUCTIONS.md` for the full rundown of
+gestures, parameters, and what the debug output means.
 
 If you're running a packaged `.exe` build (Windows) rather than
 `python main_fast.py` directly, its console window is hidden the same way
