@@ -1,7 +1,9 @@
 # 🖐️ FingerWorks
 
 Control your computer using hand gestures recognized by your webcam --
-no touching required.
+no touching required. Or put the same hand tracking to creative use:
+**paint** on a canvas in the air, or **play music** with nothing but your
+hands (see [Modes](#modes)).
 
 ## License
 
@@ -18,12 +20,12 @@ no Python install needed.
 
 **From source:**
 
-    python main_fast.py [--sensitivity MULTIPLIER] [--debug]
+    python main_fast.py [--sensitivity MULTIPLIER] [--mode control|paint|music] [--debug]
 
-A small control bar (**Pause**, **Help**, **Settings**, **Quit**) sits in
-the bottom-right corner of the screen at all times, so you can pause
-tracking, look up the gestures, or quit without needing a gesture or the
-command line. Minimize the console once it's running.
+A small control bar (**Pause**, **Mode**, **Help**, **Settings**, **Quit**)
+sits in the bottom-right corner of the screen at all times, so you can
+pause tracking, switch modes, look up the gestures, or quit without
+needing a gesture or the command line. Minimize the console once it's running.
 
 Demo: https://www.youtube.com/watch?v=EUsH5B4Lh8c&feature=youtu.be
 
@@ -43,6 +45,82 @@ Demo: https://www.youtube.com/watch?v=EUsH5B4Lh8c&feature=youtu.be
 
 Click **Help** in the control bar any time for the full gesture list, or
 see the [Gestures](#gestures) section below for the complete rundown.
+
+## Modes
+
+FingerWorks has three modes. The one you've always had -- **Control** --
+is what it starts in. Switch with the control bar's **Mode** button (or
+`--mode paint` / `--mode music` on the command line); it always starts in
+Control mode next time, however you left it.
+
+| Mode | What it does |
+|---|---|
+| **Control** | Your hands run the computer: cursor, clicks, on-screen keyboard, zoom, scroll. |
+| **Paint** | A fullscreen canvas. Your right hand is the pen; your left hand dials colour, size and brush. |
+| **Music** | An instrument in the air: a harp you strum, keys you pinch, or a theremin you wave at. |
+
+Both artistic modes have no keyboard, zoom or scroll, and they never touch
+your real mouse -- the hands only drive the canvas. The 🤙 **Hang Ten**
+sign (thumb and pinky out, on *either* hand, held for a moment) still
+pauses; the control bar stays on top so you can switch mode, un-pause or
+quit with your physical mouse.
+
+### 🎨 Paint
+
+**Right hand -- the pen.** Where your thumb and index fingertips meet is
+the brush tip (like holding a real pen).
+
+- 🤏 Pinch thumb + index → paint
+- 🤏 Pinch thumb + ring → erase
+
+**Left hand -- the dials.** Hold a pose, then *move your hand*. Values
+change by how far you move rather than jumping to where your hand is, so
+switching pose never makes anything leap.
+
+| Pose | Moving your hand changes |
+|---|---|
+| ☝️ Index only | **Hue** -- up/down sweeps the colour wheel |
+| ✌️ Index + middle | **Brush size** -- up/down |
+| 3 fingers | **Saturation** (up/down) and **brightness** (left/right) |
+| 🖐️ 4 fingers / open hand | **Brush style** (left/right) and **symmetry** (up/down) |
+| 👍 Thumb alone, held a moment | **Undo** the last stroke |
+| ✊ Fist | Hands off -- nothing changes |
+
+Brushes: **Ink** (thins out when you move fast, like a calligraphy pen),
+**Glow** (neon), **Spray**, and **Rainbow** (hue drifts along the stroke).
+Symmetry runs from a simple **Mirror** up to a **12-way Kaleidoscope**, so
+one scribble becomes a mandala. The control bar gains **Undo**, **Clear**
+and **Save** buttons (Save writes a PNG to `Pictures/FingerWorks`).
+
+### 🎵 Music
+
+Every note comes from the **key and scale** you pick in Settings (default
+C major pentatonic), so there are no wrong notes.
+
+**Left hand -- harmony and dynamics.**
+
+- Hold up **1 · 2 · 3 · 4 fingers** → chord **I · IV · V · vi** (in a
+  minor scale: **i · iv · VI · VII**). The chord stays until you pick
+  another.
+- Hand **height** is the volume: raise it to swell, lower it to soften.
+- 👍 Thumb alone, held a moment → next instrument.
+
+**Right hand -- the instrument** (the control bar's **Mode** window or
+**Next instrument** button also switch between them):
+
+- **Harp** -- sweep your fingertips across ten strings to strum. They're
+  tuned to the current chord, and plucks pan left-to-right with the string.
+- **Keys** -- pinch thumb + index over a key to play it; slide while
+  pinched for a glissando. Keys that belong to the current chord are lit.
+- **Theremin** -- hand left/right is pitch (gently pulled toward the
+  scale), hand height is vibrato, a fist is silence.
+
+Sound needs [`pygame`](https://pypi.org/project/pygame/) (`pip install
+pygame`; optional for the rest of FingerWorks). Without it the visuals
+still run and the window says so. All sounds are synthesized -- there are
+no audio files to ship.
+
+See `INSTRUCTIONS.md` for the complete reference.
 
 ## 🐞 Debug Mode
 
@@ -274,6 +352,14 @@ detection itself isn't recognizing it (check lighting/framing, or that
 zoom, the gesture is fine and the problem is downstream, in the OS
 hotkey `execute_zoom()` sends (e.g. the OS magnifier isn't installed/
 enabled, or another app is capturing that shortcut).
+
+## Tests
+
+    python -m unittest discover -s tests -t .
+
+Covers the gesture helpers, music theory, the paint engine and the synth.
+(`settings` tests need OpenCV installed, and the audio-engine test needs
+`pygame`; each is skipped or degrades gracefully if missing.)
 
 ## Using this with gloves on
 

@@ -6,13 +6,17 @@ and more narrative detail; this file is meant as a flat lookup.
 
 ## Running
 
-    python main_fast.py [--sensitivity MULTIPLIER] [--debug]
+    python main_fast.py [--sensitivity MULTIPLIER] [--mode MODE] [--debug]
 
 - `--sensitivity MULTIPLIER` -- mouse-speed multiplier. Defaults to
   whatever's saved in settings (`1.0` the first time you run it). `1.5`
   moves the cursor faster, `0.5` slower. A multiplier on top of
   `constants.MOUSE_SPEED`. Passing it here overrides (and re-saves) the
   settings value; it's also changeable at runtime from the Settings window.
+- `--mode MODE` -- `control` (the default), `paint` or `music`. Which way
+  to use FingerWorks; see "Modes" below. Never remembered: every launch
+  starts in Control mode unless you pass this. Switchable at runtime with
+  the control bar's **Mode** button.
 - `--debug` -- defaults to whatever's saved in settings (off the first
   time you run it). See "Debug mode" below. Also toggleable at runtime
   from the Settings window.
@@ -36,7 +40,14 @@ gesture with, or to already know a gesture at all:
   (the camera keeps running, just isn't acted on) until you resume. Useful
   for stepping away or using your physical mouse/keyboard for a bit
   without quitting the program outright.
-- **Help** -- opens a quick gesture cheat sheet (see "Gestures" below).
+- **Mode: ...** -- shows the current mode and opens the Mode window to
+  switch between Control, Paint and Music (and pick a Music instrument).
+  See "Modes" below.
+- **Mode-specific buttons** -- appear between Mode and Help while an
+  artistic mode is active: **Undo / Clear / Save** in Paint, **Next
+  instrument** in Music.
+- **Help** -- opens a quick gesture cheat sheet for the *current* mode
+  (see "Gestures" and "Modes" below).
 - **Settings** -- opens the Settings window (see "Settings" below).
 - **Quit** -- quits the program. Same effect as Escape. (The thumb+pinky
   gesture that used to quit now pauses instead -- see "Gestures" below --
@@ -84,6 +95,10 @@ Click **Settings** in the control bar to open a small settings window:
 - **Keyboard size** -- scales the overlay panel (and so the on-screen
   keyboard drawn on it) up or down. The panel repositions itself to stay
   clear of the control bar at any size.
+- **Music key** / **Music scale** -- the key (C ... B) and scale (major/
+  minor pentatonic, major, natural minor, dorian, lydian, blues) Music
+  mode draws every note and chord from. Remembered across restarts, and
+  applied live if Music mode is running. See "Music mode" below.
 - **Click sounds** / **Keyboard sounds** -- both off by default. A short,
   quiet tone on every left/right-click, or every on-screen keyboard key
   press, respectively -- see `sounds.py`. Deliberately light rather than
@@ -211,7 +226,125 @@ With `--debug`:
     the action still doesn't happen, the gesture is fine and the problem
     is downstream (OS hotkey, focused app, etc.).
 
+## Modes
+
+FingerWorks has three ways of being used, switched with the control bar's
+**Mode** button (or `--mode`):
+
+| Mode | Purpose |
+|---|---|
+| **Control** | The default. Hands drive the computer. Everything under "Gestures" below. |
+| **Paint** | Fullscreen canvas: right hand paints, left hand dials the brush. |
+| **Music** | Fullscreen instrument: left hand picks chords/volume, right hand plays. |
+
+Switching modes lets go of whatever the old one held: a pressed mouse
+button is released, and a zoomed-in screen is zoomed back out. Coming back
+to Control mode, everything (including the zoom gesture) works as before.
+
+What the artistic modes have in common:
+
+- They **never move your real cursor or click**; the hands drive an
+  in-app pointer on a fullscreen canvas. There is no keyboard, zoom or
+  scroll.
+- A faint skeleton of each tracked hand is drawn on the canvas, since
+  there's no real cursor to show you where your hands are.
+- **Pause** is the Hang Ten sign (thumb + pinky out, middle three
+  folded), on *either* hand, held for ~4 frames (Control mode pauses on
+  the first frame; here an accidental pause would cut a stroke or a note
+  in half). Pausing silences all sound and ends any stroke. Resume with
+  the control bar's **Resume** button.
+- The canvas is a normal always-on-top window that never takes keyboard
+  focus. The control bar is kept above it. **Escape** and **Quit** still
+  quit.
+- Hand position maps to the screen with a margin (`art_gestures.
+  FRAME_MARGIN_X/Y`) so the screen's edges are reachable without your
+  hand leaving the camera's view, and pointer motion goes through a
+  one-euro filter: steady when your hand is still, responsive when it
+  moves.
+- The **left hand's label stability** delay from Control mode doesn't
+  apply here; instead poses are debounced over 3 frames before they
+  count.
+
+### Paint mode
+
+**Right hand.** The pen tip is the midpoint of the thumb and index
+fingertips (or of the thumb and ring fingertips while erasing), not the
+middle fingertip Control mode steers with -- while pinching, the middle
+finger drifts a lot but the pinch point stays put.
+
+| Gesture | Action |
+|---|---|
+| Thumb + index pinch | Paint. Held pinch = continuous stroke. |
+| Thumb + ring pinch | Erase (ring wins if both somehow register, like right-click over left-click in Control mode). |
+
+Pinches use hysteresis: they close at the usual cutoff
+(`LEFT_CLICK_CUTOFF`/`RIGHT_CLICK_CUTOFF`) but only release at 1.35x that,
+so a pinch hovering at the threshold doesn't shatter a stroke into dots.
+
+**Left hand -- dials.** The *pose* (thumb ignored except where noted)
+chooses what's adjusted; *moving your hand* adjusts it, relative to where
+it was when the pose began, so changing pose never makes a value jump.
+
+| Pose | Dial | Movement | Gain |
+|---|---|---|---|
+| Index only | Hue | up/down (wraps) | `PaintSession.HUE_GAIN` |
+| Index + middle | Brush size (2-120 px, exponential) | up/down | `SIZE_GAIN` |
+| Index + middle + ring | Saturation / brightness | up/down / left/right | `SAT_GAIN` / `VAL_GAIN` |
+| Four fingers (or open hand) | Brush style / symmetry | left/right / up/down, stepped | `STYLE_STEP` / `SYMMETRY_STEP` |
+| Thumb alone, held 0.7s | Undo last stroke | -- | -- |
+| Fist, or anything else | Nothing | -- | -- |
+
+A "gain" is in camera-frame fractions: `HUE_GAIN = 1.5` means moving your
+hand through two thirds of the frame's height cycles the whole colour
+wheel. They're class attributes in `paint.py`.
+
+**Brushes:** Ink (width follows speed -- fast strokes thin out), Glow
+(additive soft halo with a hot core), Spray (scattered specks), Rainbow
+(hue advances along the stroke).
+
+**Symmetry:** Off, Mirror, Mirror x4, Kaleidoscope 6 / 8 / 12. Each
+rotation is drawn once and (except Off) again mirrored; the eraser ignores
+symmetry so it rubs out exactly what's under the tip.
+
+**Canvas.** Painting happens in an off-screen buffer (native resolution up
+to 1920px wide, downscaled above that) and only the 256px tiles a stroke
+touched are re-uploaded each frame. Undo keeps the last 12 states
+(`MAX_UNDO`); **Clear** is undoable too. **Save** writes
+`painting-YYYYMMDD-HHMMSS.png` to `~/Pictures/FingerWorks` (or `~/
+FingerWorks` with no Pictures folder).
+
+### Music mode
+
+Every note and chord is drawn from the key and scale in Settings (see
+`music_theory.py`), so any combination of gestures sounds consonant.
+
+**Left hand.**
+
+| Gesture | Action |
+|---|---|
+| Index only / index+middle / 3 fingers / 4 fingers | Chord I / IV / V / vi (minor scales: i / iv / VI / VII). Latched until you pick another; a fist or no hand keeps it. |
+| Hand height | Volume (`0.25`-`1.0`; raise to swell). Stays where you left it if the hand leaves. |
+| Thumb alone, held 0.8s | Next instrument. |
+
+**Instruments** (right hand):
+
+| Instrument | Gesture |
+|---|---|
+| **Harp** | Ten strings tuned to the current chord (root/3rd/5th upward, ~3 octaves). Any of your five fingertips crossing a string plucks it. Pluck speed sets loudness; position sets stereo pan. A string needs a crossing at >=170 px/s measured over 4 frames (so tracking jitter on a resting hand doesn't pluck), and re-triggers at most every 80 ms. |
+| **Keys** | Eleven-plus keys of the scale across two octaves (more for 7-note scales). Pinch thumb + index over a key to play it; strike nearer the bottom of a key for a harder note. Slide while pinched to glissando -- a neighbouring key only takes over once the pointer is clearly inside it (hysteresis). Keys in the current chord are lit. Release = the note fades. |
+| **Theremin** | A continuous tone: hand left/right = pitch over three octaves (pulled 70% toward the nearest scale note, with glide), hand height = vibrato depth, fist or no hand = silent. Volume is the left hand's height. |
+
+**Sound** is synthesized with numpy and played through `pygame.mixer`
+(`synth.py`) -- harp is an additive "plucked string" (upper harmonics decay
+faster), keys an FM electric piano, theremin a streaming oscillator on one
+reserved mixer channel with glide, vibrato and click-free chunk joins.
+Notes are cached and the other chords' harp notes are rendered in the
+background so a chord change never stalls a strum. Without `pygame` (or an
+audio device) Music mode still runs silently and says so on screen.
+
 ## Gestures
+
+*(This section is Control mode -- see "Modes" above for Paint and Music.)*
 
 ### Right hand -- mouse & keyboard
 
@@ -333,6 +466,16 @@ is active, matching whatever's currently shown on the button -- via
 `pyautogui.typewrite()` rather than `press()`, so shifted punctuation (on
 the symbols page, or anywhere else) comes out correct without needing
 special-casing for each character.
+
+## Tests
+
+    python -m unittest discover -s tests -t .
+
+`tests/` covers the pure logic: gesture helpers (`art_gestures.py`),
+music theory, the paint engine and the synth's pitch/envelope/click-free
+behaviour, and settings persistence (which skips itself without OpenCV).
+`tests/handmodel.py` builds synthetic hands whose finger-out and pinch
+distances are scaled to the real cutoffs in `constants.py`.
 
 ## Parameters (`constants.py`)
 

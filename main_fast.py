@@ -23,9 +23,14 @@ from collections import deque
 import mouse_control as mc
 import sounds
 from mouse_control import execute_event_fast, screenWidth, screenHeight
-from event_classifier import get_event_fast, get_zoom_event, get_paste_event, get_scroll_event, is_zoomed_in
+from event_classifier import (
+	get_event_fast, get_zoom_event, get_paste_event, get_scroll_event, is_zoomed_in,
+	reset_zoom_state,
+)
+import art_gestures as ag
 import constants as c
 import keyboard as k
+import modes
 import overlay as ov
 import settings as fw_settings
 import word_predictions as wp
@@ -346,6 +351,40 @@ def calc_landmark_list(image, landmarks):
 
 
 
+def collect_hands(results, image):
+	"""Turn one frame's MediaPipe results into art_gestures.Hand objects
+	for the artistic modes -- the same per-hand landmark preparation and
+	Left/Right labelling the Control-mode loop does inline, packaged up so
+	Paint and Music don't each repeat it."""
+	hands = []
+	if not results.hand_landmarks:
+		return hands
+	frame_h, frame_w = image.shape[:2]
+	for hand_idx, hand_landmarks in enumerate(results.hand_landmarks):
+		abs_landmark_list = np.array(calc_landmark_list(image, hand_landmarks))
+		rel_landmark_list = np.array(pre_process_landmark(abs_landmark_list.tolist()))
+		rel_landmark_list = mc.normalize_landmarks(
+			rel_landmark_list, mc.hand_scale(abs_landmark_list),
+		)
+		label = results.handedness[hand_idx][0].category_name
+		if c.SWAP_LABELED_HANDS:
+			label = 'Left' if label == 'Right' else 'Right'
+		hands.append(ag.Hand(label, abs_landmark_list, rel_landmark_list, frame_w, frame_h))
+	return hands
+
+
+def create_art_session(mode, overlay, settings, paint_engine=None):
+	"""Build the Paint or Music session for `mode`. Imported lazily so
+	Control mode (the default) never pays for -- or depends on -- anything
+	the artistic modes need. `paint_engine` is a previous Paint session's
+	canvas to pick up where it left off."""
+	if mode == modes.PAINT:
+		from paint import PaintSession
+		return PaintSession(overlay, settings, engine=paint_engine)
+	from music import MusicSession
+	return MusicSession(overlay, settings)
+
+
 def pre_process_landmark(landmark_list):
 
 	# Work on a copy: this function mutates entries in place, and since
@@ -602,6 +641,19 @@ def main(settings):
 	sounds.set_volume(settings.get('sound_volume', 0.7))
 	keyboard_scale = settings.get('keyboard_scale', 1.2)
 
+	# Music mode's remembered choices, plus which way the program is
+	# currently being used. `art` is the live Paint/Music session while in
+	# one of those modes, None in Control mode -- see start_mode() below.
+	music_key = settings.get('music_key', 'C')
+	music_scale = settings.get('music_scale', 'Major pentatonic')
+	music_instrument = modes.normalize_instrument(settings.get('music_instrument'))
+	mode = modes.CONTROL
+	art = None
+	# The last Paint canvas (and brush), kept while you're in another mode
+	# so switching away -- or a stray click on the Mode button -- doesn't
+	# throw a painting away. Lives for this run only.
+	paint_engine = None
+
 	cap_width = width
 	cap_height = height
 
@@ -698,8 +750,16 @@ def main(settings):
 		return True
 
 	def handle_settings_changed(new_settings):
-		nonlocal cap_device, camera_device_setting, button_list
+		nonlocal cap_device, camera_device_setting, button_list, music_key, music_scale
+		# The Settings window only knows about the settings it shows; keep
+		# everything else (e.g. the remembered Music instrument) as it was
+		# instead of letting save_settings() reset it to its default.
+		new_settings = dict(get_current_settings(), **new_settings)
 		fw_settings.save_settings(new_settings)
+		music_key = new_settings['music_key']
+		music_scale = new_settings['music_scale']
+		if art is not None:
+			art.apply_settings(new_settings)
 
 		mc.set_sensitivity_multiplier(new_settings['sensitivity'])
 		overlay.set_sensitivity(new_settings['sensitivity'])
@@ -738,7 +798,70 @@ def main(settings):
 			'click_sounds': sounds.get_click_sounds_enabled(),
 			'keyboard_sounds': sounds.get_keyboard_sounds_enabled(),
 			'sound_volume': sounds.get_volume(),
+			'music_key': music_key,
+			'music_scale': music_scale,
+			'music_instrument': (
+				art.instrument_name() if (art is not None and art.mode == modes.MUSIC)
+				else music_instrument
+			),
 		}
+
+	def start_mode(new_mode):
+		"""Switch between Control / Paint / Music at runtime."""
+		nonlocal mode, art, control_state, music_instrument, paint_engine
+		new_mode = modes.normalize_mode(new_mode)
+		if new_mode == mode:
+			# Already there. Re-picking the current mode must not tear its
+			# session down (it would wipe a half-finished painting).
+			return
+
+		if art is not None:
+			if art.mode == modes.MUSIC:
+				music_instrument = art.instrument_name()
+			elif art.mode == modes.PAINT:
+				paint_engine = art.engine
+			try:
+				art.close()
+			except Exception as exc:
+				print(f'[WARN] Problem closing {art.mode} mode: {exc}')
+			art = None
+
+		if modes.is_art_mode(new_mode):
+			# Leaving Control mode: let go of anything it was holding (a
+			# pressed mouse button, a zoomed-in screen) so it isn't left
+			# stuck while the hands are busy painting or playing.
+			mc.release_all()
+			if is_zoomed_in():
+				mc.execute_zoom('out')
+				mc.set_zoomed(False)
+			reset_zoom_state()
+			control_state = 'Mouse'
+			try:
+				art = create_art_session(new_mode, overlay, get_current_settings(), paint_engine)
+			except Exception as exc:
+				traceback.print_exc()
+				overlay.show_message(
+					'FingerWorks',
+					f'Could not start {modes.MODE_LABELS[new_mode]} mode:\n{exc}\n\nStaying in Control mode.',
+				)
+				new_mode = modes.CONTROL
+
+		mode = new_mode
+		overlay.set_mode(mode)
+		overlay.set_art_actions(art.actions() if art is not None else [])
+		print(f'Mode: {modes.MODE_LABELS[mode]}')
+
+	def handle_mode_requested(new_mode):
+		start_mode(new_mode)
+
+	def handle_instrument_requested(instrument_id):
+		nonlocal music_instrument
+		music_instrument = modes.normalize_instrument(instrument_id)
+		fw_settings.save_settings(get_current_settings())
+		if art is not None and art.mode == modes.MUSIC:
+			art.set_instrument(music_instrument)
+		else:
+			start_mode(modes.MUSIC)
 
 	_startup_t0 = time.time()
 	model_path = ensure_model_downloaded()
@@ -810,6 +933,9 @@ def main(settings):
 		on_settings_changed=handle_settings_changed,
 		get_settings=get_current_settings,
 		get_available_cameras=fw_settings.list_cameras,
+		on_mode_requested=handle_mode_requested,
+		on_instrument_requested=handle_instrument_requested,
+		get_instrument=lambda: art.instrument_name() if (art is not None and art.mode == modes.MUSIC) else music_instrument,
 	)
 
 	# Keyboard case/page state. 'letters' (QWERTY) or 'symbols'
@@ -832,6 +958,9 @@ def main(settings):
 	# there's nothing to draw/hit-test before the first frame computes it.
 	suggestion_buttons = []
 
+	if settings.get('mode', modes.CONTROL) != modes.CONTROL:
+		start_mode(settings['mode'])
+
 	try:
 		while not overlay.should_quit:
 
@@ -844,6 +973,12 @@ def main(settings):
 				frame_height, frame_width = image.shape[:2]
 
 				image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+				if art is not None:
+					# Pausing silences/stops whatever the artistic mode is
+					# doing (a held note, a half-drawn stroke) and shows
+					# 'Paused' on its canvas; resuming picks it back up.
+					art.set_paused(overlay.paused)
 
 				if overlay.paused:
 					# Skip hand detection/gesture processing entirely while
@@ -860,6 +995,24 @@ def main(settings):
 				mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image)
 				timestamp_ms = int(time.time() * 1000) - start_time_ms
 				results = landmarker.detect_for_video(mp_image, timestamp_ms)
+
+				if art is not None:
+					# Paint / Music: the hands don't drive the OS cursor or
+					# keyboard here at all, so none of the Control-mode
+					# routing below applies -- hand the frame to the active
+					# session and skip the rest of this iteration.
+					hands = collect_hands(results, image)
+					if art.update(hands, time.time()):
+						overlay.set_paused(True)
+					if overlay.debug:
+						for hand in hands:
+							draw_hand_debug_overlay(
+								image, hand.abs, hand.label,
+								_LEFT_HAND_COLOR if hand.label == 'Left' else _RIGHT_HAND_COLOR,
+							)
+						overlay.draw_video(image)
+					overlay.pump()
+					continue
 
 				hand_debug_text = ''
 				left_hand_seen_this_frame = False
@@ -1166,6 +1319,16 @@ def main(settings):
 			# after it's no longer running to zoom back out for you.
 			mc.execute_zoom('out')
 			mc.set_zoomed(False)
+		if art is not None:
+			if art.mode == modes.MUSIC and art.instrument_name() != music_instrument:
+				# Remember the instrument last played, even if it was
+				# switched with the left-hand gesture rather than the Mode
+				# window (only the latter saves on its own).
+				fw_settings.save_settings(get_current_settings())
+			try:
+				art.close()
+			except Exception as exc:
+				print(f'[WARN] Problem closing {art.mode} mode: {exc}')
 		cap.release()
 		overlay.close()
 		landmarker.close()
@@ -1200,6 +1363,16 @@ if __name__ == '__main__':
 			'Settings window.'
 		),
 	)
+	parser.add_argument(
+		'--mode', choices=modes.MODE_IDS, default=None,
+		help=(
+			'Which way to use FingerWorks: control (the default -- your '
+			'hands drive the cursor, keyboard, zoom and scroll), paint (a '
+			'gesture-driven canvas), or music (play an instrument in the '
+			'air). Always starts in control mode if omitted; can also be '
+			'switched at runtime with the control bar\'s Mode button.'
+		),
+	)
 	args = parser.parse_args()
 
 	settings = fw_settings.load_settings()
@@ -1207,6 +1380,8 @@ if __name__ == '__main__':
 		settings['sensitivity'] = args.sensitivity
 	if args.debug is not None:
 		settings['debug'] = args.debug
+	if args.mode is not None:
+		settings['mode'] = args.mode
 
 	# As early as possible -- before main() prints its startup banner --
 	# so a non-debug run never shows so much as a flash of the console.

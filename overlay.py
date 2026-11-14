@@ -2,6 +2,7 @@
 import sys
 import tkinter as tk
 
+import modes
 import settings as fw_settings
 
 
@@ -65,6 +66,68 @@ LEFT HAND -- zoom & paste
 See INSTRUCTIONS.md in the project folder for the full
 gesture and parameter reference.
 """
+
+_PAINT_INSTRUCTIONS_TEXT = """PAINT MODE -- a canvas in the air
+
+RIGHT HAND -- the pen
+ \U0001F90F  Pinch thumb + index -- paint (the pen tip is
+   the point where your two fingertips meet)
+ \U0001F90F  Pinch thumb + ring -- erase
+
+
+LEFT HAND -- the dials
+Hold a pose, then move your hand. Values change by how
+far you move, so switching pose never makes anything jump.
+
+ \u261D  1 finger -- hue (up / down)
+ \u270C  2 fingers -- brush size (up / down)
+ \u2022  3 fingers -- saturation (up / down)
+   and brightness (left / right)
+ \U0001F590  4 fingers or open hand -- brush style (left /
+   right) and symmetry (up / down)
+ \U0001F44D  Thumb alone, held a moment -- undo
+ \u270A  Fist -- hands off, nothing changes
+
+ \U0001F919  Thumb + pinky out (either hand) -- pause
+
+
+Brushes: Ink, Glow, Spray, Rainbow.
+Symmetry: Mirror up to a 12-way Kaleidoscope.
+Undo / Clear / Save are in the control bar; Save writes a
+PNG to Pictures/FingerWorks.
+"""
+
+_MUSIC_INSTRUCTIONS_TEXT = """MUSIC MODE -- play in the air
+
+LEFT HAND -- harmony & dynamics
+ \u261D  1 finger -- chord I      \u270C  2 fingers -- chord IV
+ \u2022  3 fingers -- chord V    \U0001F590  4 fingers -- chord vi
+   (the chord stays until you pick another)
+   Raise your left hand to play louder, lower it for softer.
+ \U0001F44D  Thumb alone, held a moment -- next instrument
+
+RIGHT HAND -- the instrument
+ Harp -- sweep your fingertips across the strings. The
+   strings are tuned to the current chord.
+ Keys -- pinch thumb + index over a key to play it. Slide
+   while pinched for a glissando. Keys in the current
+   chord are lit.
+ Theremin -- hand left / right = pitch, hand height =
+   vibrato. Make a fist to go silent.
+
+ \U0001F919  Thumb + pinky out (either hand) -- pause
+
+
+Every note belongs to the key and scale you picked in
+Settings, so there are no wrong notes. Needs pygame for
+sound (pip install pygame).
+"""
+
+_HELP_BY_MODE = {
+	modes.CONTROL: ('FingerWorks -- Gestures', _INSTRUCTIONS_TEXT),
+	modes.PAINT: ('FingerWorks -- Paint', _PAINT_INSTRUCTIONS_TEXT),
+	modes.MUSIC: ('FingerWorks -- Music', _MUSIC_INSTRUCTIONS_TEXT),
+}
 
 
 def _rgb_to_hex(rgb):
@@ -169,7 +232,8 @@ class Overlay:
 
 	def __init__(self, screen_width, screen_height, panel_width=None, panel_height=None, margin=None,
 				debug=False, mouse_sensitivity=1.0, keyboard_scale=fw_settings.DEFAULTS['keyboard_scale'],
-				on_settings_changed=None, get_settings=None, get_available_cameras=None):
+				on_settings_changed=None, get_settings=None, get_available_cameras=None,
+				on_mode_requested=None, on_instrument_requested=None, get_instrument=None):
 		self.screen_width = screen_width
 		self.screen_height = screen_height
 
@@ -211,6 +275,16 @@ class Overlay:
 		self.on_settings_changed = on_settings_changed
 		self.get_settings = get_settings
 		self.get_available_cameras = get_available_cameras
+
+		# Mode switching (Control / Paint / Music), same callback style:
+		# - on_mode_requested(mode_id): the Mode window picked a mode.
+		# - on_instrument_requested(instrument_id): it picked a Music
+		#   instrument (main_fast.py also switches into Music mode).
+		# - get_instrument() -> instrument_id: highlights the current one.
+		self.on_mode_requested = on_mode_requested
+		self.on_instrument_requested = on_instrument_requested
+		self.get_instrument = get_instrument
+		self.mode = modes.CONTROL
 
 		self.paused = False
 
@@ -319,6 +393,8 @@ class Overlay:
 
 		self._settings_win = None
 		self._instructions_win = None
+		self._mode_win = None
+		self._art_buttons = []
 		self._build_control_bar()
 
 	# --- Control bar --------------------------------------------------
@@ -371,7 +447,15 @@ class Overlay:
 
 		self.pause_button = _make_flat_button(frame, 'Pause', self._toggle_pause)
 		self.pause_button.pack(side='left', padx=2)
-		_make_flat_button(frame, 'Help', self._open_instructions).pack(side='left', padx=2)
+		self.mode_button = _make_flat_button(
+			frame, f'Mode: {modes.MODE_LABELS[self.mode]}', self._open_mode_window, bg='#2e5c7a',
+		)
+		self.mode_button.pack(side='left', padx=2)
+		# Mode-specific buttons (Undo/Clear/Save in Paint, Next instrument
+		# in Music) are packed just before Help -- see set_art_actions().
+		self._controls_frame = frame
+		self._help_button = _make_flat_button(frame, 'Help', self._open_instructions)
+		self._help_button.pack(side='left', padx=2)
 		_make_flat_button(frame, 'Settings', self._open_settings).pack(side='left', padx=2)
 		_make_flat_button(frame, 'Quit', self._quit, bg='#7a2e2e').pack(side='left', padx=2)
 
@@ -391,6 +475,67 @@ class Overlay:
 		_make_window_noactivate(self.control_window.winfo_id())
 
 		self._refresh_pause_ui()
+
+	def raise_controls(self):
+		"""Put the control bar back above everything else. The artistic
+		modes' fullscreen canvas is also topmost, and among topmost windows
+		the most recently raised wins -- so the bar is lifted after the
+		canvas appears, or Pause/Mode/Quit would be buried under it."""
+		self.control_window.lift()
+		self.control_window.attributes('-topmost', True)
+
+	def _refit_control_bar(self):
+		"""Resize the control bar to fit its current buttons, keeping its
+		right edge where it was (so a bar the user dragged somewhere stays
+		put and just grows/shrinks leftward)."""
+		import re
+		win = self.control_window
+		win.update_idletasks()
+		match = re.match(r'(\d+)x(\d+)\+(-?\d+)\+(-?\d+)', win.geometry())
+		if match:
+			old_w, _h, x, y = (int(v) for v in match.groups())
+		else:
+			old_w, x, y = self.control_width, self.screen_width - self.control_width - self._margin, 0
+		new_w = max(200, win.winfo_reqwidth())
+		new_x = max(0, min(x + old_w - new_w, self.screen_width - new_w))
+		win.geometry(f'{new_w}x{self.control_height}+{new_x}+{y}')
+		self.control_width = new_w
+
+	def set_mode(self, mode):
+		"""Reflect the active mode in the UI: the Mode button's label, the
+		keyboard/debug panel (Control mode only), and the open Help window."""
+		self.mode = modes.normalize_mode(mode)
+		self.mode_button.config(text=f'Mode: {modes.MODE_LABELS[self.mode]}')
+		if self.mode != modes.CONTROL and self._visible:
+			self.root.withdraw()
+			self._visible = False
+		self._refit_control_bar()
+		if self._instructions_win is not None and self._instructions_win.winfo_exists():
+			self._instructions_win.destroy()
+			self._instructions_win = None
+			self._open_instructions()
+
+	def set_art_actions(self, actions):
+		"""Replace the mode-specific buttons in the control bar. `actions`
+		is a list of (label, callback); pass [] for none (Control mode)."""
+		for button in self._art_buttons:
+			button.destroy()
+		self._art_buttons = []
+		for label, callback in actions:
+			button = _make_flat_button(self._controls_frame, label, callback, bg='#2e5c7a')
+			button.pack(side='left', padx=2, before=self._help_button)
+			self._art_buttons.append(button)
+		self._refit_control_bar()
+
+	def show_message(self, title, text):
+		"""A small modal warning box -- for the rare failure (e.g. a mode
+		that couldn't start) the user would otherwise never see, since the
+		console is hidden outside debug mode."""
+		from tkinter import messagebox
+		try:
+			messagebox.showwarning(title, text, parent=self.root)
+		except tk.TclError:
+			print(f'[WARN] {title}: {text}')
 
 	def _toggle_pause(self):
 		self.set_paused(not self.paused)
@@ -526,6 +671,22 @@ class Overlay:
 			highlightthickness=0, length=180, showvalue=True,
 		).grid(row=7, column=1, sticky='ew', padx=10, pady=4)
 
+		# Music mode's key and scale -- every instrument and chord draws
+		# from these (see music_theory.py). Only used in Music mode, but
+		# always editable here so they're already right when you switch.
+		import music_theory
+		tk.Label(win, text='Music key', **label_opts).grid(
+			row=8, column=0, sticky='w', padx=10, pady=4)
+		music_key_var = tk.StringVar(value=current.get('music_key', music_theory.DEFAULT_KEY))
+		tk.OptionMenu(win, music_key_var, *music_theory.NOTE_NAMES).grid(
+			row=8, column=1, sticky='ew', padx=10, pady=4)
+
+		tk.Label(win, text='Music scale', **label_opts).grid(
+			row=9, column=0, sticky='w', padx=10, pady=4)
+		music_scale_var = tk.StringVar(value=current.get('music_scale', music_theory.DEFAULT_SCALE))
+		tk.OptionMenu(win, music_scale_var, *music_theory.SCALES).grid(
+			row=9, column=1, sticky='ew', padx=10, pady=4)
+
 		# Debug mode is deliberately excluded from "remembered for next
 		# time" (see settings.py's _PERSISTED_KEYS) -- it only ever applies
 		# to the run you turn it on for.
@@ -534,7 +695,7 @@ class Overlay:
 			win, text='Debug mode (event text + live camera view)', variable=debug_var,
 			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
 			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=8, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
+		).grid(row=10, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
 
 		def apply_and_close():
 			chosen = camera_var.get()
@@ -549,6 +710,8 @@ class Overlay:
 				'click_sounds': click_sounds_var.get(),
 				'keyboard_sounds': keyboard_sounds_var.get(),
 				'sound_volume': round(sound_volume_var.get(), 2),
+				'music_key': music_key_var.get(),
+				'music_scale': music_scale_var.get(),
 			}
 			if self.on_settings_changed:
 				self.on_settings_changed(new_settings)
@@ -567,13 +730,86 @@ class Overlay:
 			click_sounds_var.set(d['click_sounds'])
 			keyboard_sounds_var.set(d['keyboard_sounds'])
 			sound_volume_var.set(d['sound_volume'])
+			music_key_var.set(d['music_key'])
+			music_scale_var.set(d['music_scale'])
 			debug_var.set(d['debug'])
 
 		btn_frame = tk.Frame(win, bg='#1e1e1e')
-		btn_frame.grid(row=9, column=0, columnspan=2, pady=(0, 10))
+		btn_frame.grid(row=11, column=0, columnspan=2, pady=(0, 10))
 		_make_flat_button(btn_frame, 'Apply', apply_and_close, bg='#2ecc71').pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Cancel', close).pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Reset to Defaults', reset_to_defaults).pack(side='left', padx=4)
+
+		win.update_idletasks()
+		_make_window_noactivate(win.winfo_id())
+
+	# --- Mode window ------------------------------------------------------
+
+	def _open_mode_window(self):
+		if self._mode_win is not None and self._mode_win.winfo_exists():
+			self._mode_win.lift()
+			return
+
+		win = tk.Toplevel(self.root)
+		self._mode_win = win
+		win.title('FingerWorks -- Mode')
+		win.attributes('-topmost', True)
+		win.configure(bg='#1e1e1e')
+		win.resizable(False, False)
+
+		def close():
+			win.destroy()
+			self._mode_win = None
+
+		win.protocol('WM_DELETE_WINDOW', close)
+		win.bind('<Escape>', lambda _event: close())
+
+		def pick_mode(mode_id):
+			if self.on_mode_requested:
+				self.on_mode_requested(mode_id)
+			close()
+
+		def pick_instrument(instrument_id):
+			if self.on_instrument_requested:
+				self.on_instrument_requested(instrument_id)
+			close()
+
+		tk.Label(
+			win, text='Choose how to use FingerWorks', fg='#dddddd', bg='#1e1e1e',
+			font=('Segoe UI', 11, 'bold'),
+		).grid(row=0, column=0, columnspan=2, sticky='w', padx=14, pady=(12, 6))
+
+		for row, (mode_id, label, blurb) in enumerate(modes.MODES, start=1):
+			current = mode_id == self.mode
+			button = _make_flat_button(
+				win, label, lambda m=mode_id: pick_mode(m),
+				bg='#2ecc71' if current else '#3a3a3a',
+			)
+			button.config(width=10, font=('Segoe UI', 11, 'bold'), pady=8, fg='black' if current else 'white')
+			button.grid(row=row, column=0, sticky='ew', padx=(14, 8), pady=4)
+			tk.Label(
+				win, text=blurb, fg='#bbbbbb', bg='#1e1e1e', font=('Segoe UI', 9),
+				wraplength=300, justify='left',
+			).grid(row=row, column=1, sticky='w', padx=(0, 14), pady=4)
+
+		inst_row = len(modes.MODES) + 1
+		tk.Label(
+			win, text='Music instrument', fg='#dddddd', bg='#1e1e1e', font=('Segoe UI', 10),
+		).grid(row=inst_row, column=0, sticky='w', padx=14, pady=(10, 2))
+		inst_frame = tk.Frame(win, bg='#1e1e1e')
+		inst_frame.grid(row=inst_row + 1, column=0, columnspan=2, sticky='w', padx=14, pady=(0, 6))
+		current_instrument = self.get_instrument() if self.get_instrument else None
+		for instrument_id, label, _blurb in modes.INSTRUMENTS:
+			active = self.mode == modes.MUSIC and instrument_id == current_instrument
+			_make_flat_button(
+				inst_frame, label, lambda i=instrument_id: pick_instrument(i),
+				bg='#2ecc71' if active else '#3a3a3a',
+			).pack(side='left', padx=(0, 6))
+			if active:
+				inst_frame.winfo_children()[-1].config(fg='black')
+
+		_make_flat_button(win, 'Close', close).grid(
+			row=inst_row + 2, column=0, columnspan=2, pady=(6, 12))
 
 		win.update_idletasks()
 		_make_window_noactivate(win.winfo_id())
@@ -585,9 +821,13 @@ class Overlay:
 			self._instructions_win.lift()
 			return
 
+		title, body = _HELP_BY_MODE[self.mode]
+		# Tall enough for the whole text (the Control-mode cheat sheet has
+		# always been 22 lines; the others size themselves).
+		lines = max(22, body.count('\n') + 1)
 		win = tk.Toplevel(self.root)
 		self._instructions_win = win
-		win.title('FingerWorks -- Gestures')
+		win.title(title)
 		win.attributes('-topmost', True)
 		win.configure(bg='#1e1e1e')
 
@@ -599,11 +839,11 @@ class Overlay:
 		win.bind('<Escape>', lambda _event: close())
 
 		text = tk.Text(
-			win, width=44, height=22, bg='#1e1e1e', fg='#eeeeee', relief='flat',
+			win, width=50, height=lines, bg='#1e1e1e', fg='#eeeeee', relief='flat',
 			font=('Segoe UI', 11), wrap='word', padx=14, pady=12,
 			highlightthickness=0, bd=0,
 		)
-		text.insert('1.0', _INSTRUCTIONS_TEXT)
+		text.insert('1.0', body)
 		text.config(state='disabled')
 		text.pack(fill='both', expand=True)
 
@@ -791,7 +1031,9 @@ class Overlay:
 		# so the debug text below is always visible, as it always used to
 		# be before this flag existed. The control bar (status/Pause/Help/
 		# Settings/Quit) is separate and always visible regardless.
-		should_show = self.debug or control_state == 'Keyboard'
+		# Only Control mode ever uses this panel; the artistic modes own
+		# the whole screen and have no keyboard.
+		should_show = self.mode == modes.CONTROL and (self.debug or control_state == 'Keyboard')
 		if should_show != self._visible:
 			if should_show:
 				self.root.deiconify()
