@@ -46,6 +46,59 @@ class PoseTests(unittest.TestCase):
 		self.assertGreater(abs(ring.pinch_point()[0] - px) + abs(ring.pinch_point()[1] - py), 5)
 
 
+class OpennessAndTiltTests(unittest.TestCase):
+	def test_openness_spans_fist_to_spread(self):
+		self.assertLess(hm.make_hand(out=hm.FIST).openness(), 0.1)
+		self.assertGreater(hm.make_hand(out=hm.OPEN).openness(), 0.95)
+		self.assertTrue(0.0 <= hm.make_hand(out=hm.TWO).openness() <= 1.0)
+
+	def test_roll_follows_the_tilt(self):
+		for tilt in (-45, -20, 0, 20, 45):
+			self.assertAlmostEqual(hm.make_hand(out=hm.OPEN, roll=tilt).roll_degrees(), tilt, delta=0.5)
+		# curling the fingers must not change the measured roll
+		self.assertAlmostEqual(hm.make_hand(out=hm.FIST, roll=25).roll_degrees(), 25, delta=0.5)
+
+	def test_tilt_is_a_joystick_with_a_dead_zone(self):
+		self.assertEqual(ag.tilt_rate(0), 0.0)
+		self.assertEqual(ag.tilt_rate(11), 0.0)
+		self.assertEqual(ag.tilt_rate(-11), 0.0)
+		self.assertGreater(ag.tilt_rate(25), 0.0)
+		self.assertLess(ag.tilt_rate(-25), 0.0)
+		self.assertEqual(ag.tilt_rate(40), 1.0)
+		self.assertEqual(ag.tilt_rate(80), 1.0)
+		self.assertEqual(ag.tilt_rate(-80), -1.0)
+		self.assertLess(ag.tilt_rate(20), ag.tilt_rate(30))          # monotonic
+
+	def test_burst_needs_a_clench_then_a_fast_open(self):
+		def run(values, dt=1 / 30):
+			t = ag.OpennessTracker()
+			fired = []
+			for i, v in enumerate(values):
+				fired.append(t.update(v, i * dt))
+			return [b for b in fired if b > 0]
+		clench = [1.0] * 5 + [0.0] * 8
+		self.assertEqual(len(run(clench + [0.0, 0.5, 1.0, 1.0, 1.0, 1.0])), 1, 'clench then snap open -> one burst')
+		self.assertEqual(run([1.0] * 40), [], 'a relaxed open hand never bursts')
+		wobble = [0.9, 0.7, 0.95, 0.75, 1.0, 0.8] * 6
+		self.assertEqual(run(wobble), [], 'ordinary wobble is not a burst')
+		slow = [1.0] * 5 + [0.0] * 8 + [i / 60 for i in range(0, 60)]
+		self.assertEqual(run(slow), [], 'a slow release is not a burst')
+		half_open_snap = [0.5] * 6 + [1.0] * 8          # fast, but never clenched first
+		self.assertEqual(run(half_open_snap), [], 'opening quickly from half-closed is not a burst')
+		stale = [0.0] * 6 + [i / 40 for i in range(1, 21)] + [0.5] * 40 + [1.0] * 6   # clenched long ago, released slowly, then snapped
+		self.assertEqual(run(stale), [], 'the clench must be recent')
+		two = clench + [1.0] * 5 + clench + [1.0] * 5
+		self.assertLessEqual(len(run(two)), 2)
+
+	def test_burst_strength_follows_the_snap(self):
+		t = ag.OpennessTracker()
+		for i in range(10):
+			t.update(0.0, i / 30)
+		strengths = [t.update(v, (10 + i) / 30) for i, v in enumerate([1.0] * 5)]
+		strength = max(strengths)
+		self.assertTrue(0.45 <= strength <= 1.0)
+
+
 class DebounceTests(unittest.TestCase):
 	def test_pose_must_repeat_before_it_becomes_stable(self):
 		t = ag.PoseTracker(frames=3)

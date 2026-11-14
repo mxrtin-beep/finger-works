@@ -17,6 +17,12 @@ import numpy as np
 import constants as c
 
 
+# Mean wrist-to-fingertip distance (hand-scale units) of a clenched fist and
+# of a fully spread hand -- the two ends of Hand.openness().
+OPEN_FIST_DIST = 0.85
+OPEN_SPREAD_DIST = 1.75
+
+
 class Hand:
 	"""One tracked hand, as the artistic modes see it.
 
@@ -67,6 +73,25 @@ class Hand:
 		curl or extend, so it's the steady 'where is this hand' point for
 		the left hand's dials."""
 		return self.point(9)
+
+	def openness(self):
+		"""How open the hand is, 0 (clenched fist) .. 1 (fingers spread
+		wide): the mean wrist-to-fingertip distance of the four fingers,
+		in hand-scale units, mapped so a fist is ~0 and a fully open hand
+		is ~1. Continuous, unlike the five on/off finger-out flags --
+		which is what lets a squeeze or a release be a smooth *motion*."""
+		tips = self.rel[[c.INDEX_IDX, c.MIDDLE_IDX, c.RING_IDX, c.PINKY_IDX]]
+		mean = float(np.hypot(tips[:, 0], tips[:, 1]).mean())
+		return min(max((mean - OPEN_FIST_DIST) / (OPEN_SPREAD_DIST - OPEN_FIST_DIST), 0.0), 1.0)
+
+	def roll_degrees(self):
+		"""How far the hand is tilted from upright, in degrees: 0 with the
+		fingers pointing straight up, positive when it leans to the
+		camera-image right (the user's right, as the image is mirrored),
+		negative to the left. Measured along the wrist -> middle-knuckle
+		line, which barely changes as fingers curl or spread."""
+		dx, dy = self.rel[9][0], self.rel[9][1]       # image axes: y grows downward
+		return math.degrees(math.atan2(dx, -dy))
 
 	def pinch_dist(self, finger_idx):
 		"""Hand-scale-normalized distance from thumb tip to `finger_idx`'s
@@ -256,8 +281,13 @@ class Pointer2D:
 # lets a comfortable range of motion cover all of it. Vertical gets a
 # larger margin than horizontal because a hand moves less (and less
 # comfortably) up/down in front of a laptop camera than side to side.
-FRAME_MARGIN_X = 0.12
-FRAME_MARGIN_Y = 0.20
+#
+# These are generous on purpose: the central ~60% x ~52% of the camera
+# frame covers the whole screen, so you can keep your hand well back from
+# the camera (where the whole hand stays in view) and still reach every
+# corner with a modest movement.
+FRAME_MARGIN_X = 0.22
+FRAME_MARGIN_Y = 0.26
 
 
 def frame_to_screen(x, y, frame_w, frame_h, screen_w, screen_h):
@@ -308,3 +338,75 @@ class ShakaWatch:
 			self._count = 0
 			return True
 		return False
+
+
+# --- Tilt as a joystick --------------------------------------------------------
+
+def tilt_rate(angle_degrees, dead_zone=12.0, full=40.0):
+	"""Map a hand tilt to a signed rate in -1..1: nothing inside the dead
+	zone (so a hand held "straight" doesn't drift), then ramping to full
+	speed at `full` degrees, with the sign following the lean.
+
+	Used as a joystick rather than a position: tilt right to keep
+	increasing a value, tilt left to keep decreasing it, return to upright
+	to hold it. Unlike mapping hand position to a value, that has no range
+	limit at all -- the value can travel as far as you like -- and a small
+	wrist movement is enough.
+	"""
+	magnitude = abs(angle_degrees)
+	if magnitude <= dead_zone:
+		return 0.0
+	amount = min((magnitude - dead_zone) / (full - dead_zone), 1.0)
+	return amount if angle_degrees > 0 else -amount
+
+
+class OpennessTracker:
+	"""Turns a hand's openness over time into the two things the light
+	modes care about: a smoothed openness level (clench to gather, relax to
+	let go), and a *burst* event when a clenched hand snaps open fast.
+
+	A burst needs both halves of the gesture -- recently clenched, then
+	opening quickly -- so the ordinary wobble of a relaxed open hand never
+	sets one off.
+	"""
+
+	def __init__(self, burst_speed=2.2, closed_below=0.38, memory=0.7, cooldown=0.5):
+		self.burst_speed = burst_speed        # openness units / second
+		self.closed_below = closed_below
+		self.memory = memory                  # how recently it must have been clenched
+		self.cooldown = cooldown
+		self.value = 1.0
+		self.velocity = 0.0
+		self._t = None
+		self._closed_at = -1e9
+		self._last_burst = -1e9
+
+	def update(self, openness, now):
+		"""Feed one frame. Returns a burst strength in 0..1 (0 = none)."""
+		if self._t is None:
+			self.value, self._t = openness, now
+			return 0.0
+		dt = max(now - self._t, 1e-3)
+		self._t = now
+		new_value = 0.45 * self.value + 0.55 * openness
+		velocity = (new_value - self.value) / dt
+		self.velocity = 0.5 * self.velocity + 0.5 * velocity
+		self.value = new_value
+
+		if self.value < self.closed_below:
+			self._closed_at = now
+		if (
+			self.velocity > self.burst_speed
+			and now - self._closed_at < self.memory
+			and now - self._last_burst > self.cooldown
+		):
+			self._last_burst = now
+			self._closed_at = -1e9          # one clench, one burst
+			return min(max(self.velocity / 6.0, 0.45), 1.0)
+		return 0.0
+
+	def reset(self):
+		self._t = None
+		self.value = 1.0
+		self.velocity = 0.0
+		self._closed_at = -1e9

@@ -67,34 +67,35 @@ See INSTRUCTIONS.md in the project folder for the full
 gesture and parameter reference.
 """
 
-_PAINT_INSTRUCTIONS_TEXT = """PAINT MODE -- a canvas in the air
+_PAINT_INSTRUCTIONS_TEXT = """PAINT MODE -- paint with living light
 
-RIGHT HAND -- the pen
- \U0001F90F  Pinch thumb + index -- paint (the pen tip is
-   the point where your two fingertips meet)
- \U0001F90F  Pinch thumb + ring -- erase
+The screen is alive with drifting light. Your hands act on it.
 
+RIGHT HAND -- the conductor (aims where your middle
+finger points, like the cursor in Control mode)
+ \U0001F90F  Pinch thumb + index -- ignite: pour light
+ \u270A  Clench your fist -- gather the light into a
+   blazing core
+ \U0001F590  Snap the fist open -- a shockwave of light
+ Move your hand to stir the field; every fingertip
+ sheds sparks.
 
-LEFT HAND -- the dials
-Hold a pose, then move your hand. Values change by how
-far you move, so switching pose never makes anything jump.
-
- \u261D  1 finger -- hue (up / down)
- \u270C  2 fingers -- brush size (up / down)
- \u2022  3 fingers -- saturation (up / down)
-   and brightness (left / right)
- \U0001F590  4 fingers or open hand -- brush style (left /
-   right) and symmetry (up / down)
- \U0001F44D  Thumb alone, held a moment -- undo
- \u270A  Fist -- hands off, nothing changes
+LEFT HAND -- hold a pose, then TILT your hand like a
+joystick: lean right to raise, lean left to lower,
+straighten up to hold. No limits, tiny movements.
+ \u261D  1 finger -- colour
+ \u270C  2 fingers -- glow
+ \u2022  3 fingers -- flow (calm <-> turbulent)
+ \U0001F590  4 fingers / open -- trails (sparks <-> long
+   exposure)
+ \u270A  Fist, held -- stop time
+ \U0001F44D  Thumb alone, held -- next palette
 
  \U0001F919  Thumb + pinky out (either hand) -- pause
 
-
-Brushes: Ink, Glow, Spray, Rainbow.
-Symmetry: Mirror up to a 12-way Kaleidoscope.
-Undo / Clear / Save are in the control bar; Save writes a
-PNG to Pictures/FingerWorks.
+Leave it alone and a ghost painter takes over.
+Palette / Reset / Save are in the control bar; Save
+writes a PNG to Pictures/FingerWorks.
 """
 
 _MUSIC_INSTRUCTIONS_TEXT = """MUSIC MODE -- play in the air
@@ -103,12 +104,14 @@ LEFT HAND -- harmony & dynamics
  \u261D  1 finger -- chord I      \u270C  2 fingers -- chord IV
  \u2022  3 fingers -- chord V    \U0001F590  4 fingers -- chord vi
    (the chord stays until you pick another)
+   A soft chord pad plays underneath, so every chord
+   change is audible on any instrument.
    Raise your left hand to play louder, lower it for softer.
  \U0001F44D  Thumb alone, held a moment -- next instrument
 
 RIGHT HAND -- the instrument
- Harp -- sweep your fingertips across the strings. The
-   strings are tuned to the current chord.
+ Harp -- sweep your index finger across the strings.
+   They are tuned to the current chord.
  Keys -- pinch thumb + index over a key to play it. Slide
    while pinched for a glissando. Keys in the current
    chord are lit.

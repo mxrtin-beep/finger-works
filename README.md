@@ -56,41 +56,50 @@ Control mode next time, however you left it.
 | Mode | What it does |
 |---|---|
 | **Control** | Your hands run the computer: cursor, clicks, on-screen keyboard, zoom, scroll. |
-| **Paint** | A fullscreen canvas. Your right hand is the pen; your left hand dials colour, size and brush. |
+| **Paint** | Paint with living light: pinch to ignite, clench to gather, snap open to burst; tilt your left hand to tune. |
 | **Music** | An instrument in the air: a harp you strum, keys you pinch, or a theremin you wave at. |
 
 Both artistic modes have no keyboard, zoom or scroll, and they never touch
-your real mouse -- the hands only drive the canvas. The 🤙 **Hang Ten**
+your real mouse -- the hands only drive the canvas. Your hand is mapped to
+the screen generously (the middle ~55% of the camera's view covers all of
+it), so you can sit back and keep your whole hand in frame. The 🤙 **Hang Ten**
 sign (thumb and pinky out, on *either* hand, held for a moment) still
 pauses; the control bar stays on top so you can switch mode, un-pause or
 quit with your physical mouse.
 
 ### 🎨 Paint
 
-**Right hand -- the pen.** Where your thumb and index fingertips meet is
-the brush tip (like holding a real pen).
+Not a drawing tool -- a piece of living light. The screen is a field of
+glowing motes drifting in an invisible flow, alive even with nobody in
+front of it (leave it alone and a ghost painter takes over). Your hands act
+on it, and everything leaves long-exposure trails.
 
-- 🤏 Pinch thumb + index → paint
-- 🤏 Pinch thumb + ring → erase
+**Right hand -- the conductor.** It aims where your **middle finger
+points**, exactly like the cursor in Control mode.
 
-**Left hand -- the dials.** Hold a pose, then *move your hand*. Values
-change by how far you move rather than jumping to where your hand is, so
-switching pose never makes anything leap.
+- 🤏 Pinch thumb + index → **ignite**: pour light along your path
+- ✊ Clench your fist → **gather**: the light is drawn into orbit and
+  condenses into a blazing core
+- 🖐️ Snap the fist open → **burst**: a shockwave of light rings outward
+- Just moving stirs the field, and every fingertip sheds sparks
 
-| Pose | Moving your hand changes |
+**Left hand -- the atmosphere.** Hold a pose, then **tilt your hand like a
+joystick**: lean right to keep raising a value, lean left to keep lowering
+it, straighten up to hold it. There's no range limit -- it can go as far as
+you like -- and a small wrist movement is enough.
+
+| Pose | Tilting changes |
 |---|---|
-| ☝️ Index only | **Hue** -- up/down sweeps the colour wheel |
-| ✌️ Index + middle | **Brush size** -- up/down |
-| 3 fingers | **Saturation** (up/down) and **brightness** (left/right) |
-| 🖐️ 4 fingers / open hand | **Brush style** (left/right) and **symmetry** (up/down) |
-| 👍 Thumb alone, held a moment | **Undo** the last stroke |
-| ✊ Fist | Hands off -- nothing changes |
+| ☝️ One finger | **Colour** -- rotates everything through the palette |
+| ✌️ Two fingers | **Glow** -- thin sparks ↔ fat halos |
+| Three fingers | **Flow** -- calm ↔ turbulent |
+| 🖐️ Four fingers / open hand | **Trails** -- short sparks ↔ long exposure |
+| ✊ Fist, held | **Stops time** -- everything hangs in the air; open to resume |
+| 👍 Thumb alone, held | Next **palette** (Aurora, Ember, Ocean, Nebula, Prism) |
 
-Brushes: **Ink** (thins out when you move fast, like a calligraphy pen),
-**Glow** (neon), **Spray**, and **Rainbow** (hue drifts along the stroke).
-Symmetry runs from a simple **Mirror** up to a **12-way Kaleidoscope**, so
-one scribble becomes a mandala. The control bar gains **Undo**, **Clear**
-and **Save** buttons (Save writes a PNG to `Pictures/FingerWorks`).
+The control bar gains **Palette**, **Reset** and **Save** buttons (Save
+writes a full-resolution PNG to `Pictures/FingerWorks` -- handy for
+stills).
 
 ### 🎵 Music
 
@@ -103,13 +112,17 @@ C major pentatonic), so there are no wrong notes.
   minor scale: **i · iv · VI · VII**). The chord stays until you pick
   another.
 - Hand **height** is the volume: raise it to swell, lower it to soften.
+- A soft **chord pad** plays underneath whatever instrument you're on, so a
+  chord change is always audible -- including on Keys, whose notes are
+  scale notes and so don't depend on the chord.
 - 👍 Thumb alone, held a moment → next instrument.
 
 **Right hand -- the instrument** (the control bar's **Mode** window or
 **Next instrument** button also switch between them):
 
-- **Harp** -- sweep your fingertips across ten strings to strum. They're
-  tuned to the current chord, and plucks pan left-to-right with the string.
+- **Harp** -- a compact harp in the top half of the screen: sweep your
+  **index finger** across ten strings to strum. They're tuned to the
+  current chord, and plucks pan left-to-right with the string.
 - **Keys** -- pinch thumb + index over a key to play it; slide while
   pinched for a glissando. Keys that belong to the current chord are lit.
 - **Theremin** -- hand left/right is pitch (gently pulled toward the
@@ -361,7 +374,7 @@ enabled, or another app is capturing that shortcut).
 
     python -m unittest discover -s tests -t .
 
-Covers the gesture helpers, music theory, the paint engine and the synth.
+Covers the gesture helpers, music theory, the light engine and the synth.
 (`settings` tests need OpenCV installed, and the audio-engine test needs
 `pygame`; each is skipped or degrades gracefully if missing.)
 

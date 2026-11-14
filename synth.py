@@ -53,9 +53,10 @@ class AudioEngine:
 			self.sample_rate = freq
 			self.channels = channels
 			pygame.mixer.set_num_channels(self.CHANNELS)
-			# Channel 0 is reserved for the theremin's stream, so a burst of
-			# plucked notes can never steal it.
-			pygame.mixer.set_reserved(1)
+			# Channel 0 is the theremin's stream and channels 1-2 the chord
+			# pad's two crossfading halves, so a burst of plucked notes can
+			# never steal any of them.
+			pygame.mixer.set_reserved(3)
 			self._pg = pygame
 			self.available = True
 		except Exception as exc:    # no pygame, no device, ...
@@ -200,6 +201,83 @@ class NoteBank:
 					return
 
 		threading.Thread(target=work, daemon=True).start()
+
+
+PAD_LOOP_SECONDS = 4.0
+
+
+def render_pad(root_midi, quality, sr):
+	"""A soft sustained chord that loops seamlessly.
+
+	Every partial's frequency is snapped to a whole number of cycles per
+	loop, so the end of the buffer lands exactly on its start and it can
+	repeat forever with no click. Each note is doubled with a partner a
+	quarter-hertz away (itself a whole number of cycles per loop), which
+	beats slowly against it -- the gentle shimmer of a chorus -- and the
+	whole thing breathes with a slow tremolo."""
+	n = int(PAD_LOOP_SECONDS * sr)
+	t = np.arange(n) / sr
+	third = 3 if quality == 'min' else 4
+	notes = [root_midi, root_midi + 12, root_midi + 12 + third, root_midi + 12 + 7]
+	y = np.zeros(n)
+	for i, midi in enumerate(notes):
+		f = round(midi_to_freq(midi) * PAD_LOOP_SECONDS) / PAD_LOOP_SECONDS
+		weight = 1.0 if i == 0 else 0.7
+		for detune, share in ((0.0, 1.0), (0.25, 0.5)):
+			ph = 2 * np.pi * (f + detune) * t
+			y += weight * share * (np.sin(ph) + 0.22 * np.sin(2 * ph) + 0.06 * np.sin(3 * ph))
+	y *= 0.88 + 0.12 * np.sin(2 * np.pi * 0.5 * t)
+	return y / max(np.max(np.abs(y)), 1e-6) * 0.5
+
+
+class PadVoice:
+	"""The chord pad: plays under whichever instrument is active, so
+	changing the chord is always *audible* -- on the keys (whose notes are
+	scale notes, identical whatever the chord) as much as on the harp.
+
+	Two reserved mixer channels alternate: on a chord change the new chord
+	fades in on one while the old one fades out on the other."""
+
+	FADE_MS = 700
+
+	def __init__(self, engine):
+		self.engine = engine
+		self._cache = {}
+		self._channels = [None, None]
+		self._current = None
+		self._side = 0
+
+	def set_chord(self, root_pc, quality, level):
+		if not self.engine.available:
+			return
+		key = (int(root_pc), quality)
+		if key == self._current:
+			return
+		self._current = key
+		root = 45 + ((root_pc - 45) % 12)
+		sound = self._cache.get(key)
+		if sound is None:
+			sound = self._cache[key] = self.engine.make_sound(render_pad(root, quality, self.engine.sample_rate))
+		old = self._channels[self._side]
+		self._side ^= 1
+		channel = self.engine._pg.mixer.Channel(1 + self._side)
+		channel.play(sound, loops=-1, fade_ms=self.FADE_MS)
+		channel.set_volume(level, level)
+		self._channels[self._side] = channel
+		if old is not None:
+			old.fadeout(self.FADE_MS)
+
+	def set_level(self, level):
+		channel = self._channels[self._side]
+		if channel is not None and self.engine.available:
+			channel.set_volume(level, level)
+
+	def stop(self):
+		for channel in self._channels:
+			if channel is not None:
+				channel.fadeout(300)
+		self._channels = [None, None]
+		self._current = None
 
 
 class ThereminVoice:

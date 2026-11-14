@@ -64,6 +64,36 @@ class VoiceTests(unittest.TestCase):
 		self.assertLess(late_ratio, early_ratio, 'brightness should fade as the string rings')
 
 
+class PadTests(unittest.TestCase):
+	def test_pad_loops_seamlessly(self):
+		for quality in ('maj', 'min'):
+			y = synth.render_pad(48, quality, SR)
+			self.assertEqual(len(y), int(synth.PAD_LOOP_SECONDS * SR))
+			# the step from the last sample back to the first must be no bigger than any ordinary step
+			wrap = abs(float(y[0] - y[-1]))
+			typical = float(np.max(np.abs(np.diff(y))))
+			self.assertLessEqual(wrap, typical * 1.05, f'{quality}: audible click when the loop repeats')
+
+	def test_major_and_minor_pads_differ_in_the_third(self):
+		def energy_at(y, freq):
+			spec = np.abs(np.fft.rfft(y))
+			k = int(round(freq * synth.PAD_LOOP_SECONDS))
+			return float(spec[k - 1:k + 2].max())
+		maj, mino = synth.render_pad(48, 'maj', SR), synth.render_pad(48, 'min', SR)
+		e4, eb3 = midi_to_freq(48 + 12 + 4), midi_to_freq(48 + 12 + 3)
+		self.assertGreater(energy_at(maj, e4), 5 * energy_at(maj, eb3), 'major pad has a major third')
+		self.assertGreater(energy_at(mino, eb3), 5 * energy_at(mino, e4), 'minor pad has a minor third')
+
+	def test_different_chords_are_audibly_different(self):
+		roots = [synth.render_pad(r, 'maj', SR) for r in (48, 53, 55)]
+		for a in range(3):
+			for b in range(a + 1, 3):
+				self.assertLess(abs(float(np.corrcoef(roots[a], roots[b])[0, 1])), 0.5)
+
+	def test_pad_level_is_safe(self):
+		self.assertLessEqual(float(np.max(np.abs(synth.render_pad(52, 'min', SR)))), 0.51)
+
+
 class ThereminTests(unittest.TestCase):
 	def make(self):
 		engine = types.SimpleNamespace(sample_rate=SR, available=False)

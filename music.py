@@ -23,12 +23,15 @@ import math
 import time
 from collections import deque
 
+from PIL import Image
+
 import art_gestures as ag
 import constants as c
 import modes
 import music_theory as mt
 from art_window import ArtWindow, hsv_hex
-from synth import AudioEngine, NoteBank, ThereminVoice
+from lightfield import LightField, PALETTE_NAMES, skeleton_points
+from synth import AudioEngine, NoteBank, PadVoice, ThereminVoice
 
 
 BG = (7, 9, 15)
@@ -85,13 +88,14 @@ class _Instrument:
 
 class Harp(_Instrument):
 	name = 'harp'
-	footer = 'sweep your fingers across the strings   |   left hand: 1-4 fingers = chord, height = volume'
+	footer = 'sweep your index finger across the strings   |   left hand: 1-4 fingers = chord, height = volume'
 
 	STRINGS = 10
-	X0, X1 = 0.07, 0.93
-	# Strings end at 78% of the height so their note labels clear the
-	# control bar docked at the bottom-right.
-	Y0, Y1 = 0.13, 0.78
+	X0, X1 = 0.10, 0.90
+	# A compact harp in the top half of the screen, below the header: with
+	# the hand mapped generously to the screen, a big harp meant the hand
+	# itself brushed strings while moving into position.
+	Y0, Y1 = 0.21, 0.50
 	COOLDOWN = 0.08          # seconds before the same string can re-trigger
 	MIN_SPEED = 170.0        # px/s a fingertip must cross at -- ignores resting jitter
 	WINDOW = 4               # frames of history the speed is measured over
@@ -141,7 +145,10 @@ class Harp(_Instrument):
 		self._last_t = now
 		top, bottom = s.H * self.Y0, s.H * self.Y1
 
-		for tip in _FINGERTIPS:
+		# Only the index fingertip plucks: point and strum. With all five
+		# tips live, a big hand drifting into place sets strings off by
+		# accident, and strumming stops being intentional.
+		for tip in (c.INDEX_IDX,):
 			x, y = right.point(tip)
 			x, y = ag.frame_to_screen(x, y, right.frame_w, right.frame_h, s.W, s.H)
 			prev = self._tips.get(tip)
@@ -181,6 +188,7 @@ class Harp(_Instrument):
 			s.engine.play(sound, vel * s.volume, pan=(self.string_x[i] / s.W * 2.0 - 1.0) * 0.8)
 		self._amp[i] = 5.0 + vel * 26.0
 		self._plucked[i] = now
+		s.light(self.string_x[i], y, 0.18 + 0.4 * vel, self.notes[i])
 		color = _pc_color(self.notes[i], 1.0, 0.55)
 		self._rings.append([self.string_x[i], y, now, color])
 		for k in range(5):
@@ -238,7 +246,7 @@ class Harp(_Instrument):
 
 		# Fingertips, so you can see what's about to cross a string.
 		for x, y in self._tips.values():
-			cv.create_oval(x - 5, y - 5, x + 5, y + 5, outline='#aab4d8', width=1)
+			cv.create_oval(x - 7, y - 7, x + 7, y + 7, outline='#e8ecff', width=2)
 
 
 # =====================================================================
@@ -333,6 +341,7 @@ class Keys(_Instrument):
 			channel = s.engine.play(sound, vel * s.volume, pan=((sx / s.W) * 2.0 - 1.0) * 0.7)
 		self._playing = (hover, channel)
 		self._pressed_at[hover] = now
+		s.light(x0 + (hover + 0.5) * kw, y0, 0.2 + 0.4 * vel, self.notes[hover])
 
 	def draw(self, cv, now):
 		s = self.s
@@ -382,6 +391,7 @@ class Theremin(_Instrument):
 		self._pos = None
 		self._level = 0.0
 		self._sounding = False
+		self._last_pos = None
 
 	def start(self):
 		self.s.theremin.start()
@@ -412,6 +422,16 @@ class Theremin(_Instrument):
 		s.theremin.set(freq=mt.midi_to_freq(midi), amp=amp, vibrato=vibrato)
 		self._level = amp
 		self._trail.append((sx, sy, now, midi))
+		if not fist:
+			prev = self._last_pos or (sx / s.zoom, sy / s.zoom)
+			field = s.field
+			x, y = sx / s.zoom, sy / s.zoom
+			pal = (round(midi) % 12) / 12.0
+			field.emit_ink(prev[0], prev[1], x, y, int(4 + 8 * amp), 0.0, 0.0, pal, pal, bright=0.8, life=2.5, spread=12.0)
+			field.attractors.append((x, y, 0.25, field.k * 160.0))
+			self._last_pos = (x, y)
+		else:
+			self._last_pos = None
 
 	def draw(self, cv, now):
 		s = self.s
@@ -470,6 +490,28 @@ class MusicSession:
 		self.engine = engine or AudioEngine()
 		self.bank = NoteBank(self.engine)
 		self.theremin = ThereminVoice(self.engine)
+		self.pad = PadVoice(self.engine)
+
+		# The living backdrop (see lightfield.py): lighter than Paint's
+		# since Music also redraws instruments and plays audio every frame.
+		import tkinter as tk
+		from PIL import ImageTk
+		self.zoom = max(2, math.ceil(self.W / 720))
+		iw, ih = math.ceil(self.W / self.zoom), math.ceil(self.H / self.zoom)
+		self.field = LightField(iw, ih, ambient=1400, ink=2600)
+		self.field.set_palette(PALETTE_NAMES.index('Prism'))
+		self.field.halflife = 0.45
+		self.field.swirl = 0.8
+		# Quiet backdrop, not a light show: dim, one calm blue-violet for the
+		# ambient motes, soft shockwaves, small bursts. The notes' own colours
+		# then stand out as accents instead of drowning the instrument.
+		self.field.exposure = 0.55
+		self.field.flash_gain = 0.25
+		self.field.burst_scale = 0.35
+		self.field.set_ambient_pal(0.64, 0.07)
+		self._photo = ImageTk.PhotoImage(Image.new('RGB', (iw, ih)))
+		self._big = tk.PhotoImage(master=self.canvas, width=iw * self.zoom, height=ih * self.zoom)
+		self._last_t = None
 
 		self.key = settings.get('music_key', mt.DEFAULT_KEY)
 		self.scale = settings.get('music_scale', mt.DEFAULT_SCALE)
@@ -533,6 +575,39 @@ class MusicSession:
 		self.chords = mt.chord_set(self.key, self.scale)
 		for inst in self._instruments.values():
 			inst.retune()
+		self.pad.stop()
+		self._apply_pad()
+
+	def _maybe_render(self):
+		"""Render the field -- unless frames are taking too long, in which
+		case render every other frame. The simulation still steps every
+		frame (cheap) and trails/streaks account for the skipped time, so it
+		stays smooth; what it protects is the hand tracking, which must not
+		wait on drawing."""
+		start = time.perf_counter()
+		self._frame_no = getattr(self, '_frame_no', 0) + 1
+		skip = getattr(self, '_skip', False)
+		if skip and self._frame_no % 2:
+			return
+		self._present(self.field.render())
+		took = time.perf_counter() - start
+		# smoothed cost of a render+present; skip when rendering eats a big part of the frame budget
+		self._render_cost = 0.8 * getattr(self, '_render_cost', took) + 0.2 * took
+		self._skip = self._render_cost > 0.018
+
+	def _present(self, image):
+		self._photo.paste(image)
+		self.canvas.tk.call(str(self._big), 'copy', str(self._photo), '-zoom', self.zoom, self.zoom)
+
+	def light(self, sx, sy, strength, midi):
+		"""A note was played at screen point (sx, sy): send a ring of light
+		out from it, coloured by the note's pitch class."""
+		self.field.burst(sx / self.zoom, sy / self.zoom, strength * 0.7, pal=(int(round(midi)) % 12) / 12.0)
+
+	def _apply_pad(self):
+		chord = self.chord
+		self.pad.set_chord(chord['root_pc'], chord['quality'], 0.5 * self.volume)
+		self.pad.set_level(0.5 * self.volume)     # left-hand height swells the pad too
 
 	def _flash(self, text, seconds=1.8):
 		self._toast = (text, time.time() + seconds)
@@ -548,11 +623,14 @@ class MusicSession:
 			self._redraw([], time.time())
 		else:
 			self.instrument.start()
+			self._apply_pad()
+			self._last_t = None
 
 	def release(self):
 		"""Silence and let go of everything (pause, mode switch, quit)."""
 		if self.instrument is not None:
 			self.instrument.stop()
+		self.pad.stop()
 		self.engine.stop_all()
 		self.left_pose.reset()
 		self.instrument_latch.update(False, 0)
@@ -568,6 +646,20 @@ class MusicSession:
 			self._last_hands_time = now
 		self._update_left(left, now)
 		self.instrument.update(right, now)
+
+		dt = 1.0 / 30.0 if self._last_t is None else min(max(now - self._last_t, 1e-3), 0.1)
+		self._last_t = now
+		for hand in hands:
+			xs, ys, ints = skeleton_points(
+				hand, lambda x, y, h=hand: tuple(
+					v / self.zoom for v in ag.frame_to_screen(x, y, h.frame_w, h.frame_h, self.W, self.H)
+				),
+			)
+			self.field.draw_points(xs, ys, ints * 0.75, 0.62 if hand.label == 'Left' else 0.12)
+		self._apply_pad()
+		self.field.step(dt)
+		self._maybe_render()
+
 		self._redraw(hands, now)
 		return False
 
@@ -583,6 +675,9 @@ class MusicSession:
 			self._flash(self.chord['label'], 1.0)
 			for inst in self._instruments.values():
 				inst.retune()
+			self._apply_pad()
+			# a soft pulse of light from the middle of the screen, in the new chord's colour
+			self.light(self.W / 2, self.H * 0.62, 0.4, self.chord['root_pc'])
 
 		# Hand height is a fader: up = louder. Floor of 0.25 so a hand held
 		# low reads as "quiet", never "broken".
@@ -598,8 +693,8 @@ class MusicSession:
 	def _redraw(self, hands, now):
 		cv = self.canvas
 		cv.delete('all')
+		cv.create_image(0, 0, anchor='nw', image=self._big)
 		self.instrument.draw(cv, now)
-		self.window.draw_ghost_hands(hands, tag='ghost', right_color='#2c4a66', left_color='#66304f')
 		if self.overlay.debug:
 			self.window.draw_debug(hands, tag='dbg')
 

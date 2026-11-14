@@ -1,461 +1,134 @@
-"""Paint mode: a gesture-driven canvas.
+"""Paint mode: paint with living light.
 
-Right hand = the pen. The point where your thumb and index fingertips meet
-is the brush tip; pinch thumb + index to paint, thumb + ring to erase.
+The screen is a field of luminous motes drifting in an invisible flow
+(see lightfield.py) -- alive and beautiful with nobody in front of it. Your
+hands act on it.
 
-Left hand = a set of dials. Which pose you hold chooses *what* you're
-adjusting, and moving your hand adjusts it (relative, like a trackpad --
-so switching pose never makes a value jump to wherever your hand happens
-to be):
+RIGHT hand -- the conductor. The point is where your *middle finger*
+points (exactly like the cursor in Control mode).
 
-    1 finger  (index)               Hue          move up/down
-    2 fingers (index+middle)        Brush size   move up/down
-    3 fingers                       Tone         up/down = saturation,
-                                                 left/right = brightness
-    4 fingers / open hand           Brush style  left/right
-                                    + symmetry   up/down
-    Thumb alone, held               Undo last stroke
-    Fist / anything else            Hands off -- nothing changes
+    pinch thumb + index        ignite: pour light along the path
+    clench your fist           gather: nearby light is drawn into orbit and
+                               condenses into a blazing core
+    snap the fist open         burst: a shockwave of light rings outward
+    move your hand             stirs the field; every fingertip sheds sparks
 
-PaintEngine is pure PIL/numpy (no Tk), so it can be tested headlessly.
-PaintSession wires it to the camera hands and to the Tk window.
+LEFT hand -- the atmosphere. Hold a pose, then *tilt your hand* like a
+joystick: lean right to keep raising a value, lean left to keep lowering
+it, straighten up to hold it. (No range limit -- it can go as far as you
+like -- and a small wrist movement is all it takes.)
+
+    1 finger                   colour (rotates through the palette)
+    2 fingers                  glow (thin sparks <-> fat halos)
+    3 fingers                  flow (calm <-> turbulent)
+    4 fingers / open hand      trails (short sparks <-> long exposure)
+    fist, held                 stop time (release to resume)
+    thumb alone, held          next palette
+
+Leave it alone for a few seconds and a ghost painter takes over, so it's
+never a blank screen.
 """
 
-import colorsys
 import datetime
 import math
 import os
-import random
 import time
-from collections import deque
 
-import numpy as np
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image
 
 import art_gestures as ag
 import constants as c
-
-
-BACKGROUND = (8, 8, 12)
-
-STYLES = ['Ink', 'Glow', 'Spray', 'Rainbow']
-
-# (label, rotations, mirrored). Each rotation is drawn once, and again
-# reflected if `mirrored`, so the number of live copies is rotations x 1-or-2.
-SYMMETRIES = [
-	('Off', 1, False),
-	('Mirror', 1, True),
-	('Mirror x4', 2, True),
-	('Kaleidoscope 6', 3, True),
-	('Kaleidoscope 8', 4, True),
-	('Kaleidoscope 12', 6, True),
-]
-
-SIZE_MIN, SIZE_MAX = 2.0, 120.0
-
-TILE = 256        # display-pixel edge of the tiles the Tk window repaints
-MAX_UNDO = 12
-
-
-class PaintEngine:
-	"""The painting itself: brush state, strokes, undo, save.
-
-	Works in an internal pixel space (`scale` x the display size, so a 4K
-	screen can paint into a cheaper buffer); strokes arrive in *display*
-	coordinates and are converted here. `pop_dirty()` hands the Tk side the
-	set of display tiles that changed since last asked, so each frame only
-	the touched 256px tiles get re-uploaded, not a whole 1080p image.
-	"""
-
-	def __init__(self, display_w, display_h, scale=1.0):
-		self.display_w = display_w
-		self.display_h = display_h
-		self.scale = scale
-		self.w = max(1, round(display_w * scale))
-		self.h = max(1, round(display_h * scale))
-
-		self.img = Image.new('RGB', (self.w, self.h), BACKGROUND)
-		self._undo = deque(maxlen=MAX_UNDO)
-		self._dirty = set()
-		self._masks = {}
-		self._rng = random.Random()
-
-		# Brush state -- the left-hand dials edit these.
-		self.hue = 0.58
-		self.sat = 0.85
-		self.val = 1.0
-		self.size = 18.0          # display pixels
-		self.style = 0            # index into STYLES
-		self.symmetry = 0         # index into SYMMETRIES
-
-		# Stroke state
-		self._last = None         # last point of the live stroke (internal px)
-		self._erasing = False
-		self._speed = 0.0         # smoothed px/frame, drives ink width
-		self._rainbow = 0.0
-
-		self.mark_all_dirty()
-
-	# --- dirty tracking ------------------------------------------------
-
-	def mark_all_dirty(self):
-		cols = math.ceil(self.display_w / TILE)
-		rows = math.ceil(self.display_h / TILE)
-		self._dirty = {(tx, ty) for tx in range(cols) for ty in range(rows)}
-
-	def _mark(self, x0, y0, x1, y1):
-		"""Mark the tiles overlapped by an internal-pixel box."""
-		inv = 1.0 / self.scale
-		tx0 = max(0, int(x0 * inv) // TILE)
-		ty0 = max(0, int(y0 * inv) // TILE)
-		tx1 = min((self.display_w - 1) // TILE, int(x1 * inv) // TILE)
-		ty1 = min((self.display_h - 1) // TILE, int(y1 * inv) // TILE)
-		for ty in range(ty0, ty1 + 1):
-			for tx in range(tx0, tx1 + 1):
-				self._dirty.add((tx, ty))
-
-	def pop_dirty(self):
-		dirty, self._dirty = self._dirty, set()
-		return dirty
-
-	def tile_image(self, tx, ty):
-		"""The display-resolution image for one tile."""
-		x0, y0 = tx * TILE, ty * TILE
-		x1, y1 = min(x0 + TILE, self.display_w), min(y0 + TILE, self.display_h)
-		if self.scale == 1.0:
-			return self.img.crop((x0, y0, x1, y1))
-		s = self.scale
-		return self.img.resize(
-			(x1 - x0, y1 - y0), Image.BILINEAR, box=(x0 * s, y0 * s, x1 * s, y1 * s),
-		)
-
-	# --- brush color -------------------------------------------------------
-
-	def color(self):
-		r, g, b = colorsys.hsv_to_rgb(self.hue % 1.0, self.sat, self.val)
-		return int(r * 255), int(g * 255), int(b * 255)
-
-	def style_name(self):
-		return STYLES[self.style]
-
-	def symmetry_name(self):
-		return SYMMETRIES[self.symmetry][0]
-
-	# --- dial adjustments (all clamp/wrap, so callers can pass any delta) ---
-
-	def adjust_hue(self, delta):
-		self.hue = (self.hue + delta) % 1.0
-
-	def adjust_size(self, log_delta):
-		"""Exponential, so each bit of hand travel is the same *proportional*
-		change -- linear steps are far too coarse at 3px and far too fine
-		at 100px."""
-		self.size = min(max(self.size * math.exp(log_delta), SIZE_MIN), SIZE_MAX)
-
-	def adjust_saturation(self, delta):
-		self.sat = min(max(self.sat + delta, 0.0), 1.0)
-
-	def adjust_brightness(self, delta):
-		self.val = min(max(self.val + delta, 0.12), 1.0)
-
-	def step_style(self, step):
-		self.style = (self.style + step) % len(STYLES)
-
-	def step_symmetry(self, step):
-		self.symmetry = min(max(self.symmetry + step, 0), len(SYMMETRIES) - 1)
-
-	# --- strokes -------------------------------------------------------------
-
-	def begin_stroke(self, x, y, erase=False):
-		self._undo.append(self.img.copy())
-		self._erasing = erase
-		self._speed = 0.0
-		p = (x * self.scale, y * self.scale)
-		self._last = p
-		self._dab_segment(p, p)
-
-	def move_stroke(self, x, y):
-		if self._last is None:
-			self.begin_stroke(x, y, self._erasing)
-			return
-		p = (x * self.scale, y * self.scale)
-		self._dab_segment(self._last, p)
-		self._last = p
-
-	def end_stroke(self):
-		self._last = None
-
-	@property
-	def stroking(self):
-		return self._last is not None
-
-	@property
-	def erasing(self):
-		return self._erasing
-
-	def clear(self):
-		self._undo.append(self.img.copy())
-		self.img = Image.new('RGB', (self.w, self.h), BACKGROUND)
-		self._last = None
-		self.mark_all_dirty()
-
-	def undo(self):
-		"""Revert the most recent stroke/clear. Returns False if there's
-		nothing left to undo."""
-		if not self._undo:
-			return False
-		self.img = self._undo.pop()
-		self._last = None
-		self.mark_all_dirty()
-		return True
-
-	def save(self, directory=None):
-		"""Write the painting out as a PNG and return its path."""
-		if directory is None:
-			pictures = os.path.join(os.path.expanduser('~'), 'Pictures')
-			base = pictures if os.path.isdir(pictures) else os.path.expanduser('~')
-			directory = os.path.join(base, 'FingerWorks')
-		os.makedirs(directory, exist_ok=True)
-		name = f'painting-{datetime.datetime.now():%Y%m%d-%H%M%S}.png'
-		path = os.path.join(directory, name)
-		self.img.save(path)
-		return path
-
-	# --- rendering -------------------------------------------------------------
-
-	def _copies(self, p):
-		"""`p` under the current symmetry: a list of internal-pixel points."""
-		_label, rotations, mirrored = SYMMETRIES[self.symmetry]
-		if rotations == 1 and not mirrored:
-			return [p]
-		cx, cy = self.w / 2.0, self.h / 2.0
-		dx, dy = p[0] - cx, p[1] - cy
-		out = []
-		for k in range(rotations):
-			ang = 2.0 * math.pi * k / rotations
-			cos, sin = math.cos(ang), math.sin(ang)
-			for flip in ((False, True) if mirrored else (False,)):
-				ox = -dx if flip else dx
-				out.append((cx + ox * cos - dy * sin, cy + ox * sin + dy * cos))
-		return out
-
-	def _mask(self, kind, r):
-		key = (kind, r)
-		mask = self._masks.get(key)
-		if mask is None:
-			n = 2 * r + 1
-			yy, xx = np.mgrid[0:n, 0:n]
-			d = np.hypot(xx - r, yy - r)
-			if kind == 'hard':
-				a = np.clip(r + 0.5 - d, 0.0, 1.0)            # 1px anti-aliased edge
-			else:
-				a = np.clip(1.0 - d / (r + 0.5), 0.0, 1.0) ** 2   # soft falloff
-				if kind == 'halo':
-					a = a * 0.55
-			mask = Image.fromarray((a * 255).astype(np.uint8), 'L')
-			self._masks[key] = mask
-		return mask
-
-	def _stamp(self, x, y, r, color, kind, additive=False):
-		r = int(min(max(round(r), 1), 160))
-		mask = self._mask(kind, r)
-		x0, y0 = int(round(x)) - r, int(round(y)) - r
-		n = 2 * r + 1
-		# Clip to the buffer ourselves rather than trusting paste() to.
-		bx0, by0 = max(x0, 0), max(y0, 0)
-		bx1, by1 = min(x0 + n, self.w), min(y0 + n, self.h)
-		if bx0 >= bx1 or by0 >= by1:
-			return
-		m = mask.crop((bx0 - x0, by0 - y0, bx1 - x0, by1 - y0))
-		if additive:
-			region = self.img.crop((bx0, by0, bx1, by1))
-			tint = Image.composite(
-				Image.new('RGB', region.size, color), Image.new('RGB', region.size, (0, 0, 0)), m,
-			)
-			self.img.paste(ImageChops.add(region, tint), (bx0, by0))
-		else:
-			self.img.paste(color, (bx0, by0, bx1, by1), m)
-		self._mark(bx0, by0, bx1, by1)
-
-	def _dab_segment(self, p0, p1):
-		"""Paint the stroke from `p0` to `p1` (internal px), under symmetry."""
-		dist = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
-		# Smoothed speed -> calligraphic width. Fast strokes thin out, slow
-		# ones swell, which is most of what makes Ink feel like a pen
-		# rather than a mouse.
-		self._speed = 0.7 * self._speed + 0.3 * dist
-		base_r = max(self.size * self.scale / 2.0, 0.6)
-
-		if self._erasing:
-			# Erasing ignores symmetry: you want to rub out exactly what's
-			# under the tip, not under its reflections too.
-			self._line(p0, p1, base_r * 1.6, BACKGROUND, 'hard')
-			return
-
-		style = STYLES[self.style]
-		color = self.color()
-		pairs = list(zip(self._copies(p0), self._copies(p1)))
-
-		if style == 'Ink':
-			r = base_r * min(max(1.2 - self._speed / (60.0 * self.scale), 0.45), 1.2)
-			for a, b in pairs:
-				self._line(a, b, r, color, 'hard')
-		elif style == 'Rainbow':
-			self._rainbow = (self._rainbow + dist * 0.0025 / self.scale) % 1.0
-			rr, gg, bb = colorsys.hsv_to_rgb(self._rainbow, max(self.sat, 0.6), self.val)
-			rainbow = (int(rr * 255), int(gg * 255), int(bb * 255))
-			for a, b in pairs:
-				self._line(a, b, base_r, rainbow, 'hard')
-		elif style == 'Glow':
-			core = tuple(int(v + (255 - v) * 0.55) for v in color)
-			for a, b in pairs:
-				self._line(a, b, base_r * 1.7, color, 'halo', additive=True)
-				self._line(a, b, base_r * 0.45, core, 'hard')
-		elif style == 'Spray':
-			draw = ImageDraw.Draw(self.img)
-			count = int(min(max(base_r * 2.2, 10), 140))
-			for _a, b in pairs:
-				pts = []
-				for _ in range(count):
-					ang = self._rng.random() * 2.0 * math.pi
-					rad = base_r * 1.4 * math.sqrt(self._rng.random())
-					x, y = b[0] + rad * math.cos(ang), b[1] + rad * math.sin(ang)
-					# Each speck is a 2x2 dot: single pixels vanish at
-					# normal viewing size.
-					pts += [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)]
-				draw.point(pts, fill=color)
-				reach = int(base_r * 1.4) + 2
-				self._mark(b[0] - reach, b[1] - reach, b[0] + reach, b[1] + reach)
-
-	def _line(self, p0, p1, r, color, kind, additive=False):
-		dist = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
-		# Stamp spacing: tight enough that a round brush reads as a smooth
-		# line, capped so a fast hand sweep through a kaleidoscope doesn't
-		# turn one frame into hundreds of stamps.
-		spacing = max(r * 0.3, 1.0)
-		steps = max(1, min(int(dist / spacing), 40))
-		for i in range(steps + 1):
-			t = i / steps
-			self._stamp(
-				p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t,
-				r, color, kind, additive,
-			)
-
-
-# =====================================================================
-# The Tk-facing session
-# =====================================================================
-
-# Left-hand dial poses -> (parameter label, help blurb). Order is display order.
-_DIALS = [
-	('one', 'HUE', 'index finger'),
-	('two', 'SIZE', 'index + middle'),
-	('three', 'TONE', '3 fingers'),
-	('four', 'BRUSH', '4 fingers'),
-]
+from lightfield import LightField, skeleton_points
 
 
 class PaintSession:
 	mode = 'paint'
 
-	# Hand-travel -> value gains. A "frame unit" is a fraction of the
-	# camera frame, so e.g. hue = 1.5 means sweeping your hand through two
-	# thirds of the frame's height cycles the whole color wheel.
-	HUE_GAIN = 1.5
-	SIZE_GAIN = 3.2
-	SAT_GAIN = 1.8
-	VAL_GAIN = 1.8
-	STYLE_STEP = 0.10         # frame-widths of horizontal travel per style step
-	SYMMETRY_STEP = 0.09      # frame-heights of vertical travel per symmetry step
+	# Tilt-joystick speeds (per second at full tilt)
+	HUE_RATE = 0.45
+	GLOW_RATE = 1.1
+	SWIRL_RATE = 1.4
+	TRAIL_RATE = 1.2
+
+	IDLE_SECONDS = 4.0        # no hands this long -> the ghost painter appears
 
 	def __init__(self, overlay, settings=None, engine=None):
-		"""`engine` resumes an earlier canvas (and brush) -- see
-		main_fast.start_mode(), which hands the last one back when you
-		return to Paint."""
+		"""`engine` resumes an earlier LightField (see main_fast.start_mode,
+		which hands the last one back when you return to Paint)."""
+		import tkinter as tk
 		from PIL import ImageTk
 		from art_window import ArtWindow
 
 		self.overlay = overlay
-		self._ImageTk = ImageTk
-		self.window = ArtWindow(overlay, bg='#08080c')
+		self.window = ArtWindow(overlay, bg='#000000')
 		self.canvas = self.window.canvas
 		self.W, self.H = self.window.width, self.window.height
 
-		# Paint at native resolution up to 1920px wide (so a 1080p screen
-		# needs no per-tile resizing at all), and into a 1920px buffer on
-		# anything bigger: a 4K canvas would cost four times the upload
-		# bandwidth and undo memory per stroke for no visible gain on a
-		# hand-driven brush.
-		scale = min(1.0, 1920.0 / self.W)
-		self.engine = engine or PaintEngine(self.W, self.H, scale)
-		self.engine.end_stroke()
+		# The field is simulated and rendered at roughly 1000px wide, then
+		# scaled up by an integer factor inside Tk (a fast C copy), which
+		# is far cheaper than shipping full-resolution frames. The glow
+		# hides the pixel doubling.
+		self.zoom = max(1, math.ceil(self.W / 1000))
+		iw, ih = math.ceil(self.W / self.zoom), math.ceil(self.H / self.zoom)
+		if engine is not None and (engine.w, engine.h) != (iw, ih):
+			engine = None
+		self.engine = engine or LightField(iw, ih)
 
-		self._tiles = {}
-		self._build_tiles()
+		self._photo = ImageTk.PhotoImage(Image.new('RGB', (iw, ih)))
+		self._big = (
+			tk.PhotoImage(master=self.canvas, width=iw * self.zoom, height=ih * self.zoom)
+			if self.zoom > 1 else None
+		)
+		self.canvas.create_image(0, 0, anchor='nw', image=self._big or self._photo, tags='bg')
 
-		self.pointer = ag.Pointer2D(min_cutoff=1.6, beta=0.012)
-		self.index_pinch = ag.Pinch(c.LEFT_CLICK_CUTOFF)
-		self.ring_pinch = ag.Pinch(c.RIGHT_CLICK_CUTOFF)
+		self.pointer = ag.Pointer2D(min_cutoff=1.8, beta=0.015)
+		self.pinch = ag.Pinch(c.LEFT_CLICK_CUTOFF)
+		self.openness = ag.OpennessTracker()
 		self.left_pose = ag.PoseTracker(frames=3)
-		self.undo_latch = ag.Latch(0.7)
+		self.roll_filter = ag.OneEuro(min_cutoff=1.5, beta=0.02)
+		self.palette_latch = ag.Latch(0.7)
 		self.shaka = ag.ShakaWatch()
-		self.dial_x = ag.OneEuro(min_cutoff=1.0, beta=3.0)
-		self.dial_y = ag.OneEuro(min_cutoff=1.0, beta=3.0)
-		self._dial_prev = None      # (x, y) in frame fractions, or None
-		self._style_acc = 0.0
-		self._symmetry_acc = 0.0
 
-		self._cursor = None
-		self._active_dial = None
+		self._aim = None
+		self._tips = {}
+		self._time_scale = 1.0
+		self._last_t = None
+		self._last_hands_time = time.time()
+		self._start = time.time()
+		self._gauge = None          # (label, 0..1, until)
 		self._toast = None
 		self._paused = False
-		self._last_hands_time = time.time()
+		self._ghost_prev = None
+		self._ghost_burst = -1
 
-	# --- Tk tiles -----------------------------------------------------------
-
-	def _build_tiles(self):
-		eng = self.engine
-		cols = math.ceil(self.W / TILE)
-		rows = math.ceil(self.H / TILE)
-		for ty in range(rows):
-			for tx in range(cols):
-				img = eng.tile_image(tx, ty)
-				photo = self._ImageTk.PhotoImage(img)
-				self.canvas.create_image(tx * TILE, ty * TILE, anchor='nw', image=photo, tags='tile')
-				self._tiles[(tx, ty)] = photo    # keep a reference so Tk doesn't GC it
-		eng.pop_dirty()
-
-	def _refresh_tiles(self):
-		for key in self.engine.pop_dirty():
-			photo = self._tiles.get(key)
-			if photo is not None:
-				photo.paste(self.engine.tile_image(*key))
-
-	# --- control bar actions --------------------------------------------------
+	# ---- control bar ---------------------------------------------------------------
 
 	def actions(self):
-		return [('Undo', self.do_undo), ('Clear', self.do_clear), ('Save', self.do_save)]
+		return [('Palette', self.next_palette), ('Reset', self.do_reset), ('Save', self.do_save)]
 
-	def do_undo(self):
-		self.engine.end_stroke()
-		self._flash('Undo' if self.engine.undo() else 'Nothing to undo')
+	def next_palette(self):
+		self._flash(self.engine.next_palette())
 
-	def do_clear(self):
-		self.engine.end_stroke()
-		self.engine.clear()
-		self._flash('Canvas cleared  (Undo brings it back)')
+	def do_reset(self):
+		self.engine.reset()
+		self._flash('Reset')
 
 	def do_save(self):
 		try:
-			path = self.engine.save()
-			self._flash(f'Saved  {path}', seconds=5)
+			pictures = os.path.join(os.path.expanduser('~'), 'Pictures')
+			base = pictures if os.path.isdir(pictures) else os.path.expanduser('~')
+			directory = os.path.join(base, 'FingerWorks')
+			os.makedirs(directory, exist_ok=True)
+			path = os.path.join(directory, f'light-{datetime.datetime.now():%Y%m%d-%H%M%S}.png')
+			self.engine.snapshot((self.W, self.H)).save(path)
+			self._flash(f'Saved  {path}', 5.0)
 		except OSError as exc:
-			self._flash(f'Could not save: {exc}', seconds=5)
+			self._flash(f'Could not save: {exc}', 5.0)
 
-	def _flash(self, text, seconds=2.5):
+	def _flash(self, text, seconds=2.2):
 		self._toast = (text, time.time() + seconds)
 
-	# --- per-frame -------------------------------------------------------------
+	# ---- lifecycle --------------------------------------------------------------------
 
 	def set_paused(self, paused):
 		if paused == self._paused:
@@ -463,240 +136,18 @@ class PaintSession:
 		self._paused = paused
 		if paused:
 			self.release()
-		# Redraw once on the transition (shows or clears the 'Paused'
-		# banner); the main loop calls this every frame, so it must not
-		# redraw when nothing changed.
+		self._last_t = None
 		self._redraw_hud([], time.time())
 
 	def release(self):
-		"""Let go of everything held: end the stroke, forget hand state."""
-		self.engine.end_stroke()
 		self.pointer.reset()
-		self.index_pinch.reset()
-		self.ring_pinch.reset()
-		self._dial_prev = None
-		self.dial_x.reset()
-		self.dial_y.reset()
-		self.undo_latch.update(False, 0)
-
-	def update(self, hands, now):
-		"""Process one frame. Returns True if the user asked to pause."""
-		if self.shaka.update(hands):
-			self.release()
-			return True
-
-		right, left = ag.pick_hands(hands)
-		if hands:
-			self._last_hands_time = now
-
-		cursor = self._update_pen(right, now)
-		self._update_dials(left, now)
-
-		self._refresh_tiles()
-		self._redraw_hud(hands, now, cursor=cursor)
-		return False
-
-	def _update_pen(self, right, now):
-		eng = self.engine
-		if right is None:
-			if eng.stroking:
-				eng.end_stroke()
-			self.pointer.reset()
-			self.index_pinch.reset()
-			self.ring_pinch.reset()
-			return None
-
-		erase = self.ring_pinch.update(right.pinch_dist(c.RING_IDX))
-		paint = (not erase) and self.index_pinch.update(right.pinch_dist(c.INDEX_IDX))
-		if erase:
-			# Only one of the two pinches can be live at once, and the
-			# ring pinch wins (same priority as right-click over
-			# left-click in Control mode).
-			self.index_pinch.reset()
-
-		# The pen tip is wherever the *active* pinch is: thumb+ring while
-		# erasing, thumb+index otherwise (including just hovering).
-		px, py = right.pinch_point(c.RING_IDX if erase else c.INDEX_IDX)
-		sx, sy = ag.frame_to_screen(px, py, right.frame_w, right.frame_h, self.W, self.H)
-		sx, sy = self.pointer(sx, sy, now)
-
-		if erase or paint:
-			if not eng.stroking or eng.erasing != erase:
-				eng.begin_stroke(sx, sy, erase=erase)
-			else:
-				eng.move_stroke(sx, sy)
-		elif eng.stroking:
-			eng.end_stroke()
-
-		return sx, sy, erase, paint
-
-	def _update_dials(self, left, now):
-		eng = self.engine
-		if left is None:
-			self._active_dial = None
-			self._dial_prev = None
-			self.left_pose.reset()
-			self.dial_x.reset()
-			self.dial_y.reset()
-			self.undo_latch.update(False, now)
-			return
-
-		pose = self.left_pose.update(ag.left_pose(left.fingers_out), now)
-
-		# Thumb alone, held: undo. Fires once per hold.
-		if self.undo_latch.update(pose == 'thumb', now):
-			self.do_undo()
-
-		dial = pose if pose in ('one', 'two', 'three', 'four') else None
-		if dial != self._active_dial:
-			# New pose: forget where the hand was, so the first frame of
-			# the new dial reads as "starting here", not a huge jump from
-			# wherever the hand was under the previous pose.
-			self._active_dial = dial
-			self._dial_prev = None
-			self._style_acc = 0.0
-			self._symmetry_acc = 0.0
-			self.dial_x.reset()
-			self.dial_y.reset()
-
-		if dial is None:
-			return
-
-		x, y = left.palm_point()
-		fx = self.dial_x(x / left.frame_w, now)
-		fy = self.dial_y(y / left.frame_h, now)
-		if self._dial_prev is None:
-			self._dial_prev = (fx, fy)
-			return
-		dx = fx - self._dial_prev[0]
-		dy = self._dial_prev[1] - fy          # up is positive
-		self._dial_prev = (fx, fy)
-
-		if dial == 'one':
-			eng.adjust_hue(dy * self.HUE_GAIN)
-		elif dial == 'two':
-			eng.adjust_size(dy * self.SIZE_GAIN)
-		elif dial == 'three':
-			eng.adjust_saturation(dy * self.SAT_GAIN)
-			eng.adjust_brightness(dx * self.VAL_GAIN)
-		elif dial == 'four':
-			self._style_acc += dx
-			self._symmetry_acc += dy
-			while self._style_acc >= self.STYLE_STEP:
-				eng.step_style(1)
-				self._style_acc -= self.STYLE_STEP
-			while self._style_acc <= -self.STYLE_STEP:
-				eng.step_style(-1)
-				self._style_acc += self.STYLE_STEP
-			while self._symmetry_acc >= self.SYMMETRY_STEP:
-				eng.step_symmetry(1)
-				self._symmetry_acc -= self.SYMMETRY_STEP
-			while self._symmetry_acc <= -self.SYMMETRY_STEP:
-				eng.step_symmetry(-1)
-				self._symmetry_acc += self.SYMMETRY_STEP
-
-	# --- HUD -----------------------------------------------------------------
-
-	def _redraw_hud(self, hands, now, cursor=None):
-		from art_window import hsv_hex, rgb_hex
-
-		cv = self.canvas
-		cv.delete('hud')
-		eng = self.engine
-
-		self.window.draw_ghost_hands(hands)
-		if self.overlay.debug:
-			self.window.draw_debug(hands)
-
-		# Brush cursor.
-		if cursor is not None:
-			sx, sy, erase, paint = cursor
-			r = max(eng.size / 2.0, 3.0) * (1.6 if erase else 1.0)
-			col = '#ffffff' if erase else rgb_hex(eng.color())
-			cv.create_oval(
-				sx - r, sy - r, sx + r, sy + r, outline=col,
-				width=3 if (paint or erase) else 1, tags='hud',
-			)
-			cv.create_line(sx - 6, sy, sx + 6, sy, fill=col, tags='hud')
-			cv.create_line(sx, sy - 6, sx, sy + 6, fill=col, tags='hud')
-
-		# Dial panel (top-left).
-		x0, y0 = 24, 24
-		cv.create_rectangle(x0 - 10, y0 - 10, x0 + 306, y0 + 215, fill='#14141c', outline='#2c2c3a', tags='hud')
-		cv.create_oval(x0, y0, x0 + 54, y0 + 54, fill=rgb_hex(eng.color()), outline='#ffffff', width=2, tags='hud')
-		cv.create_text(
-			x0 + 66, y0 + 8, anchor='nw', fill='#cccccc', font=('Segoe UI', 11, 'bold'),
-			text=f'{eng.style_name()}', tags='hud',
-		)
-		cv.create_text(
-			x0 + 66, y0 + 30, anchor='nw', fill='#888899', font=('Segoe UI', 9),
-			text=eng.symmetry_name(), tags='hud',
-		)
-
-		rows = [
-			('one', 'HUE', eng.hue, 'hue'),
-			('two', 'SIZE', (math.log(eng.size) - math.log(SIZE_MIN)) / (math.log(SIZE_MAX) - math.log(SIZE_MIN)), 'plain'),
-			('three', 'SAT', eng.sat, 'plain'),
-			('three', 'LIGHT', (eng.val - 0.12) / 0.88, 'plain'),
-		]
-		bar_x, bar_w = x0 + 62, 190
-		for i, (pose, label, frac, kind) in enumerate(rows):
-			ry = y0 + 72 + i * 28
-			active = self._active_dial == pose
-			cv.create_text(
-				x0, ry + 2, anchor='nw', text=label,
-				fill='#ffffff' if active else '#777788', font=('Segoe UI', 9, 'bold'), tags='hud',
-			)
-			if kind == 'hue':
-				segs = 24
-				for s in range(segs):
-					cv.create_rectangle(
-						bar_x + s * bar_w / segs, ry, bar_x + (s + 1) * bar_w / segs, ry + 14,
-						fill=hsv_hex(s / segs, 0.85, 0.95), outline='', tags='hud',
-					)
-			else:
-				cv.create_rectangle(bar_x, ry, bar_x + bar_w, ry + 14, fill='#2a2a36', outline='', tags='hud')
-				cv.create_rectangle(
-					bar_x, ry, bar_x + bar_w * frac, ry + 14,
-					fill='#e0e0ee' if active else '#7a7a90', outline='', tags='hud',
-				)
-			mx = bar_x + bar_w * frac
-			cv.create_rectangle(
-				mx - 2, ry - 3, mx + 2, ry + 17, fill='#ffffff', outline='#000000', tags='hud',
-			)
-
-		hint = {
-			'one': 'moving up / down changes hue',
-			'two': 'moving up / down changes size',
-			'three': 'up/down = saturation   left/right = brightness',
-			'four': 'left/right = brush style   up/down = symmetry',
-		}.get(self._active_dial, 'left hand: 1 finger hue | 2 size | 3 tone | 4 brush')
-		cv.create_text(x0, y0 + 190, anchor='nw', text=hint, fill='#9a9ab0', font=('Segoe UI', 9), tags='hud')
-
-		# Footer hint.
-		cv.create_text(
-			self.W / 2, self.H - 18, fill='#555566', font=('Segoe UI', 10),
-			text='pinch thumb + index to paint  |  thumb + ring to erase  |  left thumb held = undo  |  shaka = pause',
-			tags='hud',
-		)
-
-		if not hands and now - self._last_hands_time > 1.0 and not self._paused:
-			self.window.draw_banner('Show your hands to the camera', y=self.H * 0.45, color='#666677')
-
-		if self._paused:
-			self.window.draw_banner('Paused')
-
-		if self._toast is not None:
-			text, until = self._toast
-			if now > until:
-				self._toast = None
-			else:
-				cv.create_text(
-					self.W / 2, self.H - 52, text=text, fill='#e8e8f4',
-					font=('Segoe UI', 13, 'bold'), tags='hud',
-				)
-
-	# --- lifecycle ---------------------------------------------------------------
+		self.pinch.reset()
+		self.openness.reset()
+		self.left_pose.reset()
+		self.roll_filter.reset()
+		self.palette_latch.update(False, 0)
+		self._aim = None
+		self._tips.clear()
 
 	def apply_settings(self, settings):
 		pass
@@ -704,3 +155,220 @@ class PaintSession:
 	def close(self):
 		self.release()
 		self.window.close()
+
+	# ---- per frame -----------------------------------------------------------------------
+
+	def update(self, hands, now):
+		"""Process one frame. Returns True if the user asked to pause."""
+		if self.shaka.update(hands):
+			self.release()
+			return True
+
+		dt = 1.0 / 30.0 if self._last_t is None else min(max(now - self._last_t, 1e-3), 0.1)
+		self._last_t = now
+		f = self.engine
+		right, left = ag.pick_hands(hands)
+		if hands:
+			self._last_hands_time = now
+
+		if right is not None:
+			self._right(right, now, dt)
+		else:
+			self.pointer.reset()
+			self.pinch.reset()
+			self.openness.reset()
+			self._aim = None
+		self._left(left, now, dt)
+
+		# Every tracked hand lights the field: skeleton as constellation,
+		# fingertips shedding sparks when they move.
+		for hand in hands:
+			self._light_hand(hand, dt)
+
+		if now - self._last_hands_time > self.IDLE_SECONDS:
+			self._ghost(now, dt)
+
+		f.step(dt)
+		self._maybe_render()
+		self._redraw_hud(hands, now)
+		return False
+
+	def _to_field(self, x, y, hand):
+		sx, sy = ag.frame_to_screen(x, y, hand.frame_w, hand.frame_h, self.W, self.H)
+		return sx / self.zoom, sy / self.zoom
+
+	def _right(self, hand, now, dt):
+		f = self.engine
+		mx, my = hand.point(c.MIDDLE_IDX)
+		sx, sy = ag.frame_to_screen(mx, my, hand.frame_w, hand.frame_h, self.W, self.H)
+		sx, sy = self.pointer(sx, sy, now)
+		x, y = sx / self.zoom, sy / self.zoom
+		prev = self._aim
+		vx = vy = 0.0
+		step = 0.0
+		if prev is not None:
+			vx, vy = (x - prev[0]) / dt, (y - prev[1]) / dt
+			step = math.hypot(x - prev[0], y - prev[1])
+		self._aim = (x, y)
+
+		pinching = self.pinch.update(hand.pinch_dist(c.INDEX_IDX))
+		burst = self.openness.update(hand.openness(), now)
+		o = self.openness.value
+
+		# Clench -> gather. Even an open hand has a faint pull, so motes
+		# always lazily orbit the fingertip.
+		pull = (1.0 - o) ** 2
+		f.attractors.append((x, y, 0.10 + 0.90 * pull, f.k * (190.0 + 170.0 * pull)))
+		f.stirs.append((x, y, vx * 0.6, vy * 0.6))
+
+		if burst > 0.0:
+			f.burst(x, y, burst, pal=f.stroke_pal())
+
+		if pinching and prev is not None:
+			count = int(min(80, 10 + step * 0.55))
+			f.emit_ink(
+				prev[0], prev[1], x, y, count, vx, vy,
+				pal0=f.stroke_pal(), pal1=f.stroke_pal(step * 0.0012),
+				bright=0.95, life=5.5, spread=18.0,
+			)
+
+	def _light_hand(self, hand, dt):
+		f = self.engine
+		xs, ys, ints = skeleton_points(hand, lambda x, y: self._to_field(x, y, hand))
+		base = 0.12 if hand.label == 'Right' else 0.62
+		f.draw_points(xs, ys, ints * 0.9, base)
+		for tip in (c.THUMB_IDX, c.INDEX_IDX, c.MIDDLE_IDX, c.RING_IDX, c.PINKY_IDX):
+			x, y = self._to_field(*hand.point(tip), hand)
+			key = (hand.label, tip)
+			prev = self._tips.get(key)
+			self._tips[key] = (x, y)
+			if prev is None:
+				continue
+			vx, vy = (x - prev[0]) / dt, (y - prev[1]) / dt
+			speed = math.hypot(vx, vy)
+			if speed > 200.0 * f.k:
+				f.sparks(x, y, vx * 0.5, vy * 0.5, min(3, int(speed / (260.0 * f.k)) + 1), base + tip * 0.012)
+
+	def _left(self, hand, now, dt):
+		f = self.engine
+		if hand is None:
+			self.left_pose.reset()
+			self.roll_filter.reset()
+			self.palette_latch.update(False, now)
+			self._ease_time(1.0, dt)
+			return
+
+		pose = self.left_pose.update(ag.left_pose(hand.fingers_out), now)
+		rate = ag.tilt_rate(self.roll_filter(hand.roll_degrees(), now))
+
+		label = value = None
+		if pose == 'one':
+			f.adjust_hue(rate * self.HUE_RATE * dt)
+			label, value = 'COLOUR', f.hue
+		elif pose == 'two':
+			f.adjust_glow(rate * self.GLOW_RATE * dt)
+			label, value = 'GLOW', (math.log(f.glow) - math.log(0.5)) / (math.log(3.5) - math.log(0.5))
+		elif pose == 'three':
+			f.adjust_swirl(rate * self.SWIRL_RATE * dt)
+			label, value = 'FLOW', f.swirl / 3.0
+		elif pose == 'four':
+			f.adjust_halflife(rate * self.TRAIL_RATE * dt)
+			label, value = 'TRAILS', (math.log(f.halflife) - math.log(0.08)) / (math.log(5.0) - math.log(0.08))
+		if label is not None and abs(rate) > 0.02:
+			self._gauge = (label, value, rate, now + 1.4)
+
+		self._ease_time(0.03 if pose == 'fist' else 1.0, dt)
+
+		if self.palette_latch.update(pose == 'thumb', now):
+			self.next_palette()
+
+	def _ease_time(self, target, dt):
+		self._time_scale += (target - self._time_scale) * min(1.0, 5.0 * dt)
+		self.engine.set_timescale(self._time_scale)
+
+	def _ghost(self, now, dt):
+		"""The idle ghost painter: a slow Lissajous wisp that paints, plus
+		an occasional soft burst, so an unattended screen is still alive."""
+		f = self.engine
+		t = now - self._start
+		x = (0.5 + 0.31 * math.sin(0.31 * t) + 0.09 * math.sin(0.93 * t)) * f.w
+		y = (0.5 + 0.27 * math.sin(0.43 * t + 1.0) + 0.08 * math.cos(1.13 * t)) * f.h
+		prev = self._ghost_prev or (x, y)
+		self._ghost_prev = (x, y)
+		vx, vy = (x - prev[0]) / dt, (y - prev[1]) / dt
+		f.attractors.append((x, y, 0.2, f.k * 220.0))
+		f.stirs.append((x, y, vx * 0.5, vy * 0.5))
+		if math.sin(0.19 * t) > -0.35:
+			f.emit_ink(prev[0], prev[1], x, y, 14, vx, vy, f.stroke_pal(), f.stroke_pal(0.002), bright=0.85, life=4.5)
+		cycle = int(t / 9.0)
+		if cycle != self._ghost_burst and t % 9.0 > 8.0:
+			self._ghost_burst = cycle
+			f.burst(x, y, 0.55, f.stroke_pal())
+
+	# ---- drawing ---------------------------------------------------------------------------
+
+	def _maybe_render(self):
+		"""Render the field -- unless frames are taking too long, in which
+		case render every other frame. The simulation still steps every
+		frame (cheap) and trails/streaks account for the skipped time, so it
+		stays smooth; what it protects is the hand tracking, which must not
+		wait on drawing."""
+		start = time.perf_counter()
+		self._frame_no = getattr(self, '_frame_no', 0) + 1
+		skip = getattr(self, '_skip', False)
+		if skip and self._frame_no % 2:
+			return
+		self._present(self.engine.render())
+		took = time.perf_counter() - start
+		# smoothed cost of a render+present; skip when rendering eats a big part of the frame budget
+		self._render_cost = 0.8 * getattr(self, '_render_cost', took) + 0.2 * took
+		self._skip = self._render_cost > 0.018
+
+	def _present(self, image):
+		self._photo.paste(image)
+		if self._big is not None:
+			self.canvas.tk.call(str(self._big), 'copy', str(self._photo), '-zoom', self.zoom, self.zoom)
+
+	def _redraw_hud(self, hands, now):
+		cv = self.canvas
+		cv.delete('hud')
+		if self.overlay.debug:
+			self.window.draw_debug(hands)
+
+		if self._gauge is not None:
+			label, value, rate, until = self._gauge
+			if now > until:
+				self._gauge = None
+			else:
+				x, y, w = self.W / 2 - 130, self.H * 0.17, 260
+				cv.create_text(self.W / 2, y - 16, text=label, fill='#dfe6ff', font=('Segoe UI', 12, 'bold'), tags='hud')
+				cv.create_rectangle(x, y, x + w, y + 6, fill='#1c2030', outline='', tags='hud')
+				cv.create_rectangle(x, y, x + w * min(max(value, 0.0), 1.0), y + 6, fill='#cfd8ff', outline='', tags='hud')
+				cv.create_text(
+					x - 18 if rate < 0 else x + w + 18, y + 3, text='◀' if rate < 0 else '▶',
+					fill='#ffffff', font=('Segoe UI', 12), tags='hud',
+				)
+
+		idle = now - self._last_hands_time > 1.0
+		if idle and not self._paused:
+			cv.create_text(
+				self.W / 2, self.H * 0.5, text='raise your hands', fill='#7d86a8',
+				font=('Segoe UI', 13), tags='hud',
+			)
+		elif now - self._start < 30.0 or not hands:
+			cv.create_text(
+				self.W / 2, 22, fill='#4d5575', font=('Segoe UI', 10), tags='hud',
+				text='pinch to ignite   |   clench to gather, snap open to burst   |   left hand: tilt to tune   |   fist stops time   |   shaka = pause',
+			)
+
+		if self._paused:
+			self.window.draw_banner('Paused')
+		if self._toast is not None:
+			text, until = self._toast
+			if now > until:
+				self._toast = None
+			else:
+				cv.create_text(
+					self.W / 2, self.H * 0.08, text=text, fill='#f2f4ff',
+					font=('Segoe UI', 20, 'bold'), tags='hud',
+				)

@@ -9,7 +9,7 @@ MUSIC = 'music'
 # (id, label, one-line description) -- display order.
 MODES = [
 	(CONTROL, 'Control', 'Move the cursor, click, type, zoom and scroll -- your hands run the computer.'),
-	(PAINT, 'Paint', 'A canvas: pinch to paint with your right hand, dial colour and brush with your left.'),
+	(PAINT, 'Paint', 'Paint with living light: pinch to ignite, clench to gather, snap open to burst; tilt your left hand to tune.'),
 	(MUSIC, 'Music', 'Play an instrument in the air: strum a harp, play keys, or wave a theremin.'),
 ]
 
@@ -18,7 +18,7 @@ MODE_LABELS = {m[0]: m[1] for m in MODES}
 
 # Instruments inside Music mode -- display order. The first is the default.
 INSTRUMENTS = [
-	('harp', 'Harp', 'Sweep your fingers across the strings to strum.'),
+	('harp', 'Harp', 'Sweep your index finger across the strings to strum.'),
 	('keys', 'Keys', 'Pinch over a key to play it; slide while pinched for a glissando.'),
 	('theremin', 'Theremin', 'Move your hand left/right for pitch. Fist = silence.'),
 ]

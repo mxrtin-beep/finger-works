@@ -31,7 +31,7 @@ FRAME_W, FRAME_H = 640, 480
 SCALE_PX = 110.0
 
 
-def make_hand(label='Right', cx=330.0, cy=330.0, out=FIST, pinch=None):
+def make_hand(label='Right', cx=330.0, cy=330.0, out=FIST, pinch=None, roll=0.0):
 	"""A Hand with its wrist at camera pixel (cx, cy).
 
 	`pinch`: None, 'index' / 'ring' (thumb touching that fingertip), or
@@ -52,6 +52,11 @@ def make_hand(label='Right', cx=330.0, cy=330.0, out=FIST, pinch=None):
 		local[j2] = (base[0] + (end[0] - base[0]) / 3, base[1] + (end[1] - base[1]) / 3)
 		local[j3] = (base[0] + 2 * (end[0] - base[0]) / 3, base[1] + 2 * (end[1] - base[1]) / 3)
 		local[tip] = end
+
+	if roll:
+		# tilt the whole hand about the wrist; positive leans toward +x (the user's right)
+		a = np.radians(roll)
+		local = {i: (x * np.cos(a) + y * np.sin(a), -x * np.sin(a) + y * np.cos(a)) for i, (x, y) in local.items()}
 
 	abs_lm = np.zeros((21, 3))
 	rel_lm = np.zeros((21, 3))

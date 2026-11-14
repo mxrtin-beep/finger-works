@@ -234,7 +234,7 @@ FingerWorks has three ways of being used, switched with the control bar's
 | Mode | Purpose |
 |---|---|
 | **Control** | The default. Hands drive the computer. Everything under "Gestures" below. |
-| **Paint** | Fullscreen canvas: right hand paints, left hand dials the brush. |
+| **Paint** | Fullscreen living-light piece: right hand ignites/gathers/bursts, left hand tunes by tilting. |
 | **Music** | Fullscreen instrument: left hand picks chords/volume, right hand plays. |
 
 Switching modes lets go of whatever the old one held: a pressed mouse
@@ -256,9 +256,9 @@ What the artistic modes have in common:
 - The canvas is a normal always-on-top window that never takes keyboard
   focus. The control bar is kept above it. **Escape** and **Quit** still
   quit.
-- Hand position maps to the screen with a margin (`art_gestures.
-  FRAME_MARGIN_X/Y`) so the screen's edges are reachable without your
-  hand leaving the camera's view, and pointer motion goes through a
+- Hand position maps to the screen with generous margins (`art_gestures.
+  FRAME_MARGIN_X/Y`: the central ~56% x ~48% of the camera frame covers
+  the whole screen) so you can keep your hand well back, fully in view, and pointer motion goes through a
   one-euro filter: steady when your hand is still, responsive when it
   moves.
 - The **left hand's label stability** delay from Control mode doesn't
@@ -267,51 +267,62 @@ What the artistic modes have in common:
 
 ### Paint mode
 
-**Right hand.** The pen tip is the midpoint of the thumb and index
-fingertips (or of the thumb and ring fingertips while erasing), not the
-middle fingertip Control mode steers with -- while pinching, the middle
-finger drifts a lot but the pinch point stays put.
+Paint with living light (`lightfield.py`, driven by `paint.py`). The
+screen is a field of luminous motes drifting through a divergence-free
+"curl" flow -- alive on its own -- and your hands act on it. Frames
+accumulate into a float framebuffer that decays by a *half-life*, so
+everything leaves long-exposure trails, then a two-scale bloom turns the
+bright parts into glow.
 
-| Gesture | Action |
+**Right hand.** The aim point is the **middle fingertip** (as in Control
+mode), smoothed with a one-euro filter.
+
+| Gesture | Effect |
 |---|---|
-| Thumb + index pinch | Paint. Held pinch = continuous stroke. |
-| Thumb + ring pinch | Erase (ring wins if both somehow register, like right-click over left-click in Control mode). |
+| Thumb + index pinch | **Ignite**: emit bright, long-lived "ink" motes along the path from last frame's aim to this frame's (so a fast stroke is a continuous line). Ink keeps some of the stroke's velocity and then drifts with the flow. Colour shades along the stroke. |
+| Clench (openness -> 0) | **Gather**: an attractor at the aim point, strength `0.1 + 0.9 (1-openness)^2`, with a sideways component (motes orbit) and extra drag near the centre (they condense into a core). Even an open hand has a faint pull. |
+| Snap open | **Burst**: an expanding shockwave ring that shoves and flashes motes, plus a spray of fresh ink. Needs a *recent clench* (within 0.7 s) and a fast opening (openness velocity > 2.2/s); one burst per clench, 0.5 s cooldown; strength follows the speed. |
+| Moving | **Stir**: motes near the fingertip are dragged along with it. Every fingertip of both hands sheds sparks when moving fast, and both hands are drawn as glowing skeletons. |
 
-Pinches use hysteresis: they close at the usual cutoff
-(`LEFT_CLICK_CUTOFF`/`RIGHT_CLICK_CUTOFF`) but only release at 1.35x that,
-so a pinch hovering at the threshold doesn't shatter a stroke into dots.
+Pinch uses hysteresis (closes at `LEFT_CLICK_CUTOFF`, opens at 1.35x).
+"Openness" (`Hand.openness()`) is the mean wrist-to-fingertip distance of
+the four fingers, mapped so a fist is 0 and a spread hand is 1
+(`OPEN_FIST_DIST`/`OPEN_SPREAD_DIST` in `art_gestures.py`).
 
-**Left hand -- dials.** The *pose* (thumb ignored except where noted)
-chooses what's adjusted; *moving your hand* adjusts it, relative to where
-it was when the pose began, so changing pose never makes a value jump.
+**Left hand -- tilt joystick.** The pose picks a parameter; the hand's
+*roll* (`Hand.roll_degrees()`: the angle of the wrist -> middle-knuckle
+line from vertical) sets its *rate of change* via `tilt_rate()`: nothing
+inside a 12 degree dead zone, ramping to full speed at 40 degrees, sign
+following the lean. Value moves for as long as you hold the tilt, so there
+is no range limit.
 
-| Pose | Dial | Movement | Gain |
+| Pose | Parameter | Full-tilt rate (`PaintSession`) | Range |
 |---|---|---|---|
-| Index only | Hue | up/down (wraps) | `PaintSession.HUE_GAIN` |
-| Index + middle | Brush size (2-120 px, exponential) | up/down | `SIZE_GAIN` |
-| Index + middle + ring | Saturation / brightness | up/down / left/right | `SAT_GAIN` / `VAL_GAIN` |
-| Four fingers (or open hand) | Brush style / symmetry | left/right / up/down, stepped | `STYLE_STEP` / `SYMMETRY_STEP` |
-| Thumb alone, held 0.7s | Undo last stroke | -- | -- |
-| Fist, or anything else | Nothing | -- | -- |
+| One finger | Colour (palette rotation) | `HUE_RATE` 0.45 turns/s | wraps |
+| Two fingers | Glow (bloom radius/strength) | `GLOW_RATE` 1.1 (log, per s) | 0.5 - 3.5 |
+| Three fingers | Flow (how hard the flow stirs) | `SWIRL_RATE` 1.4 /s | 0 - 3 |
+| Four fingers / open | Trails (half-life) | `TRAIL_RATE` 1.2 (log, per s) | 0.08 - 5 s |
+| Fist (held) | Time stops (timescale eases to 0.03) | -- | -- |
+| Thumb alone, held 0.7 s | Next palette | -- | 5 palettes |
 
-A "gain" is in camera-frame fractions: `HUE_GAIN = 1.5` means moving your
-hand through two thirds of the frame's height cycles the whole colour
-wheel. They're class attributes in `paint.py`.
+A small gauge appears at the top of the screen while you tune.
 
-**Brushes:** Ink (width follows speed -- fast strokes thin out), Glow
-(additive soft halo with a hot core), Spray (scattered specks), Rainbow
-(hue advances along the stroke).
+**Idle:** after `IDLE_SECONDS` (4 s) with no hands a ghost painter -- a
+slow Lissajous wisp that paints, with an occasional soft burst -- takes
+over so an unattended screen is never blank.
 
-**Symmetry:** Off, Mirror, Mirror x4, Kaleidoscope 6 / 8 / 12. Each
-rotation is drawn once and (except Off) again mirrored; the eraser ignores
-symmetry so it rubs out exactly what's under the tip.
+**Performance.** The field is simulated and rendered at ~1000px wide and
+scaled up by an integer factor inside Tk (a fast C copy), so a 1080p
+screen renders at 960x540. If drawing gets expensive, rendering drops to
+every other frame while the simulation still steps every frame (trail decay
+and streaks use the elapsed time, so it stays smooth); hand tracking never
+waits on drawing. Debug mode (`--debug`) shows the actual frame rate.
 
-**Canvas.** Painting happens in an off-screen buffer (native resolution up
-to 1920px wide, downscaled above that) and only the 256px tiles a stroke
-touched are re-uploaded each frame. Undo keeps the last 12 states
-(`MAX_UNDO`); **Clear** is undoable too. **Save** writes
-`painting-YYYYMMDD-HHMMSS.png` to `~/Pictures/FingerWorks` (or `~/
-FingerWorks` with no Pictures folder).
+**Save** writes the current frame, smoothly upscaled to full screen
+resolution, as `light-YYYYmmdd-HHMMSS.png` in `~/Pictures/FingerWorks`
+(or `~/FingerWorks`). **Reset** wipes the light and ink; **Palette**
+cycles palettes. The field survives leaving and returning to Paint within
+a run.
 
 ### Music mode
 
@@ -330,9 +341,13 @@ Every note and chord is drawn from the key and scale in Settings (see
 
 | Instrument | Gesture |
 |---|---|
-| **Harp** | Ten strings tuned to the current chord (root/3rd/5th upward, ~3 octaves). Any of your five fingertips crossing a string plucks it. Pluck speed sets loudness; position sets stereo pan. A string needs a crossing at >=170 px/s measured over 4 frames (so tracking jitter on a resting hand doesn't pluck), and re-triggers at most every 80 ms. |
+| **Harp** | Ten strings tuned to the current chord (root/3rd/5th upward, ~3 octaves), in a compact band in the top half of the screen. Only the **index fingertip** plucks -- point and strum -- so a large hand moving into place can't set strings off by accident. Pluck speed sets loudness; position sets stereo pan. A string needs a crossing at >=170 px/s measured over 4 frames (so tracking jitter on a resting hand doesn't pluck), and re-triggers at most every 80 ms. |
 | **Keys** | Eleven-plus keys of the scale across two octaves (more for 7-note scales). Pinch thumb + index over a key to play it; strike nearer the bottom of a key for a harder note. Slide while pinched to glissando -- a neighbouring key only takes over once the pointer is clearly inside it (hysteresis). Keys in the current chord are lit. Release = the note fades. |
 | **Theremin** | A continuous tone: hand left/right = pitch over three octaves (pulled 70% toward the nearest scale note, with glide), hand height = vibrato depth, fist or no hand = silent. Volume is the left hand's height. |
+
+**Chord pad.** A soft, seamlessly-looping chord (`synth.render_pad`: root, then an octave-up triad, each note doubled with a quarter-hertz partner for a slow chorus shimmer, with a gentle tremolo) plays under every instrument, on two reserved mixer channels that crossfade over 0.7 s when the chord changes. It exists so a chord change is always *audible* -- Keys' notes are scale notes and so identical whatever the chord. Its level follows the left hand's height.
+
+**Backdrop.** Music reuses the light field of Paint as a quiet backdrop (dim, a single calm blue-violet, soft shockwaves): each pluck/key sends a ring of light out in the note's colour, the theremin leaves a coloured trail, and a chord change pulses the middle of the screen.
 
 **Sound** is synthesized with numpy and played through `pygame.mixer`
 (`synth.py`) -- harp is an additive "plucked string" (upper harmonics decay
@@ -471,9 +486,10 @@ special-casing for each character.
 
     python -m unittest discover -s tests -t .
 
-`tests/` covers the pure logic: gesture helpers (`art_gestures.py`),
-music theory, the paint engine and the synth's pitch/envelope/click-free
-behaviour, and settings persistence (which skips itself without OpenCV).
+`tests/` covers the pure logic: gesture helpers (`art_gestures.py`: poses,
+debouncing, openness, tilt, burst detection), music theory, the light
+engine (flow, attractors, shockwaves, decay, bloom) and the synth's
+pitch/envelope/click-free behaviour (including the chord pad's loop seam), and settings persistence (which skips itself without OpenCV).
 `tests/handmodel.py` builds synthetic hands whose finger-out and pinch
 distances are scaled to the real cutoffs in `constants.py`.
 
