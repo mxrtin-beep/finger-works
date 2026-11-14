@@ -18,7 +18,7 @@ nltk
 # also only installable where a prebuilt wheel exists for your Python
 # version; it has no prebuilt wheel yet for very new Python releases (e.g.
 # fails to build from source on Python 3.14, missing MSVC build
-# tools/distutils) -- not worth chasing unless you already have a full
-# Visual Studio Build Tools setup. If you want it and your Python version
-# has a wheel for it, `pip install pygame` separately; nothing else in
-# this project depends on it.
+# tools/distutils). On such a Python, install `pygame-ce` instead -- a
+# maintained drop-in fork with prebuilt wheels that is still imported as
+# `pygame` (install one or the other, not both). Otherwise `pip install
+# pygame` separately; nothing else in this project depends on it.

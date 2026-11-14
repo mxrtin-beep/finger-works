@@ -600,6 +600,8 @@ class MusicSession:
 		cv.delete('all')
 		self.instrument.draw(cv, now)
 		self.window.draw_ghost_hands(hands, tag='ghost', right_color='#2c4a66', left_color='#66304f')
+		if self.overlay.debug:
+			self.window.draw_debug(hands, tag='dbg')
 
 		# Header: instrument, key, chord chips.
 		label = modes.INSTRUMENT_LABELS[self.instrument.name]

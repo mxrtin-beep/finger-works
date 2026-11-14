@@ -605,6 +605,8 @@ class PaintSession:
 		eng = self.engine
 
 		self.window.draw_ghost_hands(hands)
+		if self.overlay.debug:
+			self.window.draw_debug(hands)
 
 		# Brush cursor.
 		if cursor is not None:

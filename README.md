@@ -115,9 +115,13 @@ C major pentatonic), so there are no wrong notes.
 - **Theremin** -- hand left/right is pitch (gently pulled toward the
   scale), hand height is vibrato, a fist is silence.
 
-Sound needs [`pygame`](https://pypi.org/project/pygame/) (`pip install
-pygame`; optional for the rest of FingerWorks). Without it the visuals
-still run and the window says so. All sounds are synthesized -- there are
+Sound needs `pygame` (optional for the rest of FingerWorks). Without it
+the visuals still run and the window says so. Install it with
+`pip install pygame`, **or `pip install pygame-ce` if that fails** -- on
+newer Pythons (3.14 at the time of writing) plain `pygame` has no
+prebuilt Windows wheel and tries to compile from source, which usually
+errors out. `pygame-ce` is a maintained drop-in fork with prebuilt wheels;
+it's still imported as `pygame`. Install one or the other, not both. All sounds are synthesized -- there are
 no audio files to ship.
 
 See `INSTRUCTIONS.md` for the complete reference.

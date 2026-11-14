@@ -957,6 +957,7 @@ def main(settings):
 	# current word (see below), unlike button_list above. Starts empty so
 	# there's nothing to draw/hit-test before the first frame computes it.
 	suggestion_buttons = []
+	_reported_frame_errors = set()
 
 	if settings.get('mode', modes.CONTROL) != modes.CONTROL:
 		start_mode(settings['mode'])
@@ -1309,6 +1310,13 @@ def main(settings):
 				# later typed out somewhere else entirely (e.g. Notepad) by a
 				# stray Paste. Log it and skip to the next frame instead.
 				print(f'[WARN] Skipping a frame due to an unexpected error: {exc}')
+				# The one-line message above isn't enough to find where it
+				# came from -- print the full traceback the first time each
+				# distinct error shows up (not every frame: it'd flood).
+				signature = (type(exc).__name__, str(exc))
+				if signature not in _reported_frame_errors:
+					_reported_frame_errors.add(signature)
+					traceback.print_exc()
 				continue
 
 	finally:

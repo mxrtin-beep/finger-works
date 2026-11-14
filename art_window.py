@@ -84,6 +84,36 @@ class ArtWindow:
 			for x, y in pts:
 				c.create_oval(x - 3, y - 3, x + 3, y + 3, fill=color, outline='', tags=tag)
 
+	def draw_debug(self, hands, tag='hud'):
+		"""Debug mode only: what the session thinks it's seeing, drawn in
+		the bottom-left -- frame rate, and for each hand its label, which
+		fingers read as extended (T I M R P, '-' = folded), the two pinch
+		distances against their cutoffs, and whether it reads as the pause
+		sign. Answers "is it even seeing my hand / which pose is it
+		reading" at a glance."""
+		import time
+		import constants as c
+		now = time.time()
+		last = getattr(self, '_dbg_last', None)
+		self._dbg_last = now
+		if last is not None:
+			fps = 1.0 / max(now - last, 1e-3)
+			self._dbg_fps = fps if getattr(self, '_dbg_fps', None) is None else 0.9 * self._dbg_fps + 0.1 * fps
+		lines = [f'fps {getattr(self, "_dbg_fps", 0.0):.0f}   hands {len(hands)}']
+		for hand in hands:
+			out = ''.join(ch if on else '-' for ch, on in zip('TIMRP', hand.fingers_out))
+			lines.append(
+				f'{hand.label:5s} {out}  pinch idx {hand.pinch_dist(c.INDEX_IDX):.2f}'
+				f' (<{c.LEFT_CLICK_CUTOFF:.2f})  ring {hand.pinch_dist(c.RING_IDX):.2f}'
+				f' (<{c.RIGHT_CLICK_CUTOFF:.2f})  {"SHAKA" if ag.is_shaka(hand.fingers_out) else ""}'
+			)
+		y = self.height - 130
+		for i, text in enumerate(lines):
+			self.canvas.create_text(
+				16, y + i * 18, anchor='nw', text=text, fill='#7fd17f',
+				font=('Consolas', 11), tags=tag,
+			)
+
 	def draw_banner(self, text, y=None, color='#e67e22', tag='hud'):
 		"""One centered line of status text (paused, no audio, ...)."""
 		y = self.height * 0.5 if y is None else y
