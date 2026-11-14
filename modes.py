@@ -18,7 +18,7 @@ MODE_LABELS = {m[0]: m[1] for m in MODES}
 
 # Instruments inside Music mode -- display order. The first is the default.
 INSTRUMENTS = [
-	('harp', 'Harp', 'Sweep your index finger across the strings to strum.'),
+	('harp', 'Harp', 'Sweep your fingers across the strings to strum.'),
 	('keys', 'Keys', 'Pinch over a key to play it; slide while pinched for a glissando.'),
 	('theremin', 'Theremin', 'Move your hand left/right for pitch. Fist = silence.'),
 ]

@@ -121,7 +121,7 @@ C major pentatonic), so there are no wrong notes.
 **Next instrument** button also switch between them):
 
 - **Harp** -- a compact harp in the top half of the screen: sweep your
-  **index finger** across ten strings to strum. They're tuned to the
+  **fingers** across ten strings to strum. They're tuned to the
   current chord, and plucks pan left-to-right with the string.
 - **Keys** -- pinch thumb + index over a key to play it; slide while
   pinched for a glissando. Keys that belong to the current chord are lit.

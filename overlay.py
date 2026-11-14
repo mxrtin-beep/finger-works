@@ -110,7 +110,7 @@ LEFT HAND -- harmony & dynamics
  \U0001F44D  Thumb alone, held a moment -- next instrument
 
 RIGHT HAND -- the instrument
- Harp -- sweep your index finger across the strings.
+ Harp -- sweep your fingers across the strings.
    They are tuned to the current chord.
  Keys -- pinch thumb + index over a key to play it. Slide
    while pinched for a glissando. Keys in the current

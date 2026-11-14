@@ -341,7 +341,7 @@ Every note and chord is drawn from the key and scale in Settings (see
 
 | Instrument | Gesture |
 |---|---|
-| **Harp** | Ten strings tuned to the current chord (root/3rd/5th upward, ~3 octaves), in a compact band in the top half of the screen. Only the **index fingertip** plucks -- point and strum -- so a large hand moving into place can't set strings off by accident. Pluck speed sets loudness; position sets stereo pan. A string needs a crossing at >=170 px/s measured over 4 frames (so tracking jitter on a resting hand doesn't pluck), and re-triggers at most every 80 ms. |
+| **Harp** | Ten strings tuned to the current chord (root/3rd/5th upward, ~3 octaves), in a compact band in the top half of the screen. Any of your five fingertips crossing a string plucks it, so a whole-hand sweep is a strum. Pluck speed sets loudness; position sets stereo pan. A string needs a crossing at >=170 px/s measured over 4 frames (so tracking jitter on a resting hand doesn't pluck), and re-triggers at most every 80 ms. |
 | **Keys** | Eleven-plus keys of the scale across two octaves (more for 7-note scales). Pinch thumb + index over a key to play it; strike nearer the bottom of a key for a harder note. Slide while pinched to glissando -- a neighbouring key only takes over once the pointer is clearly inside it (hysteresis). Keys in the current chord are lit. Release = the note fades. |
 | **Theremin** | A continuous tone: hand left/right = pitch over three octaves (pulled 70% toward the nearest scale note, with glide), hand height = vibrato depth, fist or no hand = silent. Volume is the left hand's height. |
 

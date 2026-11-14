@@ -88,7 +88,7 @@ class _Instrument:
 
 class Harp(_Instrument):
 	name = 'harp'
-	footer = 'sweep your index finger across the strings   |   left hand: 1-4 fingers = chord, height = volume'
+	footer = 'sweep your fingers across the strings   |   left hand: 1-4 fingers = chord, height = volume'
 
 	STRINGS = 10
 	X0, X1 = 0.10, 0.90
@@ -145,10 +145,11 @@ class Harp(_Instrument):
 		self._last_t = now
 		top, bottom = s.H * self.Y0, s.H * self.Y1
 
-		# Only the index fingertip plucks: point and strum. With all five
-		# tips live, a big hand drifting into place sets strings off by
-		# accident, and strumming stops being intentional.
-		for tip in (c.INDEX_IDX,):
+		# Every fingertip plucks, so a whole-hand sweep is a strum. (The
+		# harp is compact and sits in the top half of the screen so the hand
+		# doesn't brush strings on its way there; the speed threshold and
+		# multi-frame window below ignore a hand that's merely drifting.)
+		for tip in _FINGERTIPS:
 			x, y = right.point(tip)
 			x, y = ag.frame_to_screen(x, y, right.frame_w, right.frame_h, s.W, s.H)
 			prev = self._tips.get(tip)
@@ -246,7 +247,7 @@ class Harp(_Instrument):
 
 		# Fingertips, so you can see what's about to cross a string.
 		for x, y in self._tips.values():
-			cv.create_oval(x - 7, y - 7, x + 7, y + 7, outline='#e8ecff', width=2)
+			cv.create_oval(x - 5, y - 5, x + 5, y + 5, outline='#aab4d8', width=1)
 
 
 # =====================================================================
@@ -601,7 +602,16 @@ class MusicSession:
 
 	def light(self, sx, sy, strength, midi):
 		"""A note was played at screen point (sx, sy): send a ring of light
-		out from it, coloured by the note's pitch class."""
+		out from it, coloured by the note's pitch class.
+
+		Throttled: a whole-hand strum plucks many strings within a few
+		milliseconds, and a burst each would stack into a wall of light
+		that hides the instrument. (The little expanding colour rings on
+		the strings themselves aren't affected -- one per pluck.)"""
+		now = time.time()
+		if now - getattr(self, '_last_light', 0.0) < 0.12:
+			return
+		self._last_light = now
 		self.field.burst(sx / self.zoom, sy / self.zoom, strength * 0.7, pal=(int(round(midi)) % 12) / 12.0)
 
 	def _apply_pad(self):
