@@ -20,17 +20,16 @@ Pause is the usual shaka sign. Key and scale come from Settings.
 """
 
 import math
+import random
 import time
 from collections import deque
 
-from PIL import Image
 
 import art_gestures as ag
 import constants as c
 import modes
 import music_theory as mt
 from art_window import ArtWindow, hsv_hex
-from lightfield import LightField, PALETTE_NAMES, skeleton_points
 from synth import AudioEngine, NoteBank, PadVoice, ThereminVoice
 
 
@@ -392,7 +391,7 @@ class Theremin(_Instrument):
 		self._pos = None
 		self._level = 0.0
 		self._sounding = False
-		self._last_pos = None
+		self._last_glow = 0.0
 
 	def start(self):
 		self.s.theremin.start()
@@ -423,16 +422,9 @@ class Theremin(_Instrument):
 		s.theremin.set(freq=mt.midi_to_freq(midi), amp=amp, vibrato=vibrato)
 		self._level = amp
 		self._trail.append((sx, sy, now, midi))
-		if not fist:
-			prev = self._last_pos or (sx / s.zoom, sy / s.zoom)
-			field = s.field
-			x, y = sx / s.zoom, sy / s.zoom
-			pal = (round(midi) % 12) / 12.0
-			field.emit_ink(prev[0], prev[1], x, y, int(4 + 8 * amp), 0.0, 0.0, pal, pal, bright=0.8, life=2.5, spread=12.0)
-			field.attractors.append((x, y, 0.25, field.k * 160.0))
-			self._last_pos = (x, y)
-		else:
-			self._last_pos = None
+		if not fist and now - self._last_glow > 0.07:
+			self._last_glow = now
+			s.light(sx, sy, 0.12 + 0.2 * amp, midi)
 
 	def draw(self, cv, now):
 		s = self.s
@@ -493,25 +485,16 @@ class MusicSession:
 		self.theremin = ThereminVoice(self.engine)
 		self.pad = PadVoice(self.engine)
 
-		# The living backdrop (see lightfield.py): lighter than Paint's
-		# since Music also redraws instruments and plays audio every frame.
-		import tkinter as tk
-		from PIL import ImageTk
-		self.zoom = max(2, math.ceil(self.W / 720))
-		iw, ih = math.ceil(self.W / self.zoom), math.ceil(self.H / self.zoom)
-		self.field = LightField(iw, ih, ambient=1400, ink=2600)
-		self.field.set_palette(PALETTE_NAMES.index('Prism'))
-		self.field.halflife = 0.45
-		self.field.swirl = 0.8
-		# Quiet backdrop, not a light show: dim, one calm blue-violet for the
-		# ambient motes, soft shockwaves, small bursts. The notes' own colours
-		# then stand out as accents instead of drowning the instrument.
-		self.field.exposure = 0.55
-		self.field.flash_gain = 0.25
-		self.field.burst_scale = 0.35
-		self.field.set_ambient_pal(0.64, 0.07)
-		self._photo = ImageTk.PhotoImage(Image.new('RGB', (iw, ih)))
-		self._big = tk.PhotoImage(master=self.canvas, width=iw * self.zoom, height=ih * self.zoom)
+		# Backdrop: pure vector drawing (a soft sky gradient, drifting stars,
+		# and glow halos that bloom at each note). Crisp at any resolution
+		# and cheap -- an earlier version rendered a pixel particle field
+		# here, which looked blocky when scaled up and cost real frame time.
+		rng = random.Random(7)
+		self._stars = [
+			(rng.random(), rng.random(), rng.random() * 6.28, 0.004 + 0.01 * rng.random(), 1 + (rng.random() < 0.2))
+			for _ in range(70)
+		]
+		self._halos = []          # [x, y, born, rgb, strength]
 		self._last_t = None
 
 		self.key = settings.get('music_key', mt.DEFAULT_KEY)
@@ -579,40 +562,11 @@ class MusicSession:
 		self.pad.stop()
 		self._apply_pad()
 
-	def _maybe_render(self):
-		"""Render the field -- unless frames are taking too long, in which
-		case render every other frame. The simulation still steps every
-		frame (cheap) and trails/streaks account for the skipped time, so it
-		stays smooth; what it protects is the hand tracking, which must not
-		wait on drawing."""
-		start = time.perf_counter()
-		self._frame_no = getattr(self, '_frame_no', 0) + 1
-		skip = getattr(self, '_skip', False)
-		if skip and self._frame_no % 2:
-			return
-		self._present(self.field.render())
-		took = time.perf_counter() - start
-		# smoothed cost of a render+present; skip when rendering eats a big part of the frame budget
-		self._render_cost = 0.8 * getattr(self, '_render_cost', took) + 0.2 * took
-		self._skip = self._render_cost > 0.018
-
-	def _present(self, image):
-		self._photo.paste(image)
-		self.canvas.tk.call(str(self._big), 'copy', str(self._photo), '-zoom', self.zoom, self.zoom)
-
 	def light(self, sx, sy, strength, midi):
-		"""A note was played at screen point (sx, sy): send a ring of light
-		out from it, coloured by the note's pitch class.
-
-		Throttled: a whole-hand strum plucks many strings within a few
-		milliseconds, and a burst each would stack into a wall of light
-		that hides the instrument. (The little expanding colour rings on
-		the strings themselves aren't affected -- one per pluck.)"""
-		now = time.time()
-		if now - getattr(self, '_last_light', 0.0) < 0.12:
-			return
-		self._last_light = now
-		self.field.burst(sx / self.zoom, sy / self.zoom, strength * 0.7, pal=(int(round(midi)) % 12) / 12.0)
+		"""A note was played at screen point (sx, sy): bloom a soft halo of
+		the note's colour there (see _draw_backdrop)."""
+		self._halos.append([sx, sy, time.time(), _pc_color(midi, 1.0, 0.6), strength])
+		del self._halos[:-16]
 
 	def _apply_pad(self):
 		chord = self.chord
@@ -657,18 +611,7 @@ class MusicSession:
 		self._update_left(left, now)
 		self.instrument.update(right, now)
 
-		dt = 1.0 / 30.0 if self._last_t is None else min(max(now - self._last_t, 1e-3), 0.1)
-		self._last_t = now
-		for hand in hands:
-			xs, ys, ints = skeleton_points(
-				hand, lambda x, y, h=hand: tuple(
-					v / self.zoom for v in ag.frame_to_screen(x, y, h.frame_w, h.frame_h, self.W, self.H)
-				),
-			)
-			self.field.draw_points(xs, ys, ints * 0.75, 0.62 if hand.label == 'Left' else 0.12)
 		self._apply_pad()
-		self.field.step(dt)
-		self._maybe_render()
 
 		self._redraw(hands, now)
 		return False
@@ -700,10 +643,46 @@ class MusicSession:
 
 	# --- HUD --------------------------------------------------------------------------
 
+	def _draw_backdrop(self, cv, now):
+		W, H = self.W, self.H
+		# Sky: a handful of horizontal bands fading navy -> deep violet.
+		bands = 10
+		for i in range(bands):
+			t = i / (bands - 1)
+			col = _hex(_mix((9, 12, 30), (24, 10, 34), t))
+			cv.create_rectangle(0, H * i / bands, W, H * (i + 1) / bands + 1, fill=col, outline='')
+		# Stars drifting slowly, twinkling.
+		for x, y, phase, speed, size in self._stars:
+			px = ((x + now * speed) % 1.0) * W
+			b = 0.35 + 0.35 * math.sin(now * 1.3 + phase)
+			col = _hex(_mix((24, 24, 44), (200, 210, 255), b))
+			cv.create_oval(px - size, y * H - size, px + size, y * H + size, fill=col, outline='')
+		# Glow halos: concentric discs from faint/large to bright/small, so
+		# the layers read as a smooth gradient.
+		self._halos = [h for h in self._halos if now - h[2] < 1.1]
+		layers = 9
+		for x, y, born, rgb, strength in self._halos:
+			age = (now - born) / 1.1
+			alpha = (1.0 - age) ** 1.6
+			radius = 30 + age * 170 * (0.6 + strength)
+			# Fade toward the sky colour at this height (not plain black),
+			# so the halo's edge disappears into the gradient behind it.
+			sky = _mix((9, 12, 30), (24, 10, 34), min(max(y / H, 0.0), 1.0))
+			for k in range(layers, 0, -1):
+				t = k / layers
+				glow = alpha * (1.0 - t) ** 1.2 * 0.95
+				if glow < 0.05:
+					continue        # ~transparent: drawing it would only paint sky over a neighbouring halo
+				cv.create_oval(
+					x - radius * t, y - radius * t, x + radius * t, y + radius * t,
+					fill=_hex(_mix(sky, rgb, glow)), outline='',
+				)
+
 	def _redraw(self, hands, now):
 		cv = self.canvas
 		cv.delete('all')
-		cv.create_image(0, 0, anchor='nw', image=self._big)
+		self._draw_backdrop(cv, now)
+		self.window.draw_ghost_hands(hands, tag='ghost', right_color='#2c4a66', left_color='#66304f')
 		self.instrument.draw(cv, now)
 		if self.overlay.debug:
 			self.window.draw_debug(hands, tag='dbg')

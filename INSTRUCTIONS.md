@@ -347,7 +347,7 @@ Every note and chord is drawn from the key and scale in Settings (see
 
 **Chord pad.** A soft, seamlessly-looping chord (`synth.render_pad`: root, then an octave-up triad, each note doubled with a quarter-hertz partner for a slow chorus shimmer, with a gentle tremolo) plays under every instrument, on two reserved mixer channels that crossfade over 0.7 s when the chord changes. It exists so a chord change is always *audible* -- Keys' notes are scale notes and so identical whatever the chord. Its level follows the left hand's height.
 
-**Backdrop.** Music reuses the light field of Paint as a quiet backdrop (dim, a single calm blue-violet, soft shockwaves): each pluck/key sends a ring of light out in the note's colour, the theremin leaves a coloured trail, and a chord change pulses the middle of the screen.
+**Backdrop.** Pure vector drawing, so it stays crisp at any resolution and costs almost nothing per frame: a soft navy-to-violet sky, slowly drifting twinkling stars, and glow halos (concentric discs fading into the sky) that bloom in the note's colour at each pluck/key press, alongside the expanding colour rings. The theremin leaves a trail of halos, and a chord change blooms one mid-screen. (Paint, by contrast, is rendered by the pixel light field -- see "Paint mode".)
 
 **Sound** is synthesized with numpy and played through `pygame.mixer`
 (`synth.py`) -- harp is an additive "plucked string" (upper harmonics decay
