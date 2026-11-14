@@ -79,7 +79,19 @@ class PaintSession:
 			tk.PhotoImage(master=self.canvas, width=iw * self.zoom, height=ih * self.zoom)
 			if self.zoom > 1 else None
 		)
-		self.canvas.create_image(0, 0, anchor='nw', image=self._big or self._photo, tags='bg')
+		self._bg_item = self.canvas.create_image(0, 0, anchor='nw', image=self._big or self._photo, tags='bg')
+
+		# Presentation tiers, best first (see _maybe_render): 'smooth' = a
+		# real interpolated upscale to the full screen size; 'fast' = Tk's
+		# blocky integer zoom, about half the cost; and either can also skip
+		# every other render. A 960px field shown on a 1080p screen is the
+		# case where this matters; at 1:1 there's nothing to smooth.
+		self._full = None
+		self._smooth = self.zoom > 1
+		self._smooth_retry_at = 0.0
+		self._smooth_tried_at = 0.0
+		self._smooth_penalty = 0.0
+		self._applied_smooth = None
 
 		self.pointer = ag.Pointer2D(min_cutoff=1.8, beta=0.015)
 		self.pinch = ag.Pinch(c.LEFT_CLICK_CUTOFF)
@@ -308,32 +320,75 @@ class PaintSession:
 	# ---- drawing ---------------------------------------------------------------------------
 
 	def _maybe_render(self):
-		"""Render the field -- unless frames are taking too long, in which
-		case render every other frame. The simulation still steps every
-		frame (cheap) and trails/streaks account for the skipped time, so it
-		stays smooth; what it protects is the hand tracking, which must not
-		wait on drawing."""
-		start = time.perf_counter()
+		"""Render the field and put it on screen, adapting to how fast this
+		machine is so drawing never starves hand tracking:
+
+		  smooth (full-size interpolated upscale, best looking)
+		    -> fast (Tk's blocky integer zoom)
+		    -> fast, rendering every other frame.
+
+		It steps down when the smoothed cost of a render+present is over
+		budget, and cautiously probes back up after things have been cheap
+		for a while (backing off if the better tier doesn't hold). The
+		simulation steps every frame regardless, and trails/streaks use the
+		elapsed time, so skipped renders stay smooth."""
+		now = time.perf_counter()
 		self._frame_no = getattr(self, '_frame_no', 0) + 1
-		skip = getattr(self, '_skip', False)
-		if skip and self._frame_no % 2:
+		if getattr(self, '_skip', False) and self._frame_no % 2:
 			return
 		self._present(self.engine.render())
-		took = time.perf_counter() - start
-		# smoothed cost of a render+present; skip when rendering eats a big part of the frame budget
-		self._render_cost = 0.8 * getattr(self, '_render_cost', took) + 0.2 * took
-		self._skip = self._render_cost > 0.018
+		took = time.perf_counter() - now
+		if self._frame_no <= 8:
+			# Warm-up: the first frames include allocating the full-screen
+			# image and are always slow -- not evidence about this machine.
+			self._render_cost = 0.012
+			return
+		cost = self._render_cost = 0.8 * getattr(self, '_render_cost', took) + 0.2 * took
+		now = time.perf_counter()
+
+		if self._smooth:
+			if cost > 0.034 and self.zoom > 1:
+				self._smooth = False                       # too slow: drop to the blocky zoom
+				self._smooth_penalty = min(self._smooth_penalty + 20.0, 80.0) if now - self._smooth_tried_at < 6.0 else 0.0
+				self._smooth_retry_at = now + 15.0 + self._smooth_penalty
+				self._render_cost = cost * 0.5
+		elif self.zoom > 1 and now > self._smooth_retry_at and cost < 0.011 and not self._skip:
+			self._smooth = True                            # cheap for a while: try smooth again
+			self._smooth_tried_at = now
+			self._render_cost = 0.03
+		self._skip = (not self._smooth or self.zoom == 1) and self._render_cost > 0.018
 
 	def _present(self, image):
-		self._photo.paste(image)
-		if self._big is not None:
-			self.canvas.tk.call(str(self._big), 'copy', str(self._photo), '-zoom', self.zoom, self.zoom)
+		if self._smooth and self.zoom > 1:
+			if self._full is None:
+				from PIL import ImageTk
+				self._full = ImageTk.PhotoImage(Image.new('RGB', (self.W, self.H)))
+			self._full.paste(image.resize((self.W, self.H), Image.BILINEAR))
+			wanted = self._full
+		else:
+			self._photo.paste(image)
+			if self._big is not None:
+				self.canvas.tk.call(str(self._big), 'copy', str(self._photo), '-zoom', self.zoom, self.zoom)
+			wanted = self._big or self._photo
+		if self._applied_smooth is not (wanted is self._full):
+			self.canvas.itemconfig(self._bg_item, image=wanted)
+			self._applied_smooth = wanted is self._full
+
+	def quality_label(self):
+		"""For the debug readout: which presentation tier is active."""
+		if self._smooth and self.zoom > 1:
+			return 'smooth'
+		return 'fast (skipping)' if getattr(self, '_skip', False) else 'fast'
 
 	def _redraw_hud(self, hands, now):
 		cv = self.canvas
 		cv.delete('hud')
 		if self.overlay.debug:
 			self.window.draw_debug(hands)
+			cv.create_text(
+				16, self.H - 150, anchor='nw', text=f'render: {self.quality_label()}  {1000 * getattr(self, "_render_cost", 0):.0f} ms',
+				fill='#7fd17f', font=('Consolas', 11), tags='hud',
+			)
 
 		if self._gauge is not None:
 			label, value, rate, until = self._gauge

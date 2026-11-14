@@ -311,12 +311,18 @@ A small gauge appears at the top of the screen while you tune.
 slow Lissajous wisp that paints, with an occasional soft burst -- takes
 over so an unattended screen is never blank.
 
-**Performance.** The field is simulated and rendered at ~1000px wide and
-scaled up by an integer factor inside Tk (a fast C copy), so a 1080p
-screen renders at 960x540. If drawing gets expensive, rendering drops to
-every other frame while the simulation still steps every frame (trail decay
-and streaks use the elapsed time, so it stays smooth); hand tracking never
-waits on drawing. Debug mode (`--debug`) shows the actual frame rate.
+**Performance and sharpness.** The field is simulated and rendered at
+~1000px wide (960x540 on a 1080p screen) and scaled up to the screen. By
+default that's a real **smooth, interpolated upscale**, which keeps edges
+and glows clean. It's the expensive part, so Paint adapts to the machine:
+if a frame's render+present cost stays over budget it steps down to Tk's
+much cheaper but blocky integer zoom, and failing that renders every other
+frame (the simulation still steps every frame, and trail decay/streaks use
+the elapsed time, so it stays smooth). After a while of being cheap it
+probes back up to smooth, backing off for longer if that doesn't hold.
+The first few frames are ignored (they include allocating the full-size
+image). Hand tracking never waits on drawing. `--debug` shows the active
+tier (`smooth` / `fast` / `fast (skipping)`) and the render cost.
 
 **Save** writes the current frame, smoothly upscaled to full screen
 resolution, as `light-YYYYmmdd-HHMMSS.png` in `~/Pictures/FingerWorks`
