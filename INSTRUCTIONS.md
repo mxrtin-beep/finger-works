@@ -267,22 +267,21 @@ What the artistic modes have in common:
 
 ### Paint mode
 
-Paint with living light (`lightfield.py`, driven by `paint.py`). The
-screen is a field of luminous motes drifting through a divergence-free
-"curl" flow -- alive on its own -- and your hands act on it. Frames
-accumulate into a float framebuffer that decays by a *half-life*, so
-everything leaves long-exposure trails, then a two-scale bloom turns the
-bright parts into glow.
+Paint with living light (`lightswarm.py` simulates it, `paint.py` draws it
+and reads the gestures). Around 80 soft orbs drift through a divergence-free
+"curl" flow -- alive on its own -- and your hands act on it. It is
+deliberately small (a couple of hundred things) and drawn as **crisp vector
+shapes** on the Tk canvas.
 
 **Right hand.** The aim point is the **middle fingertip** (as in Control
 mode), smoothed with a one-euro filter.
 
 | Gesture | Effect |
 |---|---|
-| Thumb + index pinch | **Ignite**: emit bright, long-lived "ink" motes along the path from last frame's aim to this frame's (so a fast stroke is a continuous line). Ink keeps some of the stroke's velocity and then drifts with the flow. Colour shades along the stroke. |
-| Clench (openness -> 0) | **Gather**: an attractor at the aim point, strength `0.1 + 0.9 (1-openness)^2`, with a sideways component (motes orbit) and extra drag near the centre (they condense into a core). Even an open hand has a faint pull. |
-| Snap open | **Burst**: an expanding shockwave ring that shoves and flashes motes, plus a spray of fresh ink. Needs a *recent clench* (within 0.7 s) and a fast opening (openness velocity > 2.2/s); one burst per clench, 0.5 s cooldown; strength follows the speed. |
-| Moving | **Stir**: motes near the fingertip are dragged along with it. Every fingertip of both hands sheds sparks when moving fast, and both hands are drawn as glowing skeletons. |
+| Thumb + index pinch | **Ignite**: each frame adds a point to the pen's *ribbon* -- a glowing line, widest and brightest at the newest end, that ages out over the **Trail** time -- and throws a few sparks that drift away with the flow. Colour shades along the stroke. |
+| Clench (openness -> 0) | **Gather**: an attractor at the aim point, strength `0.1 + 0.9 (1-openness)^2`, with a sideways component (orbs orbit) and extra drag near the centre. Even an open hand has a faint pull. |
+| Snap open | **Burst**: an expanding shockwave ring that shoves and flashes orbs, plus a spray of sparks. Needs a *recent clench* (within 0.7 s) and a fast opening (openness velocity > 2.2/s); one burst per clench, 0.5 s cooldown; strength follows the speed. |
+| Moving | **Stir**: orbs near the fingertip are dragged along with it. Fast-moving fingertips of either hand shed sparks, and both hands are drawn as faint skeletons. |
 
 Pinch uses hysteresis (closes at `LEFT_CLICK_CUTOFF`, opens at 1.35x).
 "Openness" (`Hand.openness()`) is the mean wrist-to-fingertip distance of
@@ -299,9 +298,9 @@ is no range limit.
 | Pose | Parameter | Full-tilt rate (`PaintSession`) | Range |
 |---|---|---|---|
 | One finger | Colour (palette rotation) | `HUE_RATE` 0.45 turns/s | wraps |
-| Two fingers | Glow (bloom radius/strength) | `GLOW_RATE` 1.1 (log, per s) | 0.5 - 3.5 |
+| Two fingers | Glow (orb size and ribbon fatness) | `GLOW_RATE` 1.1 (log, per s) | 0.5 - 3.5 |
 | Three fingers | Flow (how hard the flow stirs) | `SWIRL_RATE` 1.4 /s | 0 - 3 |
-| Four fingers / open | Trails (half-life) | `TRAIL_RATE` 1.2 (log, per s) | 0.08 - 5 s |
+| Four fingers / open | Trail (how long the ribbon lasts) | `TRAIL_RATE` 1.2 (log, per s) | 0.15 - 5 s |
 | Fist (held) | Time stops (timescale eases to 0.03) | -- | -- |
 | Thumb alone, held 0.7 s | Next palette | -- | 5 palettes |
 
@@ -311,23 +310,22 @@ A small gauge appears at the top of the screen while you tune.
 slow Lissajous wisp that paints, with an occasional soft burst -- takes
 over so an unattended screen is never blank.
 
-**Performance and sharpness.** The field is simulated and rendered at
-~1000px wide (960x540 on a 1080p screen) and scaled up to the screen. By
-default that's a real **smooth, interpolated upscale**, which keeps edges
-and glows clean. It's the expensive part, so Paint adapts to the machine:
-if a frame's render+present cost stays over budget it steps down to Tk's
-much cheaper but blocky integer zoom, and failing that renders every other
-frame (the simulation still steps every frame, and trail decay/streaks use
-the elapsed time, so it stays smooth). After a while of being cheap it
-probes back up to smooth, backing off for longer if that doesn't hold.
-The first few frames are ignored (they include allocating the full-size
-image). Hand tracking never waits on drawing. `--debug` shows the active
-tier (`smooth` / `fast` / `fast (skipping)`) and the render cost.
+**Performance.** Every shape (orbs, sparks, ribbon segments, rings, pointer)
+is created **once** as a canvas item and then only *moved* and recoloured
+each frame -- creating and deleting hundreds of canvas items per frame is
+what makes Tk stutter. Colours are quantized (32 palette steps x 16
+brightness levels) so the colour strings are precomputed, and an item's
+colour/width is only touched when it actually changes. The simulation is a
+few dozen numpy operations on ~250 elements. Frame cost is ~6 ms at 1080p
+in testing (an earlier pixel-field version cost 20-35 ms and looked blocky
+when scaled up). Halos *add* to the sky colour (`glow_colour`) rather than
+using a plain faint colour, which would be darker than the lit sky and show
+up as a dark ring.
 
-**Save** writes the current frame, smoothly upscaled to full screen
-resolution, as `light-YYYYmmdd-HHMMSS.png` in `~/Pictures/FingerWorks`
-(or `~/FingerWorks`). **Reset** wipes the light and ink; **Palette**
-cycles palettes. The field survives leaving and returning to Paint within
+**Save** renders the current state at full screen resolution with Pillow
+(supersampled glow, since it's one-off) as `light-YYYYmmdd-HHMMSS.png` in
+`~/Pictures/FingerWorks` (or `~/FingerWorks`). **Reset** clears the ribbon and sparks; **Palette**
+cycles palettes. The swarm survives leaving and returning to Paint within
 a run.
 
 ### Music mode
@@ -353,7 +351,7 @@ Every note and chord is drawn from the key and scale in Settings (see
 
 **Chord pad.** A soft, seamlessly-looping chord (`synth.render_pad`: root, then an octave-up triad, each note doubled with a quarter-hertz partner for a slow chorus shimmer, with a gentle tremolo) plays under every instrument, on two reserved mixer channels that crossfade over 0.7 s when the chord changes. It exists so a chord change is always *audible* -- Keys' notes are scale notes and so identical whatever the chord. Its level follows the left hand's height.
 
-**Backdrop.** Pure vector drawing, so it stays crisp at any resolution and costs almost nothing per frame: a soft navy-to-violet sky, slowly drifting twinkling stars, and glow halos (concentric discs fading into the sky) that bloom in the note's colour at each pluck/key press, alongside the expanding colour rings. The theremin leaves a trail of halos, and a chord change blooms one mid-screen. (Paint, by contrast, is rendered by the pixel light field -- see "Paint mode".)
+**Backdrop.** Pure vector drawing, so it stays crisp at any resolution and costs almost nothing per frame: a soft navy-to-violet sky, slowly drifting twinkling stars, and glow halos (concentric discs fading into the sky) that bloom in the note's colour at each pluck/key press, alongside the expanding colour rings. The theremin leaves a trail of halos, and a chord change blooms one mid-screen.
 
 **Sound** is synthesized with numpy and played through `pygame.mixer`
 (`synth.py`) -- harp is an additive "plucked string" (upper harmonics decay
@@ -494,7 +492,7 @@ special-casing for each character.
 
 `tests/` covers the pure logic: gesture helpers (`art_gestures.py`: poses,
 debouncing, openness, tilt, burst detection), music theory, the light
-engine (flow, attractors, shockwaves, decay, bloom) and the synth's
+swarm (flow, attractors, shockwaves, ribbon, colours) and the synth's
 pitch/envelope/click-free behaviour (including the chord pad's loop seam), and settings persistence (which skips itself without OpenCV).
 `tests/handmodel.py` builds synthetic hands whose finger-out and pinch
 distances are scaled to the real cutoffs in `constants.py`.

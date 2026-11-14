@@ -69,14 +69,15 @@ gesture and parameter reference.
 
 _PAINT_INSTRUCTIONS_TEXT = """PAINT MODE -- paint with living light
 
-The screen is alive with drifting light. Your hands act on it.
+Soft orbs of light drift on their own. Your hands act on them.
 
 RIGHT HAND -- the conductor (aims where your middle
 finger points, like the cursor in Control mode)
- \U0001F90F  Pinch thumb + index -- ignite: pour light
- \u270A  Clench your fist -- gather the light into a
-   blazing core
- \U0001F590  Snap the fist open -- a shockwave of light
+ \U0001F90F  Pinch thumb + index -- ignite: a ribbon of
+   light follows your fingertip
+ \u270A  Clench your fist -- gather the orbs around you
+ \U0001F590  Snap the fist open -- a ring of light shoves
+   them outward
  Move your hand to stir the field; every fingertip
  sheds sparks.
 
@@ -86,8 +87,8 @@ straighten up to hold. No limits, tiny movements.
  \u261D  1 finger -- colour
  \u270C  2 fingers -- glow
  \u2022  3 fingers -- flow (calm <-> turbulent)
- \U0001F590  4 fingers / open -- trails (sparks <-> long
-   exposure)
+ \U0001F590  4 fingers / open -- trail (short <-> long
+   ribbon)
  \u270A  Fist, held -- stop time
  \U0001F44D  Thumb alone, held -- next palette
 

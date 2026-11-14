@@ -69,19 +69,20 @@ quit with your physical mouse.
 
 ### 🎨 Paint
 
-Not a drawing tool -- a piece of living light. The screen is a field of
-glowing motes drifting in an invisible flow, alive even with nobody in
-front of it (leave it alone and a ghost painter takes over). Your hands act
-on it, and everything leaves long-exposure trails.
+Not a drawing tool -- a calm piece of living light. Soft glowing orbs drift
+through an invisible flow, alive even with nobody in front of it (leave it
+alone and a ghost painter takes over). Your hands act on it. It's drawn as
+crisp vector shapes, so it stays sharp at any resolution and runs smoothly.
 
 **Right hand -- the conductor.** It aims where your **middle finger
 points**, exactly like the cursor in Control mode.
 
-- 🤏 Pinch thumb + index → **ignite**: pour light along your path
-- ✊ Clench your fist → **gather**: the light is drawn into orbit and
-  condenses into a blazing core
-- 🖐️ Snap the fist open → **burst**: a shockwave of light rings outward
-- Just moving stirs the field, and every fingertip sheds sparks
+- 🤏 Pinch thumb + index → **ignite**: a glowing ribbon of light follows
+  your fingertip, fading as it ages, and throws off sparks
+- ✊ Clench your fist → **gather**: the orbs are drawn into orbit around
+  your fingertip
+- 🖐️ Snap the fist open → **burst**: a ring of light shoves them outward
+- Just moving stirs the swarm, and every fingertip sheds sparks
 
 **Left hand -- the atmosphere.** Hold a pose, then **tilt your hand like a
 joystick**: lean right to keep raising a value, lean left to keep lowering
@@ -91,15 +92,14 @@ you like -- and a small wrist movement is enough.
 | Pose | Tilting changes |
 |---|---|
 | ☝️ One finger | **Colour** -- rotates everything through the palette |
-| ✌️ Two fingers | **Glow** -- thin sparks ↔ fat halos |
+| ✌️ Two fingers | **Glow** -- small crisp orbs ↔ big soft ones |
 | Three fingers | **Flow** -- calm ↔ turbulent |
-| 🖐️ Four fingers / open hand | **Trails** -- short sparks ↔ long exposure |
+| 🖐️ Four fingers / open hand | **Trail** -- short ribbon ↔ long ribbon |
 | ✊ Fist, held | **Stops time** -- everything hangs in the air; open to resume |
 | 👍 Thumb alone, held | Next **palette** (Aurora, Ember, Ocean, Nebula, Prism) |
 
 The control bar gains **Palette**, **Reset** and **Save** buttons (Save
-writes a full-resolution PNG to `Pictures/FingerWorks` -- handy for
-stills).
+writes a full-resolution PNG to `Pictures/FingerWorks`).
 
 ### 🎵 Music
 
@@ -374,7 +374,7 @@ enabled, or another app is capturing that shortcut).
 
     python -m unittest discover -s tests -t .
 
-Covers the gesture helpers, music theory, the light engine and the synth.
+Covers the gesture helpers, music theory, the light swarm and the synth.
 (`settings` tests need OpenCV installed, and the audio-engine test needs
 `pygame`; each is skipped or degrades gracefully if missing.)
 
