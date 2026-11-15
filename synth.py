@@ -373,13 +373,12 @@ class ThereminVoice:
 				time.sleep(0.05)
 
 
-# Timbre per bowed instrument: (harmonic roll-off exponent, number of
-# harmonics, bow-noise level). Lower exponent = brighter; the cello is the
-# darkest and the most rosiny.
+# Timbre of the bowed voice: (harmonic roll-off exponent, number of
+# harmonics, bow-noise level). Lower exponent = brighter. One voice, in the
+# middle of the violin family -- warm like a viola, still bright enough to
+# sing at the top. (More entries could be added for other instruments.)
 BOWED_TIMBRES = {
-	'violin': (0.90, 14, 0.010),
-	'viola': (1.10, 12, 0.012),
-	'cello': (1.25, 10, 0.016),
+	'strings': (1.0, 13, 0.012),
 }
 
 
@@ -396,13 +395,13 @@ class BowedVoice(ThereminVoice):
 	AMP_TAU = 0.07
 	GAIN = 0.5
 
-	def __init__(self, engine, timbre='violin'):
+	def __init__(self, engine, timbre='strings'):
 		super().__init__(engine)
 		self.set_timbre(timbre)
 		self._rng = np.random.default_rng(1)
 
 	def set_timbre(self, timbre):
-		self.timbre = timbre if timbre in BOWED_TIMBRES else 'violin'
+		self.timbre = timbre if timbre in BOWED_TIMBRES else 'strings'
 		rolloff, count, noise = BOWED_TIMBRES[self.timbre]
 		self._k = np.arange(1, count + 1)
 		self._weights = 1.0 / self._k ** rolloff

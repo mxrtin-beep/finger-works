@@ -21,9 +21,7 @@ INSTRUMENTS = [
 	('harp', 'Harp', 'Sweep your fingers across the strings to strum.'),
 	('keys', 'Keys', 'Pinch over a key to play it; slide while pinched for a glissando.'),
 	('theremin', 'Theremin', 'Move your hand left/right for pitch. Fist = silence.'),
-	('violin', 'Violin', 'Bow with your right hand; your left hand\'s height fingers the notes. Pinch to pluck.'),
-	('viola', 'Viola', 'Like the violin, a fifth lower and darker.'),
-	('cello', 'Cello', 'Like the violin, two octaves lower and richer.'),
+	('strings', 'Strings', 'Drag your right index finger across a string to bow it; point your left finger up/down for the note. Pinch to pluck.'),
 ]
 
 INSTRUMENT_IDS = [i[0] for i in INSTRUMENTS]
@@ -39,5 +37,11 @@ def normalize_mode(mode):
 	return mode if mode in MODE_IDS else CONTROL
 
 
+# Earlier versions had separate violin / viola / cello instruments; they're
+# one "Strings" instrument now, so a remembered choice of any of them lands there.
+_INSTRUMENT_ALIASES = {'violin': 'strings', 'viola': 'strings', 'cello': 'strings'}
+
+
 def normalize_instrument(name):
+	name = _INSTRUMENT_ALIASES.get(name, name)
 	return name if name in INSTRUMENT_IDS else DEFAULT_INSTRUMENT

@@ -137,28 +137,13 @@ class BowedVoiceTests(unittest.TestCase):
 			v._render_chunk()
 		return np.concatenate([v._render_chunk() for _ in range(int(secs * SR / 1024))])
 
-	def test_pitch_is_exact_for_every_voice(self):
-		for timbre in synth.BOWED_TIMBRES:
-			y = self.settle(self.make(timbre), 196.0)
-			self.assertAlmostEqual(dominant_freq(y, 0, len(y)), 196.0, delta=2.0, msg=timbre)
-
-	def test_brightness_orders_violin_viola_cello(self):
-		# Measure the harmonics themselves -- not all high-frequency energy,
-		# which would also count the bow-hiss (and the cello has the most).
-		def bright(timbre):
-			y = self.settle(self.make(timbre), 220.0, secs=1.0)
-			spec = np.abs(np.fft.rfft(y * np.hanning(len(y))))
-			def partial(k):
-				c = int(round(220.0 * k * len(y) / SR))
-				return float(spec[c - 2:c + 3].max())
-			parts = [partial(k) for k in range(1, 11)]
-			return sum(parts[3:]) / sum(parts)          # 4th harmonic and up
-		# a clear step between each (measured: ~16-19%), not a hair's difference
-		self.assertGreater(bright('violin'), bright('viola') * 1.08)
-		self.assertGreater(bright('viola'), bright('cello') * 1.08)
+	def test_pitch_is_exact_across_the_range(self):
+		for freq in (130.8, 196.0, 440.0, 880.0):
+			y = self.settle(self.make('strings'), freq)
+			self.assertAlmostEqual(dominant_freq(y, 0, len(y)), freq, delta=2.0, msg=freq)
 
 	def test_a_bowed_tone_has_far_more_harmonics_than_the_theremin(self):
-		bowed = self.settle(self.make('violin'), 220.0)
+		bowed = self.settle(self.make('strings'), 220.0)
 		theremin = self.settle(synth.ThereminVoice(types.SimpleNamespace(sample_rate=SR, available=False)), 220.0)
 		def high_share(y):
 			spec = np.abs(np.fft.rfft(y * np.hanning(len(y))))
@@ -166,18 +151,18 @@ class BowedVoiceTests(unittest.TestCase):
 		self.assertGreater(high_share(bowed), 10 * max(high_share(theremin), 1e-4))
 
 	def test_level_is_safe_and_audible(self):
-		for timbre in synth.BOWED_TIMBRES:
-			y = self.settle(self.make(timbre), 110.0, amp=1.0)
-			self.assertLess(float(np.max(np.abs(y))), 0.95, timbre)
-			self.assertGreater(float(np.sqrt((y ** 2).mean())), 0.05, timbre)
+		for freq in (110.0, 440.0):
+			y = self.settle(self.make('strings'), freq, amp=1.0)
+			self.assertLess(float(np.max(np.abs(y))), 0.95, freq)
+			self.assertGreater(float(np.sqrt((y ** 2).mean())), 0.05, freq)
 
 	def test_silent_when_the_bow_is_still(self):
-		v = self.make('cello')
+		v = self.make('strings')
 		y = self.settle(v, 110.0, amp=0.0, secs=0.5)
 		self.assertLess(float(np.max(np.abs(y))), 0.02)
 
 	def test_chunks_join_cleanly_through_a_pitch_slide_and_vibrato(self):
-		v = self.make('violin')
+		v = self.make('strings')
 		v.set(freq=330.0, amp=0.8, vibrato=0.5)
 		a = np.concatenate([v._render_chunk() for _ in range(30)])
 		v.set(freq=440.0)
@@ -187,8 +172,11 @@ class BowedVoiceTests(unittest.TestCase):
 		smooth = np.convolve(out, np.ones(8) / 8, mode='valid')
 		self.assertLess(float(np.max(np.abs(np.diff(smooth)))), 0.3)
 
+	def test_an_unknown_timbre_falls_back_to_strings(self):
+		self.assertEqual(self.make('theorbo').timbre, 'strings')
+
 	def test_a_bow_takes_a_moment_to_speak(self):
-		bow, theremin = self.make('violin'), synth.ThereminVoice(types.SimpleNamespace(sample_rate=SR, available=False))
+		bow, theremin = self.make('strings'), synth.ThereminVoice(types.SimpleNamespace(sample_rate=SR, available=False))
 		self.assertGreater(bow.AMP_TAU, theremin.AMP_TAU)
 
 

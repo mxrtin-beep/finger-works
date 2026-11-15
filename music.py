@@ -469,46 +469,51 @@ class Theremin(_Instrument):
 
 
 # =====================================================================
-# Bowed / plucked strings: violin, viola, cello
+# Strings: bow with your right fingertip, finger with your left
 # =====================================================================
 
 class Strings(_Instrument):
-	"""Right hand bows (or plucks), left hand holds down the strings.
+	"""Your fingers are the instrument.
 
-	  RIGHT  sweep side to side = bow; bow speed is loudness (slow draw =
-	         quiet, fast = loud), a note held for a while gains vibrato;
-	         hand height picks the string (four bands, crossing strings like
-	         a bow does); pinch thumb + index = pluck (pizzicato)
-	  LEFT   hand height = where on the string you're pressing, from the
-	         open string up about an octave and a half. Pitches are pulled
-	         toward the key and scale chosen in Settings, so it can't go
-	         badly out of tune.
+	  RIGHT index fingertip = the bow. Touch a string (the one under your
+	         fingertip lights up) and drag sideways along it: it sounds. How
+	         fast you drag is how loud; hold a note and vibrato blooms in.
+	         Pinch thumb + index to pluck instead.
+	  LEFT index finger = pressing the string. Point it up or down: its height
+	         is the note, from the open string up about an octave and a half
+	         (a ladder on the left shows where you are). Notes are pulled
+	         toward the key and scale chosen in Settings, so it can't go badly
+	         out of tune.
+
+	Because the left hand is the fingerboard it can't also pick chords, so
+	this instrument ignores chord poses and the chord pad.
 	"""
 
+	name = 'strings'
 	owns_left_hand = True
-	timbre = 'violin'
-	label = 'Violin'
-	OPEN = (55, 62, 69, 76)           # low -> high, as MIDI notes
+	OPEN = (48, 55, 62, 69)           # low -> high: C3 G3 D4 A4 (viola tuning: between violin and cello)
 	SPAN = 14                         # semitones above the open string
 	MAGNET = 0.85                     # 1 = fully snapped to the scale
-	MIN_SPEED = 80.0                  # px/s of bow motion below which nothing sounds
-	FULL_SPEED = 1200.0               # px/s for full volume
-	Y0, Y1 = 0.30, 0.80               # the bowing zone, as a fraction of screen height
-	FOOTER = (
-		'bow with your right hand (hand height = string, speed = loudness)   |   '
-		'pinch to pluck   |   left hand height = pitch   |   shaka = pause'
+	MIN_SPEED = 90.0                  # px/s of sideways motion below which nothing sounds
+	FULL_SPEED = 1100.0               # px/s for full volume
+	Y0, Y1 = 0.30, 0.80               # the strings' zone, as a fraction of screen height
+	GUIDE_SECONDS = 35.0              # how long the how-to panel shows at the start
+	footer = (
+		'RIGHT index finger: touch a string, drag sideways to bow   |   '
+		'LEFT index finger up/down = note   |   pinch to pluck   |   shaka = pause'
 	)
 
 	def __init__(self, session):
 		super().__init__(session)
-		self.footer = self.FOOTER
-		self.voice = BowedVoice(session.engine, self.timbre)
+		self.voice = BowedVoice(session.engine, 'strings')
+		self.tip = ag.Pointer2D(min_cutoff=2.0, beta=0.012)       # the bowing fingertip, smoothed
 		self.pinch = ag.Pinch(c.LEFT_CLICK_CUTOFF)
-		self.string_idx = 1               # index into the strings, top band = 0 = highest
-		self.level = 0.0                  # left hand: 0 = open string .. 1 = top of the range
-		self.midi = float(self.OPEN[1])
+		self.string_idx = 1               # which string the fingertip is on (top lane = 0 = highest)
+		self.level = 0.0                  # left finger: 0 = open string .. 1 = top of the range
+		self.midi = float(self.OPEN[2])
 		self.sounding = False
-		self.bow_x = None
+		self.on_string = False            # the bowing fingertip is inside the strings' zone
+		self.tip_pos = None
 		self._prev_x = None
 		self._prev_t = None
 		self._speed = 0.0
@@ -516,23 +521,23 @@ class Strings(_Instrument):
 		self._held = 0.0                  # seconds of continuous bowing (drives vibrato)
 		self._plucks = []                 # [x, y, born, rgb]
 		self._last_glow = 0.0
-		self._right_y = None
+		self._was_pinching = False
+		self._born = time.time()
 
 	# -- geometry -------------------------------------------------------------
 
+	def lane_height(self):
+		return self.s.H * (self.Y1 - self.Y0) / len(self.OPEN)
+
 	def string_y(self, idx):
-		s = self.s
-		top, bottom = s.H * self.Y0, s.H * self.Y1
-		band = (bottom - top) / len(self.OPEN)
-		return top + band * (idx + 0.5)
+		return self.s.H * self.Y0 + self.lane_height() * (idx + 0.5)
 
 	def _pick_string(self, y):
-		"""Which string a right-hand height selects, with hysteresis so a
-		bow hovering on a boundary doesn't flicker between two strings."""
-		s = self.s
+		"""The string a fingertip height selects, with hysteresis so a
+		fingertip on a boundary doesn't flicker between two strings."""
 		n = len(self.OPEN)
-		top, bottom = s.H * self.Y0, s.H * self.Y1
-		band = (bottom - top) / n
+		top = self.s.H * self.Y0
+		band = self.lane_height()
 		cur = self.string_idx
 		lo, hi = top + band * cur, top + band * (cur + 1)
 		margin = band * 0.18
@@ -541,7 +546,7 @@ class Strings(_Instrument):
 		return min(max(int((y - top) // band), 0), n - 1)
 
 	def open_midi(self, idx):
-		return self.OPEN[len(self.OPEN) - 1 - idx]     # top band is the highest string
+		return self.OPEN[len(self.OPEN) - 1 - idx]     # the top lane is the highest string
 
 	# -- lifecycle --------------------------------------------------------------
 
@@ -552,11 +557,14 @@ class Strings(_Instrument):
 		self.voice.set(amp=0.0)
 		self.voice.stop()
 		self.pinch.reset()
+		self.tip.reset()
 		self.sounding = False
+		self.on_string = False
+		self.tip_pos = None
 		self._prev_x = self._prev_t = None
 		self._speed = 0.0
 		self._held = 0.0
-		self.bow_x = None
+		self._was_pinching = False
 
 	def retune(self):
 		pass
@@ -565,7 +573,9 @@ class Strings(_Instrument):
 
 	def _fingered_pitch(self, left, open_midi):
 		if left is not None:
-			self.level = ag.height_to_level(left.palm_point()[1], left.frame_h, low=0.78, high=0.32)
+			# the pressing finger's height; the tip travels further than the
+			# palm does, so the range of heights is wider than you might expect
+			self.level = ag.height_to_level(left.point(c.INDEX_IDX)[1], left.frame_h, low=0.70, high=0.22)
 		raw = open_midi + self.level * self.SPAN
 		return mt.snap_to_scale(raw, self.s.key, self.s.scale, self.MAGNET)
 
@@ -575,21 +585,28 @@ class Strings(_Instrument):
 		if right is None:
 			self.voice.set(amp=0.0)
 			self.sounding = False
-			self.bow_x = None
+			self.on_string = False
+			self.tip_pos = None
 			self._prev_x = self._prev_t = None
 			self._speed = 0.0
 			self._held = 0.0
 			self.pinch.reset()
+			self.tip.reset()
+			self._was_pinching = False
 			return
 
-		px, py = right.palm_point()
-		sx, sy = ag.frame_to_screen(px, py, right.frame_w, right.frame_h, s.W, s.H)
-		self.bow_x, self._right_y = sx, sy
-		self.string_idx = self._pick_string(sy)
+		tx, ty = right.point(c.INDEX_IDX)
+		sx, sy = ag.frame_to_screen(tx, ty, right.frame_w, right.frame_h, s.W, s.H)
+		sx, sy = self.tip(sx, sy, now)
+		self.tip_pos = (sx, sy)
+		self.on_string = s.H * self.Y0 <= sy <= s.H * self.Y1
+		if self.on_string:
+			self.string_idx = self._pick_string(sy)
 		open_midi = self.open_midi(self.string_idx)
 		self.midi = self._fingered_pitch(left, open_midi)
 
-		# Bow speed from the palm's horizontal motion
+		# Sideways speed of the fingertip. Only horizontal motion bows: moving
+		# up or down just changes which string you're on.
 		dt = 1.0 / 30.0
 		if self._prev_x is not None and now > self._prev_t:
 			dt = min(now - self._prev_t, 0.1)
@@ -599,11 +616,10 @@ class Strings(_Instrument):
 				self._direction = 1 if v > 0 else -1
 		self._prev_x, self._prev_t = sx, now
 
-		in_zone = s.H * self.Y0 - 40 <= sy <= s.H * self.Y1 + 40
 		pinching = self.pinch.update(right.pinch_dist(c.INDEX_IDX))
 		if pinching:
-			# Pinch = pizzicato; fire on the closing edge only.
-			if not getattr(self, '_was_pinching', False) and in_zone:
+			# Pinch = pluck, on the closing edge only.
+			if not self._was_pinching and self.on_string:
 				self._pluck(sx, self.string_y(self.string_idx), now)
 			self._was_pinching = True
 			self.voice.set(amp=0.0)
@@ -613,17 +629,16 @@ class Strings(_Instrument):
 		self._was_pinching = False
 
 		amp = 0.0
-		if in_zone and self._speed > self.MIN_SPEED:
+		if self.on_string and self._speed > self.MIN_SPEED:
 			amp = min(1.0, (self._speed - self.MIN_SPEED) / (self.FULL_SPEED - self.MIN_SPEED)) ** 0.7
 		self.sounding = amp > 0.04
-		# Vibrato builds while a note is held and only drains slowly in a
-		# gap, so it carries through a change of bow direction (where the
-		# speed briefly dips to nothing) the way a player's does.
+		# Vibrato builds while a note is held and only drains slowly in a gap,
+		# so it carries through a change of bow direction (where the speed
+		# briefly dips to nothing) the way a player's does.
 		if self.sounding:
 			self._held += dt
 		else:
 			self._held = max(0.0, self._held - 2.0 * dt)
-		# Vibrato blooms in after the note has been held for a moment, like a player's.
 		vibrato = min(max((self._held - 0.5) / 1.0, 0.0), 1.0) * 0.55
 		self.voice.set(freq=mt.midi_to_freq(self.midi), amp=0.9 * amp, vibrato=vibrato)
 
@@ -644,15 +659,23 @@ class Strings(_Instrument):
 
 	def draw(self, cv, now):
 		s = self.s
-		x0, x1 = s.W * 0.14, s.W * 0.90
+		x0, x1 = s.W * 0.16, s.W * 0.90
 		n = len(self.OPEN)
 		color = _pc_color(self.midi, 1.0, 0.55)
+		lane = self.lane_height()
+		hand_here = self.tip_pos is not None
+
 		for idx in range(n):
 			y = self.string_y(idx)
 			open_m = self.open_midi(idx)
-			selected = idx == self.string_idx
+			selected = idx == self.string_idx and self.on_string and hand_here
 			base = _pc_color(open_m, 0.55, 0.45)
-			width = 2 + (n - 1 - idx) * 0.0 + (1.5 if selected else 0)      # thicker lower strings
+			# The lane (the area a fingertip has to be in), brighter when it's the one you're on.
+			cv.create_rectangle(
+				x0 - 10, y - lane / 2 + 3, x1 + 10, y + lane / 2 - 3,
+				fill=_hex(_mix(BG, color if selected else base, 0.20 if selected else 0.07)),
+				outline=_hex(_mix(BG, color, 0.55)) if selected else '',
+			)
 			width = 1.5 + 0.7 * idx + (1.5 if selected else 0)
 			col = _hex(_mix(base, color, 0.7)) if selected else _hex(base)
 			if selected and self.sounding:
@@ -667,7 +690,7 @@ class Strings(_Instrument):
 			else:
 				cv.create_line(x0, y, x1, y, fill=col, width=width)
 			cv.create_text(
-				x1 + 26, y, text=mt.note_name(open_m), fill=_hex(_pc_color(open_m, 0.8, 0.55)),
+				x1 + 30, y, text=mt.note_name(open_m), fill=_hex(_pc_color(open_m, 0.8, 0.55)),
 				font=('Segoe UI', 12, 'bold'),
 			)
 
@@ -683,20 +706,26 @@ class Strings(_Instrument):
 				pts += [x0 + (x1 - x0) * u, y + off]
 			cv.create_line(*pts, fill=_hex(rgb), width=3, smooth=True)
 
-		# the bow
-		if self.bow_x is not None and self._right_y is not None:
-			bx, by = self.bow_x, self._right_y
-			half = s.W * 0.13
-			tilt = 14
-			cv.create_line(bx - half, by + tilt, bx + half, by - tilt, fill='#7a5a3a', width=5, capstyle='round')
-			cv.create_line(bx - half + 6, by + tilt + 5, bx + half - 6, by - tilt + 5, fill='#efe6d4', width=3, capstyle='round')
-			if self.sounding:
-				arrow = '\u25b6' if self._direction > 0 else '\u25c0'
-				cv.create_text(bx, by - 34, text=arrow, fill=_hex(color), font=('Segoe UI', 14, 'bold'))
+		# the bow: just your fingertip, marked where it touches
+		if hand_here:
+			bx, by = self.tip_pos
+			if self.on_string:
+				ring = 16 + (8 if self.sounding else 0)
+				cv.create_oval(bx - ring, by - ring, bx + ring, by + ring, outline=_hex(color), width=3 if self.sounding else 2)
+				cv.create_oval(bx - 5, by - 5, bx + 5, by + 5, fill='#ffffff', outline='')
+				if self.sounding:
+					cv.create_text(bx + (34 if self._direction > 0 else -34), by, text='\u25b6' if self._direction > 0 else '\u25c0', fill=_hex(color), font=('Segoe UI', 15, 'bold'))
+				else:
+					cv.create_text(bx, by + 36, text='drag sideways to bow', fill='#c9d2f0', font=('Segoe UI', 11, 'bold'))
+			else:
+				cv.create_oval(bx - 10, by - 10, bx + 10, by + 10, outline='#8d99c8', width=2)
+				cv.create_text(bx, by - 26, text='move onto a string', fill='#8d99c8', font=('Segoe UI', 11))
 
-		# the fingerboard ruler: the left hand's height as a pitch
-		rx = s.W * 0.06
+		# the ladder: where the LEFT finger is on the string
+		rx = s.W * 0.075
 		top, bottom = s.H * 0.28, s.H * 0.80
+		cv.create_text(rx, top - 40, text='LEFT finger', fill='#8d99c8', font=('Segoe UI', 11, 'bold'))
+		cv.create_text(rx, top - 22, text='up = higher note', fill='#555d7e', font=('Segoe UI', 9))
 		cv.create_line(rx, top, rx, bottom, fill='#3a4466', width=3)
 		open_m = self.open_midi(self.string_idx)
 		for m in range(int(open_m), int(open_m + self.SPAN) + 1):
@@ -705,40 +734,42 @@ class Strings(_Instrument):
 			frac = (m - open_m) / self.SPAN
 			y = bottom - frac * (bottom - top)
 			cv.create_line(rx - 8, y, rx + 8, y, fill=_hex(_pc_color(m, 0.7, 0.6)), width=2)
-			cv.create_text(rx + 24, y, text=mt.note_name(m), fill='#7f89ad', font=('Segoe UI', 9))
+			cv.create_text(rx + 26, y, text=mt.note_name(m), fill='#7f89ad', font=('Segoe UI', 10))
 		frac = min(max((self.midi - open_m) / self.SPAN, 0.0), 1.0)
 		my = bottom - frac * (bottom - top)
-		cv.create_oval(rx - 9, my - 9, rx + 9, my + 9, fill=_hex(color), outline='#ffffff', width=2)
-		cv.create_text(rx - 18, my, text=mt.note_name(self.midi), fill='#ffffff', font=('Segoe UI', 14, 'bold'), anchor='e')
-		cv.create_text(rx, bottom + 22, text='open', fill='#555d7e', font=('Segoe UI', 9))
+		cv.create_oval(rx - 10, my - 10, rx + 10, my + 10, fill=_hex(color), outline='#ffffff', width=2)
+		cv.create_text(rx - 20, my, text=mt.note_name(self.midi), fill='#ffffff', font=('Segoe UI', 15, 'bold'), anchor='e')
+		cv.create_text(rx, bottom + 20, text='open string', fill='#555d7e', font=('Segoe UI', 9))
 		if s.left_hand is None:
-			cv.create_text(rx, top - 22, text='left hand', fill='#555d7e', font=('Segoe UI', 10))
+			cv.create_text(rx, (top + bottom) / 2, text='point your\nleft finger\nup or down', fill='#8d99c8', font=('Segoe UI', 11), justify='center')
 
+		self._draw_guide(cv, now)
 
-class Violin(Strings):
-	name = 'violin'
-	timbre = 'violin'
-	label = 'Violin'
-	OPEN = (55, 62, 69, 76)           # G3 D4 A4 E5
-
-
-class Viola(Strings):
-	name = 'viola'
-	timbre = 'viola'
-	label = 'Viola'
-	OPEN = (48, 55, 62, 69)           # C3 G3 D4 A4
-
-
-class Cello(Strings):
-	name = 'cello'
-	timbre = 'cello'
-	label = 'Cello'
-	OPEN = (36, 43, 50, 57)           # C2 G2 D3 A3
+	def _draw_guide(self, cv, now):
+		"""A short how-to, shown for the first stretch of a session and again
+		whenever the hands have been away for a moment. The controls aren't
+		obvious from the picture alone, so say them in plain words."""
+		s = self.s
+		away = now - s._last_hands_time > 2.0
+		if not (away or time.time() - self._born < self.GUIDE_SECONDS):
+			return
+		w, h = 560, 150
+		x0, y0 = s.W / 2 - w / 2, s.H * 0.105      # below the toast banner that names the instrument
+		cv.create_rectangle(x0, y0, x0 + w, y0 + h, fill='#11162a', outline='#39426a', width=2)
+		cv.create_text(x0 + 20, y0 + 16, anchor='nw', text='HOW TO PLAY', fill='#dfe4f6', font=('Segoe UI', 12, 'bold'))
+		lines = (
+			('RIGHT', 'touch a string with your index finger and drag it sideways -- that is the bow. Faster = louder.'),
+			('LEFT', 'point your index finger up or down -- that is where you press the string. Higher = higher note.'),
+			('PINCH', 'right thumb + index to pluck the string instead.'),
+		)
+		for i, (tag, text) in enumerate(lines):
+			y = y0 + 46 + i * 34
+			cv.create_text(x0 + 20, y, anchor='nw', text=tag, fill='#8d99c8', font=('Segoe UI', 10, 'bold'))
+			cv.create_text(x0 + 82, y, anchor='nw', text=text, fill='#c9d2f0', font=('Segoe UI', 10), width=w - 104)
 
 
 _INSTRUMENT_CLASSES = {
-	'harp': Harp, 'keys': Keys, 'theremin': Theremin,
-	'violin': Violin, 'viola': Viola, 'cello': Cello,
+	'harp': Harp, 'keys': Keys, 'theremin': Theremin, 'strings': Strings,
 }
 
 

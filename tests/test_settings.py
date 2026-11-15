@@ -62,6 +62,14 @@ class ModesTests(unittest.TestCase):
 		self.assertFalse(modes.is_art_mode(modes.CONTROL))
 		self.assertTrue(modes.is_art_mode(modes.PAINT) and modes.is_art_mode(modes.MUSIC))
 
+	def test_old_string_instrument_names_map_to_strings(self):
+		# earlier versions had violin / viola / cello; a remembered choice must still work
+		for old in ('violin', 'viola', 'cello'):
+			self.assertEqual(modes.normalize_instrument(old), 'strings')
+		self.assertIn('strings', modes.INSTRUMENT_IDS)
+		for gone in ('violin', 'viola', 'cello'):
+			self.assertNotIn(gone, modes.INSTRUMENT_IDS)
+
 	def test_every_mode_and_instrument_is_described(self):
 		self.assertEqual(modes.MODE_IDS, ['control', 'paint', 'music'])
 		for mode_id, label, blurb in modes.MODES:

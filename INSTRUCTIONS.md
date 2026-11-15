@@ -355,32 +355,32 @@ Every note and chord is drawn from the key and scale in Settings (see
 | **Harp** | Ten strings tuned to the current chord (root/3rd/5th upward, ~3 octaves), in a compact band in the top half of the screen. Any of your five fingertips crossing a string plucks it, so a whole-hand sweep is a strum. Pluck speed sets loudness; position sets stereo pan. A string needs a crossing at >=170 px/s measured over 4 frames (so tracking jitter on a resting hand doesn't pluck), and re-triggers at most every 80 ms. |
 | **Keys** | Eleven-plus keys of the scale across two octaves (more for 7-note scales). Pinch thumb + index over a key to play it; strike nearer the bottom of a key for a harder note. Slide while pinched to glissando -- a neighbouring key only takes over once the pointer is clearly inside it (hysteresis). Keys in the current chord are lit. Release = the note fades. |
 | **Theremin** | A continuous tone: hand left/right = pitch over three octaves (pulled 70% toward the nearest scale note, with glide), hand height = vibrato depth, fist or no hand = silent. Volume is the left hand's height. |
-| **Violin / Viola / Cello** | See "Strings" below. |
+| **Strings** | See "Strings" below. |
 
-**Strings (violin, viola, cello)** -- `music.Strings`, with `BowedVoice` in
-`synth.py` for the sound. The two hands swap roles compared with the other
-instruments: the left hand is the fingerboard, so it is *not* used for chords,
-volume or switching instruments (those poses are ignored, the chord pad is
-stopped, and the header's chord chips/volume bar are hidden). Change
-instrument with the control bar's **Next instrument** button or the Mode
-window.
+**Strings** -- `music.Strings`, with `BowedVoice` in `synth.py` for the sound.
+One violin-family instrument (open strings C3 G3 D4 A4, between violin and
+cello). Your *fingers* are the controls -- there is no drawn bow -- and a
+how-to panel is shown for the first 35 s and whenever the hands have been
+away for 2 s. The hands swap roles compared with the other instruments: the
+left hand is the fingerboard, so it is *not* used for chords, volume or
+switching instruments (those poses are ignored, the chord pad is stopped, and
+the header's chord chips/volume bar are hidden). Change instrument with the
+control bar's **Next instrument** button or the Mode window.
 
 | Hand | Gesture | Effect |
 |---|---|---|
-| Right | Move the palm side to side | **Bow.** Speed is loudness: nothing below `MIN_SPEED` (80 px/s), full at `FULL_SPEED` (1200 px/s), eased with an exponent of 0.7. Direction is shown by an arrow. |
-| Right | Hand height | **String.** Four bands between 30% and 80% of the screen height, top band = highest string; 18% hysteresis so a bow on a boundary doesn't flicker. Only inside the zone does it sound. |
+| Right | Put the **index fingertip** inside a string's lane | **Select** that string: its lane lights up and a ring marks your fingertip (silent so far; "drag sideways to bow" is shown). Four lanes between 30% and 80% of the screen height, top lane = highest string, 18% hysteresis on the boundaries. |
+| Right | **Drag the fingertip sideways** along the string | **Bow.** Only *horizontal* speed counts (moving up/down just changes string). Nothing below `MIN_SPEED` (90 px/s), full volume at `FULL_SPEED` (1100 px/s), eased with an exponent of 0.7. An arrow shows the direction. Outside the lanes it is silent and says "move onto a string". |
 | Right | Pinch thumb + index | **Pluck** (pizzicato) on the closing edge: a harp-voice note at the current fingered pitch. No bowing while pinched. |
-| Right | Held note | **Vibrato** fades in after 0.5 s of sounding (full by 1.5 s) and only drains slowly in a gap, so it carries through bow changes. |
-| Left | Hand height | **Pitch**: the open string at the bottom of the range up `SPAN` (14) semitones at the top, pulled `MAGNET` (85%) toward the key/scale from Settings. The last position is remembered if the hand leaves. |
+| Right | Hold a bowed note | **Vibrato** fades in after 0.5 s of sounding (full by 1.5 s) and only drains slowly in a gap, so it carries through bow changes. |
+| Left | **Index fingertip** height | **Pitch**: the open string at the bottom of the range up `SPAN` (14) semitones at the top, pulled `MAGNET` (85%) toward the key/scale from Settings (fingertip heights 70% -> 22% of the camera frame). The last position is remembered if the hand leaves. Point with your index finger -- the fingertip is what's read. |
 
-Open strings (low -> high): violin G3 D4 A4 E5, viola C3 G3 D4 A4, cello C2
-G2 D3 A3. The voices differ in harmonic roll-off and bow noise
-(`synth.BOWED_TIMBRES`): the violin is brightest, the cello darkest. The
-bowed voice streams exactly like the theremin (one reserved mixer channel,
-glide, click-free chunk joins) but with a stack of harmonics, a faint rosin
-hiss that follows the bow, and slower attack/release. A ruler on the left
-shows the fingered note; the four strings are drawn across the middle, the
-sounding one vibrating and glowing, with the bow resting on it.
+A ladder on the left shows the scale notes available on the current string and
+the fingered note. The bowed voice streams exactly like the theremin (one
+reserved mixer channel, glide, click-free chunk joins) but with a stack of 13
+harmonics, a faint rosin hiss that follows the bow, and slower attack/release.
+(`synth.BOWED_TIMBRES` is a table, so more instruments could be added.) An
+older saved choice of `violin`, `viola` or `cello` maps to `strings`.
 
 **Chord pad.** A soft, seamlessly-looping chord (`synth.render_pad`: root, then an octave-up triad, each note doubled with a quarter-hertz partner for a slow chorus shimmer, with a gentle tremolo) plays under every instrument, on two reserved mixer channels that crossfade over 0.7 s when the chord changes. It exists so a chord change is always *audible* -- Keys' notes are scale notes and so identical whatever the chord. Its level follows the left hand's height.
 
