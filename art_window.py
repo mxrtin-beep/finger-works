@@ -62,6 +62,13 @@ class ArtWindow:
 		_make_window_noactivate(self.win.winfo_id())
 		overlay.raise_controls()
 
+		# A click on this fullscreen topmost window re-stacks it above the
+		# (also topmost) control bar, which then looks like it vanished: put
+		# the bar back on top as soon as anything happens here.
+		for event in ('<ButtonPress>', '<ButtonRelease>', '<FocusIn>', '<Map>', '<Visibility>'):
+			self.canvas.bind(event, lambda _e: overlay.raise_controls(min_interval=0.2), add='+')
+			self.win.bind(event, lambda _e: overlay.raise_controls(min_interval=0.2), add='+')
+
 	def close(self):
 		try:
 			self.win.destroy()

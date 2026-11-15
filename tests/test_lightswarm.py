@@ -120,6 +120,15 @@ class RibbonTests(unittest.TestCase):
 		self.assertAlmostEqual(new[3], 1.0)
 
 
+class PaintSoundTests(unittest.TestCase):
+	def test_every_palette_has_a_mood(self):
+		import paint
+		self.assertEqual(len(paint.PALETTE_MOODS), len(ls.PALETTES))
+		for root, quality in paint.PALETTE_MOODS:
+			self.assertTrue(0 <= root < 12 and quality in ('maj', 'min'))
+		self.assertEqual(len(set(paint.PALETTE_MOODS)), len(paint.PALETTE_MOODS), 'moods should be distinguishable')
+
+
 class LookTests(unittest.TestCase):
 	def test_intensity_is_bounded_and_ambient_is_visible(self):
 		s = swarm()

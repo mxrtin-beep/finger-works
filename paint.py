@@ -40,9 +40,22 @@ import time
 
 import art_gestures as ag
 import constants as c
+import music_theory as mt
 from lightswarm import LightSwarm
+from synth import AudioEngine, NoteBank, PadVoice, ThereminVoice
 
 RIBBON_SEGMENTS = 110
+
+# Each palette has a mood: the chord its ambient pad rests on, as (root pitch
+# class, quality). Switching palette crossfades the harmony, so the change is
+# heard as well as seen. Order matches lightswarm.PALETTES.
+PALETTE_MOODS = [
+	(2, 'maj'),     # Aurora  -- D major, open and bright
+	(9, 'min'),     # Ember   -- A minor, warm
+	(7, 'maj'),     # Ocean   -- G major, wide
+	(4, 'min'),     # Nebula  -- E minor, mysterious
+	(0, 'maj'),     # Prism   -- C major, clear
+]
 
 
 class PaintSession:
@@ -91,6 +104,65 @@ class PaintSession:
 		self._paused = False
 		self._ghost_prev = None
 		self._ghost_burst = -1
+		self._pen_speed = 0.0
+
+		# Sound: a soft pad that follows the palette's mood and swells as you
+		# clench, a gentle pen tone while you draw (higher when your hand is
+		# higher, louder when faster, snapped to the mood's scale so it never
+		# sounds wrong), a chime on a burst or palette change, and a hush
+		# while time is stopped. Silent without pygame / an audio device.
+		settings = settings or {}
+		self.audio = AudioEngine()
+		self.bank = NoteBank(self.audio)
+		self.pad = PadVoice(self.audio)
+		self.tone = ThereminVoice(self.audio)
+		self._sound_pref = bool(settings.get('paint_sound', True))
+		self.sound_on = False
+		self._set_sound(self._sound_pref)
+
+	# ---- sound -------------------------------------------------------------------------
+
+	def _set_sound(self, wanted):
+		wanted = bool(wanted) and self.audio.available
+		if wanted and not self.sound_on:
+			self.tone.start()
+		elif not wanted and self.sound_on:
+			self.tone.set(amp=0.0)
+			self.pad.stop()
+		self.sound_on = wanted
+
+	def _audio(self):
+		if not self.sound_on:
+			return
+		f = self.engine
+		root, quality = PALETTE_MOODS[f.palette % len(PALETTE_MOODS)]
+		frozen = self._time_scale < 0.5
+		openness = self._pen[2] if self._pen else 1.0
+		pull = (1.0 - openness) ** 2
+		level = (0.10 + 0.22 * pull) * (0.4 if frozen else 1.0)
+		self.pad.set_chord(root, quality, level)
+		self.pad.set_level(level)
+
+		if self._pen and self._pen[3] and not frozen:
+			x, y, _o, _p = self._pen
+			midi = 60 + (1.0 - y / self.H) * 24
+			scale = 'Major pentatonic' if quality == 'maj' else 'Minor pentatonic'
+			midi = mt.snap_to_scale(midi, root, scale, 0.9)
+			amp = min(0.45, 0.05 + 0.4 * self._pen_speed / 1500.0)
+			self.tone.set(freq=mt.midi_to_freq(midi), amp=amp, vibrato=0.0)
+		else:
+			self.tone.set(amp=0.0)
+
+	def _chime(self, strength):
+		"""A bright little chord of the current mood, louder for a harder burst."""
+		if not self.sound_on:
+			return
+		root, quality = PALETTE_MOODS[self.engine.palette % len(PALETTE_MOODS)]
+		base = 72 + ((root - 72) % 12)
+		third = 3 if quality == 'min' else 4
+		volume = min(0.55, 0.22 + 0.33 * strength)
+		for interval, weight, pan in ((0, 1.0, -0.3), (third, 0.7, 0.0), (7, 0.8, 0.3), (12, 0.6, 0.5)):
+			self.audio.play(self.bank.get('keys', base + interval), volume * weight, pan)
 
 	# ---- item pool --------------------------------------------------------------------
 
@@ -222,6 +294,7 @@ class PaintSession:
 
 	def next_palette(self):
 		self._flash(self.engine.next_palette())
+		self._chime(0.4)
 
 	def do_reset(self):
 		self.engine.reset()
@@ -263,12 +336,17 @@ class PaintSession:
 		self._aim = None
 		self._pen = None
 		self._tips.clear()
+		self.tone.set(amp=0.0)
+		self.pad.stop()
 
 	def apply_settings(self, settings):
-		pass
+		self._sound_pref = bool(settings.get('paint_sound', self._sound_pref))
+		self._set_sound(self._sound_pref)
 
 	def close(self):
 		self.release()
+		self.tone.stop()
+		self.audio.stop_all()
 		self.window.close()
 
 	# ---- per frame -----------------------------------------------------------------------
@@ -302,6 +380,7 @@ class PaintSession:
 		if now - self._last_hands_time > self.IDLE_SECONDS:
 			self._ghost(now, dt)
 
+		self._audio()
 		f.step(dt)
 		self._draw_swarm()
 		self._redraw_hud(hands, now)
@@ -323,6 +402,7 @@ class PaintSession:
 		burst = self.openness.update(hand.openness(), now)
 		o = self.openness.value
 		self._pen = (x, y, o, pinching)
+		self._pen_speed = math.hypot(vx, vy)
 
 		# Clench -> gather. Even an open hand has a faint pull, so orbs
 		# always lazily orbit the fingertip.
@@ -332,6 +412,7 @@ class PaintSession:
 
 		if burst > 0.0:
 			f.burst(x, y, burst, pal=f.stroke_pal())
+			self._chime(burst)
 
 		if pinching:
 			f.add_ribbon_point(x, y, f.stroke_pal(step * 0.0009))

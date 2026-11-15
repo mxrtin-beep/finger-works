@@ -647,6 +647,7 @@ def main(settings):
 	music_key = settings.get('music_key', 'C')
 	music_scale = settings.get('music_scale', 'Major pentatonic')
 	music_instrument = modes.normalize_instrument(settings.get('music_instrument'))
+	paint_sound = settings.get('paint_sound', True)
 	mode = modes.CONTROL
 	art = None
 	# The last Paint canvas (and brush), kept while you're in another mode
@@ -750,7 +751,7 @@ def main(settings):
 		return True
 
 	def handle_settings_changed(new_settings):
-		nonlocal cap_device, camera_device_setting, button_list, music_key, music_scale
+		nonlocal cap_device, camera_device_setting, button_list, music_key, music_scale, paint_sound
 		# The Settings window only knows about the settings it shows; keep
 		# everything else (e.g. the remembered Music instrument) as it was
 		# instead of letting save_settings() reset it to its default.
@@ -758,6 +759,7 @@ def main(settings):
 		fw_settings.save_settings(new_settings)
 		music_key = new_settings['music_key']
 		music_scale = new_settings['music_scale']
+		paint_sound = new_settings['paint_sound']
 		if art is not None:
 			art.apply_settings(new_settings)
 
@@ -800,6 +802,7 @@ def main(settings):
 			'sound_volume': sounds.get_volume(),
 			'music_key': music_key,
 			'music_scale': music_scale,
+			'paint_sound': paint_sound,
 			'music_instrument': (
 				art.instrument_name() if (art is not None and art.mode == modes.MUSIC)
 				else music_instrument

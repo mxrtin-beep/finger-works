@@ -65,6 +65,9 @@ DEFAULTS = {
 	'music_key': 'C',
 	'music_scale': 'Major pentatonic',
 	'music_instrument': 'harp',
+	# Paint mode's soft sound design (ambient pad, pen tone, burst chime);
+	# needs pygame, silently does nothing without it. See paint.py.
+	'paint_sound': True,
 }
 
 # Settings persisted to disk across restarts -- everything in DEFAULTS

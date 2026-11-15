@@ -1,5 +1,6 @@
 
 import sys
+import time
 import tkinter as tk
 
 import modes
@@ -399,6 +400,7 @@ class Overlay:
 		self._instructions_win = None
 		self._mode_win = None
 		self._art_buttons = []
+		self._last_raise = 0.0
 		self._build_control_bar()
 
 	# --- Control bar --------------------------------------------------
@@ -480,13 +482,25 @@ class Overlay:
 
 		self._refresh_pause_ui()
 
-	def raise_controls(self):
+	def raise_controls(self, min_interval=0.0):
 		"""Put the control bar back above everything else. The artistic
 		modes' fullscreen canvas is also topmost, and among topmost windows
 		the most recently raised wins -- so the bar is lifted after the
 		canvas appears, or Pause/Mode/Quit would be buried under it."""
+		if min_interval and time.time() - self._last_raise < min_interval:
+			return      # event-driven callers: raising changes stacking, which fires events -- don't loop
 		self.control_window.lift()
 		self.control_window.attributes('-topmost', True)
+		# The dialogs (Settings / Mode / Help) belong above the canvas and the
+		# bar too -- a click on the canvas buries them just the same.
+		for win in (self._settings_win, self._mode_win, self._instructions_win):
+			try:
+				if win is not None and win.winfo_exists():
+					win.lift()
+					win.attributes('-topmost', True)
+			except tk.TclError:
+				pass
+		self._last_raise = time.time()
 
 	def _refit_control_bar(self):
 		"""Resize the control bar to fit its current buttons, keeping its
@@ -691,6 +705,13 @@ class Overlay:
 		tk.OptionMenu(win, music_scale_var, *music_theory.SCALES).grid(
 			row=9, column=1, sticky='ew', padx=10, pady=4)
 
+		paint_sound_var = tk.BooleanVar(value=current.get('paint_sound', True))
+		tk.Checkbutton(
+			win, text='Paint sounds (soft pad, pen tone, chimes)', variable=paint_sound_var,
+			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
+			activebackground='#1e1e1e', activeforeground='#dddddd',
+		).grid(row=10, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+
 		# Debug mode is deliberately excluded from "remembered for next
 		# time" (see settings.py's _PERSISTED_KEYS) -- it only ever applies
 		# to the run you turn it on for.
@@ -699,7 +720,7 @@ class Overlay:
 			win, text='Debug mode (event text + live camera view)', variable=debug_var,
 			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
 			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=10, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
+		).grid(row=11, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
 
 		def apply_and_close():
 			chosen = camera_var.get()
@@ -716,6 +737,7 @@ class Overlay:
 				'sound_volume': round(sound_volume_var.get(), 2),
 				'music_key': music_key_var.get(),
 				'music_scale': music_scale_var.get(),
+				'paint_sound': paint_sound_var.get(),
 			}
 			if self.on_settings_changed:
 				self.on_settings_changed(new_settings)
@@ -736,10 +758,11 @@ class Overlay:
 			sound_volume_var.set(d['sound_volume'])
 			music_key_var.set(d['music_key'])
 			music_scale_var.set(d['music_scale'])
+			paint_sound_var.set(d['paint_sound'])
 			debug_var.set(d['debug'])
 
 		btn_frame = tk.Frame(win, bg='#1e1e1e')
-		btn_frame.grid(row=11, column=0, columnspan=2, pady=(0, 10))
+		btn_frame.grid(row=12, column=0, columnspan=2, pady=(0, 10))
 		_make_flat_button(btn_frame, 'Apply', apply_and_close, bg='#2ecc71').pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Cancel', close).pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Reset to Defaults', reset_to_defaults).pack(side='left', padx=4)
@@ -1022,6 +1045,13 @@ class Overlay:
 
 	def pump(self):
 		"""Process pending Tk events for one iteration of the main loop."""
+		# Keep the control bar on top. Windows re-stacks topmost windows when
+		# one is clicked, so a click on the fullscreen art canvas (or another
+		# topmost app) can bury the bar -- looking exactly like it vanished.
+		# Re-raising once a second makes that self-healing; ArtWindow also
+		# re-raises immediately on a click.
+		if time.time() - self._last_raise > 1.0:
+			self.raise_controls()
 		self.root.update_idletasks()
 		self.root.update()
 

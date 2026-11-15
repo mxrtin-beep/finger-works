@@ -99,6 +99,8 @@ Click **Settings** in the control bar to open a small settings window:
   minor pentatonic, major, natural minor, dorian, lydian, blues) Music
   mode draws every note and chord from. Remembered across restarts, and
   applied live if Music mode is running. See "Music mode" below.
+- **Paint sounds** -- the soft pad, pen tone and chimes in Paint mode (on by
+  default; needs pygame). See "Paint mode".
 - **Click sounds** / **Keyboard sounds** -- both off by default. A short,
   quiet tone on every left/right-click, or every on-screen keyboard key
   press, respectively -- see `sounds.py`. Deliberately light rather than
@@ -254,7 +256,10 @@ What the artistic modes have in common:
   in half). Pausing silences all sound and ends any stroke. Resume with
   the control bar's **Resume** button.
 - The canvas is a normal always-on-top window that never takes keyboard
-  focus. The control bar is kept above it. **Escape** and **Quit** still
+  focus. The control bar (and any Settings/Mode/Help window) is kept above
+  it: a click on a topmost window re-stacks it, which used to bury the bar,
+  so the bar re-raises itself when the canvas is clicked and once a second
+  in every mode. **Escape** and **Quit** still
   quit.
 - Hand position maps to the screen with generous margins (`art_gestures.
   FRAME_MARGIN_X/Y`: the central ~56% x ~48% of the camera frame covers
@@ -305,6 +310,8 @@ is no range limit.
 | Thumb alone, held 0.7 s | Next palette | -- | 5 palettes |
 
 A small gauge appears at the top of the screen while you tune.
+
+**Sound** (`PaintSession._audio`/`_chime`, using the same `synth` engine as Music; silent without pygame; *Paint sounds* checkbox in Settings, `paint_sound`): a soft chord pad (moods in `PALETTE_MOODS`: Aurora D, Ember Am, Ocean G, Nebula Em, Prism C) crossfades when the palette changes and swells with `(1-openness)^2` as you clench; while pinching, a quiet pen tone glides with the aim point (height -> pitch over two octaves, snapped 90% to the mood's pentatonic scale; speed -> volume); a snap-open burst, and a palette change, ring a four-note chime of the mood; while time is stopped the pad drops to 40% and the pen tone is silent.
 
 **Idle:** after `IDLE_SECONDS` (4 s) with no hands a ghost painter -- a
 slow Lissajous wisp that paints, with an occasional soft burst -- takes

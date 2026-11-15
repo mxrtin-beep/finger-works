@@ -98,6 +98,12 @@ you like -- and a small wrist movement is enough.
 | ✊ Fist, held | **Stops time** -- everything hangs in the air; open to resume |
 | 👍 Thumb alone, held | Next **palette** (Aurora, Ember, Ocean, Nebula, Prism) |
 
+**Sound** (needs `pygame`; turn off with *Paint sounds* in Settings): a soft
+ambient pad whose harmony follows the palette (changing palette crossfades the
+mood), swelling as you clench; a gentle pen tone while you draw (higher when
+your hand is higher, louder when faster, always in key); a bright chime on a
+burst; and a hush while time is stopped.
+
 The control bar gains **Palette**, **Reset** and **Save** buttons (Save
 writes a full-resolution PNG to `Pictures/FingerWorks`).
 
