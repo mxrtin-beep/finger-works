@@ -56,6 +56,19 @@ class ScaleTests(unittest.TestCase):
 		self.assertAlmostEqual(mt.snap_to_scale(71.9, 'C', 'Major pentatonic'), 72.0)
 		self.assertAlmostEqual(mt.snap_to_scale(59.9, 'C', 'Major pentatonic'), 60.0)
 
+	def test_the_harps_scale_tuning_has_every_step_of_the_scale(self):
+		# pentatonic gaps would make melodies impossible: Twinkle Twinkle needs the F
+		self.assertEqual(mt.diatonic_scale('Major pentatonic'), 'Major')
+		self.assertEqual(mt.diatonic_scale('Minor pentatonic'), 'Natural minor')
+		self.assertEqual(mt.diatonic_scale('Blues'), 'Natural minor')
+		self.assertEqual(mt.diatonic_scale('Dorian'), 'Dorian')          # already seven notes: unchanged
+		strings = mt.scale_notes('C', mt.diatonic_scale('Major pentatonic'), 10, lowest=60)
+		self.assertEqual(strings, [60, 62, 64, 65, 67, 69, 71, 72, 74, 76])
+		twinkle = [60, 60, 67, 67, 69, 69, 67, 65, 65, 64, 64, 62, 62, 60]
+		self.assertTrue(set(twinkle) <= set(strings), 'every note of the tune is on a string')
+		pent = mt.scale_notes('C', 'Major pentatonic', 10, lowest=60)
+		self.assertNotIn(65, pent, 'the plain pentatonic really does lack the F')
+
 	def test_frequencies(self):
 		self.assertAlmostEqual(mt.midi_to_freq(69), 440.0)
 		self.assertAlmostEqual(mt.midi_to_freq(60), 261.6256, places=3)

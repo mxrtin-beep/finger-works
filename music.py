@@ -118,11 +118,21 @@ class Harp(_Instrument):
 		self._rings = []                # [x, y, born, rgb]
 		self.retune()
 
+	def _chord_pcs(self):
+		chord = self.s.chord
+		return {(chord['root_pc'] + i) % 12 for i in ((0, 4, 7) if chord['quality'] == 'maj' else (0, 3, 7))}
+
 	def retune(self):
 		s = self.s
 		self.string_x = [
 			s.W * (self.X0 + (self.X1 - self.X0) * i / (self.STRINGS - 1)) for i in range(self.STRINGS)
 		]
+		if s.harp_tuning == 'scale':
+			# Every note of the scale, like a real harp: melodies are playable.
+			# Chord changes still move the pad and light up the chord's strings.
+			self.notes = mt.scale_notes(s.key, mt.diatonic_scale(s.scale), self.STRINGS, lowest=60)
+			s.bank.warm('harp', self.notes)
+			return
 		self.notes = mt.chord_notes(s.chord, self.STRINGS, lowest=45)
 		# Render this chord's notes first, then the other three chords' in
 		# the same background pass, so a chord change finds its strings
@@ -208,7 +218,8 @@ class Harp(_Instrument):
 		top, bottom = s.H * self.Y0, s.H * self.Y1
 		segs = 26
 		for i, sx in enumerate(self.string_x):
-			base = _pc_color(self.notes[i], 0.5, 0.5)
+			in_chord = (self.notes[i] % 12) in self._chord_pcs()
+			base = _pc_color(self.notes[i], 0.5, 0.5 if in_chord else 0.3)
 			age = now - self._plucked[i]
 			amp = self._amp[i] * math.exp(-age / 0.85)
 			if amp > 0.4:
@@ -227,8 +238,9 @@ class Harp(_Instrument):
 			cv.create_oval(sx - 4, bottom - 4, sx + 4, bottom + 4, fill=_hex(base), outline='')
 			cv.create_text(
 				sx, bottom + 22, text=mt.note_name(self.notes[i]),
-				fill=_hex(_pc_color(self.notes[i], 0.8, 0.4)), font=('Segoe UI', 11, 'bold'),
+				fill=_hex(_pc_color(self.notes[i], 0.8, 0.4 if in_chord else 0.28)), font=('Segoe UI', 11, 'bold'),
 			)
+			cv.create_text(sx, bottom + 40, text=str(i + 1), fill='#4d5575', font=('Segoe UI', 9))
 
 		self._rings = [r for r in self._rings if now - r[2] < 0.7]
 		for x, y, born, color in self._rings:
@@ -806,6 +818,7 @@ class MusicSession:
 
 		self.key = settings.get('music_key', mt.DEFAULT_KEY)
 		self.scale = settings.get('music_scale', mt.DEFAULT_SCALE)
+		self.harp_tuning = settings.get('harp_tuning', 'chord') if settings.get('harp_tuning') in ('chord', 'scale') else 'chord'
 		if self.scale not in mt.SCALES:
 			self.scale = mt.DEFAULT_SCALE
 		self.chords = mt.chord_set(self.key, self.scale)
@@ -831,7 +844,16 @@ class MusicSession:
 	# --- control bar / mode window hooks ------------------------------------------
 
 	def actions(self):
-		return [('Next instrument', self.next_instrument)]
+		return [('Next instrument', self.next_instrument), ('Harp strings', self.toggle_harp_tuning)]
+
+	def toggle_harp_tuning(self):
+		"""Flip the harp between chord tones and every scale note. Goes through
+		the app's settings path so the choice is saved and applied everywhere."""
+		other = 'scale' if self.harp_tuning == 'chord' else 'chord'
+		if self.overlay.on_settings_changed:
+			self.overlay.on_settings_changed({'harp_tuning': other})
+		else:
+			self.apply_settings({'harp_tuning': other})
 
 	def instrument_name(self):
 		return self.instrument.name if self.instrument else None
@@ -861,6 +883,14 @@ class MusicSession:
 		scale = settings.get('music_scale', self.scale)
 		if scale not in mt.SCALES:
 			scale = self.scale
+		tuning = settings.get('harp_tuning', self.harp_tuning)
+		if tuning not in ('chord', 'scale'):
+			tuning = self.harp_tuning
+		if tuning != self.harp_tuning:
+			self.harp_tuning = tuning
+			self._flash('Harp: scale notes (play melodies)' if tuning == 'scale' else 'Harp: chord tones', 2.2)
+			if 'harp' in self._instruments:
+				self._instruments['harp'].retune()
 		if (key, scale) == (self.key, self.scale):
 			return
 		self.key, self.scale = key, scale

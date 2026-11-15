@@ -35,6 +35,17 @@ _MINOR_CHORDS = [('i', 0, 'min'), ('iv', 5, 'min'), ('VI', 8, 'maj'), ('VII', 10
 _TRIADS = {'maj': (0, 4, 7), 'min': (0, 3, 7)}
 
 
+# The harp's "scale notes" tuning wants every step of a full scale (a real
+# harp has them all), so pentatonic/blues choices use their diatonic parent:
+# the missing notes are exactly what melodies like Twinkle Twinkle need.
+_DIATONIC_PARENT = {'Major pentatonic': 'Major', 'Minor pentatonic': 'Natural minor', 'Blues': 'Natural minor'}
+
+
+def diatonic_scale(scale_name):
+	"""The seven-note scale to use where pentatonic gaps would be a problem."""
+	return _DIATONIC_PARENT.get(scale_name, scale_name)
+
+
 def key_index(name):
 	"""'C#' -> 1. Unknown names fall back to C."""
 	try:

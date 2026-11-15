@@ -68,6 +68,11 @@ DEFAULTS = {
 	# Paint mode's soft sound design (ambient pad, pen tone, burst chime);
 	# needs pygame, silently does nothing without it. See paint.py.
 	'paint_sound': True,
+	# How the Music harp's strings are tuned: 'chord' = the notes of the
+	# current chord (no wrong notes; left-hand chords retune the strings), or
+	# 'scale' = every note of the scale like a real harp, so melodies can be
+	# played.
+	'harp_tuning': 'chord',
 }
 
 # Settings persisted to disk across restarts -- everything in DEFAULTS
