@@ -214,17 +214,27 @@ def _open_camera(device, cap_width, cap_height):
 
 	cv2.VideoCapture's default backend on Windows (MSMF) can take a couple
 	of seconds just to enumerate/open a device; DirectShow (CAP_DSHOW) is
-	usually noticeably faster to open, so it's worth requesting explicitly
-	rather than leaving OpenCV to auto-pick. Other platforms don't have
-	this particular slow-default problem, so they're left on the default
-	backend (passing a Windows-only backend constant elsewhere would just
-	error out)."""
-	if sys.platform == 'win32':
-		cap = cv2.VideoCapture(device, cv2.CAP_DSHOW)
-	else:
-		cap = cv2.VideoCapture(device)
-	cap.set(cv2.CAP_PROP_FRAME_WIDTH, cap_width)
-	cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cap_height)
+	usually noticeably faster to open, so it's tried first. But DirectShow
+	is also the backend that fails on some machines/drivers (or while the
+	camera is momentarily busy) when the default one works fine -- so if it
+	doesn't open, fall back to the default backend, and make a second pass
+	after a short pause before giving up. Other platforms have no
+	Windows-only backend to try (passing one elsewhere would just error).
+
+	Always returns a VideoCapture; if nothing opened it's the last, unopened
+	one, which callers check with isOpened()."""
+	backends = [cv2.CAP_DSHOW, cv2.CAP_ANY] if sys.platform == 'win32' else [cv2.CAP_ANY]
+	cap = None
+	for attempt in range(2):
+		for backend in backends:
+			cap = cv2.VideoCapture(device, backend)
+			if cap.isOpened():
+				cap.set(cv2.CAP_PROP_FRAME_WIDTH, cap_width)
+				cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cap_height)
+				return cap
+			cap.release()
+		if attempt == 0:
+			time.sleep(0.6)       # camera may just be releasing from a previous run
 	return cap
 
 
