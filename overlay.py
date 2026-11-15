@@ -119,6 +119,12 @@ RIGHT HAND -- the instrument
    chord are lit.
  Theremin -- hand left / right = pitch, hand height =
    vibrato. Make a fist to go silent.
+ Violin / Viola / Cello -- RIGHT hand bows: sweep it side
+   to side (speed = loudness), its height picks the
+   string, pinch to pluck. LEFT hand fingers the notes:
+   its height is the pitch along the string. (The left
+   hand is busy, so no chords or thumb-switching here;
+   use Next instrument to leave.)
 
  \U0001F919  Thumb + pinky out (either hand) -- pause
 

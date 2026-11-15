@@ -131,6 +131,18 @@ C major pentatonic), so there are no wrong notes.
   current chord, and plucks pan left-to-right with the string.
 - **Keys** -- pinch thumb + index over a key to play it; slide while
   pinched for a glissando. Keys that belong to the current chord are lit.
+- **Violin / Viola / Cello** -- you play it like one. **Right hand bows**:
+  sweep it side to side (bow speed is loudness -- a slow draw is quiet, a fast
+  one loud, and a held note gradually gains vibrato), and the *height* of your
+  hand picks the string, like crossing strings with a bow. **Pinch** thumb +
+  index to pluck. **Left hand holds down the strings**: its height is where
+  you press along the string, from the open string up about an octave and a
+  half, pulled toward your key and scale so it stays in tune. The left hand
+  is the fingerboard, so these three have no chord poses and no chord pad;
+  switch instrument with the control bar's **Next instrument** button or the
+  Mode window. They're the same instrument at different registers: violin
+  G-D-A-E, viola C-G-D-A, cello C-G-D-A two octaves down, each with its own
+  brightness.
 - **Theremin** -- hand left/right is pitch (gently pulled toward the
   scale), hand height is vibrato, a fist is silence.
 

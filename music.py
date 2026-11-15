@@ -30,7 +30,7 @@ import constants as c
 import modes
 import music_theory as mt
 from art_window import ArtWindow, hsv_hex
-from synth import AudioEngine, NoteBank, PadVoice, ThereminVoice
+from synth import AudioEngine, BowedVoice, NoteBank, PadVoice, ThereminVoice
 
 
 BG = (7, 9, 15)
@@ -61,6 +61,11 @@ class _Instrument:
 
 	name = ''
 	footer = ''
+	# True for instruments that need the left hand for themselves (the bowed
+	# strings: it is the fingerboard). The session then leaves the left hand
+	# alone -- no chord poses, no volume fader, no thumb-to-switch -- and
+	# silences the chord pad.
+	owns_left_hand = False
 
 	def __init__(self, session):
 		self.s = session
@@ -463,7 +468,278 @@ class Theremin(_Instrument):
 			)
 
 
-_INSTRUMENT_CLASSES = {'harp': Harp, 'keys': Keys, 'theremin': Theremin}
+# =====================================================================
+# Bowed / plucked strings: violin, viola, cello
+# =====================================================================
+
+class Strings(_Instrument):
+	"""Right hand bows (or plucks), left hand holds down the strings.
+
+	  RIGHT  sweep side to side = bow; bow speed is loudness (slow draw =
+	         quiet, fast = loud), a note held for a while gains vibrato;
+	         hand height picks the string (four bands, crossing strings like
+	         a bow does); pinch thumb + index = pluck (pizzicato)
+	  LEFT   hand height = where on the string you're pressing, from the
+	         open string up about an octave and a half. Pitches are pulled
+	         toward the key and scale chosen in Settings, so it can't go
+	         badly out of tune.
+	"""
+
+	owns_left_hand = True
+	timbre = 'violin'
+	label = 'Violin'
+	OPEN = (55, 62, 69, 76)           # low -> high, as MIDI notes
+	SPAN = 14                         # semitones above the open string
+	MAGNET = 0.85                     # 1 = fully snapped to the scale
+	MIN_SPEED = 80.0                  # px/s of bow motion below which nothing sounds
+	FULL_SPEED = 1200.0               # px/s for full volume
+	Y0, Y1 = 0.30, 0.80               # the bowing zone, as a fraction of screen height
+	FOOTER = (
+		'bow with your right hand (hand height = string, speed = loudness)   |   '
+		'pinch to pluck   |   left hand height = pitch   |   shaka = pause'
+	)
+
+	def __init__(self, session):
+		super().__init__(session)
+		self.footer = self.FOOTER
+		self.voice = BowedVoice(session.engine, self.timbre)
+		self.pinch = ag.Pinch(c.LEFT_CLICK_CUTOFF)
+		self.string_idx = 1               # index into the strings, top band = 0 = highest
+		self.level = 0.0                  # left hand: 0 = open string .. 1 = top of the range
+		self.midi = float(self.OPEN[1])
+		self.sounding = False
+		self.bow_x = None
+		self._prev_x = None
+		self._prev_t = None
+		self._speed = 0.0
+		self._direction = 0
+		self._held = 0.0                  # seconds of continuous bowing (drives vibrato)
+		self._plucks = []                 # [x, y, born, rgb]
+		self._last_glow = 0.0
+		self._right_y = None
+
+	# -- geometry -------------------------------------------------------------
+
+	def string_y(self, idx):
+		s = self.s
+		top, bottom = s.H * self.Y0, s.H * self.Y1
+		band = (bottom - top) / len(self.OPEN)
+		return top + band * (idx + 0.5)
+
+	def _pick_string(self, y):
+		"""Which string a right-hand height selects, with hysteresis so a
+		bow hovering on a boundary doesn't flicker between two strings."""
+		s = self.s
+		n = len(self.OPEN)
+		top, bottom = s.H * self.Y0, s.H * self.Y1
+		band = (bottom - top) / n
+		cur = self.string_idx
+		lo, hi = top + band * cur, top + band * (cur + 1)
+		margin = band * 0.18
+		if lo - margin <= y <= hi + margin:
+			return cur
+		return min(max(int((y - top) // band), 0), n - 1)
+
+	def open_midi(self, idx):
+		return self.OPEN[len(self.OPEN) - 1 - idx]     # top band is the highest string
+
+	# -- lifecycle --------------------------------------------------------------
+
+	def start(self):
+		self.voice.start()
+
+	def stop(self):
+		self.voice.set(amp=0.0)
+		self.voice.stop()
+		self.pinch.reset()
+		self.sounding = False
+		self._prev_x = self._prev_t = None
+		self._speed = 0.0
+		self._held = 0.0
+		self.bow_x = None
+
+	def retune(self):
+		pass
+
+	# -- per frame ---------------------------------------------------------------
+
+	def _fingered_pitch(self, left, open_midi):
+		if left is not None:
+			self.level = ag.height_to_level(left.palm_point()[1], left.frame_h, low=0.78, high=0.32)
+		raw = open_midi + self.level * self.SPAN
+		return mt.snap_to_scale(raw, self.s.key, self.s.scale, self.MAGNET)
+
+	def update(self, right, now):
+		s = self.s
+		left = s.left_hand
+		if right is None:
+			self.voice.set(amp=0.0)
+			self.sounding = False
+			self.bow_x = None
+			self._prev_x = self._prev_t = None
+			self._speed = 0.0
+			self._held = 0.0
+			self.pinch.reset()
+			return
+
+		px, py = right.palm_point()
+		sx, sy = ag.frame_to_screen(px, py, right.frame_w, right.frame_h, s.W, s.H)
+		self.bow_x, self._right_y = sx, sy
+		self.string_idx = self._pick_string(sy)
+		open_midi = self.open_midi(self.string_idx)
+		self.midi = self._fingered_pitch(left, open_midi)
+
+		# Bow speed from the palm's horizontal motion
+		dt = 1.0 / 30.0
+		if self._prev_x is not None and now > self._prev_t:
+			dt = min(now - self._prev_t, 0.1)
+			v = (sx - self._prev_x) / (now - self._prev_t)
+			self._speed = 0.55 * self._speed + 0.45 * abs(v)
+			if abs(v) > self.MIN_SPEED:
+				self._direction = 1 if v > 0 else -1
+		self._prev_x, self._prev_t = sx, now
+
+		in_zone = s.H * self.Y0 - 40 <= sy <= s.H * self.Y1 + 40
+		pinching = self.pinch.update(right.pinch_dist(c.INDEX_IDX))
+		if pinching:
+			# Pinch = pizzicato; fire on the closing edge only.
+			if not getattr(self, '_was_pinching', False) and in_zone:
+				self._pluck(sx, self.string_y(self.string_idx), now)
+			self._was_pinching = True
+			self.voice.set(amp=0.0)
+			self.sounding = False
+			self._held = 0.0
+			return
+		self._was_pinching = False
+
+		amp = 0.0
+		if in_zone and self._speed > self.MIN_SPEED:
+			amp = min(1.0, (self._speed - self.MIN_SPEED) / (self.FULL_SPEED - self.MIN_SPEED)) ** 0.7
+		self.sounding = amp > 0.04
+		# Vibrato builds while a note is held and only drains slowly in a
+		# gap, so it carries through a change of bow direction (where the
+		# speed briefly dips to nothing) the way a player's does.
+		if self.sounding:
+			self._held += dt
+		else:
+			self._held = max(0.0, self._held - 2.0 * dt)
+		# Vibrato blooms in after the note has been held for a moment, like a player's.
+		vibrato = min(max((self._held - 0.5) / 1.0, 0.0), 1.0) * 0.55
+		self.voice.set(freq=mt.midi_to_freq(self.midi), amp=0.9 * amp, vibrato=vibrato)
+
+		if self.sounding and now - self._last_glow > 0.35:
+			self._last_glow = now
+			s.light(sx, self.string_y(self.string_idx), 0.1 + 0.25 * amp, self.midi)
+
+	def _pluck(self, x, y, now):
+		s = self.s
+		if s.engine.available:
+			sound = s.bank.get('harp', int(round(self.midi)))
+			s.engine.play(sound, 0.85, pan=(x / s.W * 2.0 - 1.0) * 0.6)
+		self._plucks.append([x, y, now, _pc_color(self.midi, 1.0, 0.55)])
+		del self._plucks[:-8]
+		s.light(x, y, 0.35, self.midi)
+
+	# -- drawing --------------------------------------------------------------------
+
+	def draw(self, cv, now):
+		s = self.s
+		x0, x1 = s.W * 0.14, s.W * 0.90
+		n = len(self.OPEN)
+		color = _pc_color(self.midi, 1.0, 0.55)
+		for idx in range(n):
+			y = self.string_y(idx)
+			open_m = self.open_midi(idx)
+			selected = idx == self.string_idx
+			base = _pc_color(open_m, 0.55, 0.45)
+			width = 2 + (n - 1 - idx) * 0.0 + (1.5 if selected else 0)      # thicker lower strings
+			width = 1.5 + 0.7 * idx + (1.5 if selected else 0)
+			col = _hex(_mix(base, color, 0.7)) if selected else _hex(base)
+			if selected and self.sounding:
+				amp = 6 + 20 * min(1.0, self._speed / self.FULL_SPEED)
+				pts = []
+				for k in range(41):
+					u = k / 40
+					off = amp * math.sin(math.pi * u) * math.cos(2.0 * math.pi * 9.0 * now)
+					pts += [x0 + (x1 - x0) * u, y + off]
+				cv.create_line(*pts, fill=_hex(_mix(color, BG, 0.65)), width=width + 7, smooth=True)
+				cv.create_line(*pts, fill=_hex(color), width=width + 1, smooth=True)
+			else:
+				cv.create_line(x0, y, x1, y, fill=col, width=width)
+			cv.create_text(
+				x1 + 26, y, text=mt.note_name(open_m), fill=_hex(_pc_color(open_m, 0.8, 0.55)),
+				font=('Segoe UI', 12, 'bold'),
+			)
+
+		# plucked-string ripples
+		self._plucks = [p for p in self._plucks if now - p[2] < 0.9]
+		for x, y, born, rgb in self._plucks:
+			age = (now - born) / 0.9
+			amp = 16 * (1 - age)
+			pts = []
+			for k in range(41):
+				u = k / 40
+				off = amp * math.sin(math.pi * u) * math.cos(2.0 * math.pi * 7.0 * (now - born)) * (1 - age)
+				pts += [x0 + (x1 - x0) * u, y + off]
+			cv.create_line(*pts, fill=_hex(rgb), width=3, smooth=True)
+
+		# the bow
+		if self.bow_x is not None and self._right_y is not None:
+			bx, by = self.bow_x, self._right_y
+			half = s.W * 0.13
+			tilt = 14
+			cv.create_line(bx - half, by + tilt, bx + half, by - tilt, fill='#7a5a3a', width=5, capstyle='round')
+			cv.create_line(bx - half + 6, by + tilt + 5, bx + half - 6, by - tilt + 5, fill='#efe6d4', width=3, capstyle='round')
+			if self.sounding:
+				arrow = '\u25b6' if self._direction > 0 else '\u25c0'
+				cv.create_text(bx, by - 34, text=arrow, fill=_hex(color), font=('Segoe UI', 14, 'bold'))
+
+		# the fingerboard ruler: the left hand's height as a pitch
+		rx = s.W * 0.06
+		top, bottom = s.H * 0.28, s.H * 0.80
+		cv.create_line(rx, top, rx, bottom, fill='#3a4466', width=3)
+		open_m = self.open_midi(self.string_idx)
+		for m in range(int(open_m), int(open_m + self.SPAN) + 1):
+			if mt.snap_to_scale(m, s.key, s.scale, 1.0) != m:
+				continue
+			frac = (m - open_m) / self.SPAN
+			y = bottom - frac * (bottom - top)
+			cv.create_line(rx - 8, y, rx + 8, y, fill=_hex(_pc_color(m, 0.7, 0.6)), width=2)
+			cv.create_text(rx + 24, y, text=mt.note_name(m), fill='#7f89ad', font=('Segoe UI', 9))
+		frac = min(max((self.midi - open_m) / self.SPAN, 0.0), 1.0)
+		my = bottom - frac * (bottom - top)
+		cv.create_oval(rx - 9, my - 9, rx + 9, my + 9, fill=_hex(color), outline='#ffffff', width=2)
+		cv.create_text(rx - 18, my, text=mt.note_name(self.midi), fill='#ffffff', font=('Segoe UI', 14, 'bold'), anchor='e')
+		cv.create_text(rx, bottom + 22, text='open', fill='#555d7e', font=('Segoe UI', 9))
+		if s.left_hand is None:
+			cv.create_text(rx, top - 22, text='left hand', fill='#555d7e', font=('Segoe UI', 10))
+
+
+class Violin(Strings):
+	name = 'violin'
+	timbre = 'violin'
+	label = 'Violin'
+	OPEN = (55, 62, 69, 76)           # G3 D4 A4 E5
+
+
+class Viola(Strings):
+	name = 'viola'
+	timbre = 'viola'
+	label = 'Viola'
+	OPEN = (48, 55, 62, 69)           # C3 G3 D4 A4
+
+
+class Cello(Strings):
+	name = 'cello'
+	timbre = 'cello'
+	label = 'Cello'
+	OPEN = (36, 43, 50, 57)           # C2 G2 D3 A3
+
+
+_INSTRUMENT_CLASSES = {
+	'harp': Harp, 'keys': Keys, 'theremin': Theremin,
+	'violin': Violin, 'viola': Viola, 'cello': Cello,
+}
 
 
 # =====================================================================
@@ -508,6 +784,7 @@ class MusicSession:
 		self.left_pose = ag.PoseTracker(frames=3)
 		self.instrument_latch = ag.Latch(0.8)
 		self.shaka = ag.ShakaWatch()
+		self.left_hand = None
 
 		self._instruments = {}
 		self.instrument = None
@@ -569,6 +846,12 @@ class MusicSession:
 		del self._halos[:-16]
 
 	def _apply_pad(self):
+		if self.instrument.owns_left_hand:
+			# The bowed strings use the left hand for pitch, so there are no
+			# chord poses to follow, and a sustained pad under a solo string
+			# would only muddy it.
+			self.pad.stop()
+			return
 		chord = self.chord
 		self.pad.set_chord(chord['root_pc'], chord['quality'], 0.5 * self.volume)
 		self.pad.set_level(0.5 * self.volume)     # left-hand height swells the pad too
@@ -608,6 +891,7 @@ class MusicSession:
 		right, left = ag.pick_hands(hands)
 		if hands:
 			self._last_hands_time = now
+		self.left_hand = left
 		self._update_left(left, now)
 		self.instrument.update(right, now)
 
@@ -617,6 +901,14 @@ class MusicSession:
 		return False
 
 	def _update_left(self, left, now):
+		if self.instrument.owns_left_hand:
+			# The instrument reads the left hand itself (see Strings). No chord
+			# poses, no volume fader, and no thumb-hold-to-switch: a fingering
+			# hand curls and drifts through that pose all the time. Switch
+			# with the control bar's Next instrument button or the Mode window.
+			self.left_pose.reset()
+			self.instrument_latch.update(False, now)
+			return
 		if left is None:
 			self.left_pose.reset()
 			self.instrument_latch.update(False, now)
@@ -697,29 +989,30 @@ class MusicSession:
 			28, 50, anchor='nw', fill='#7f89ad', font=('Segoe UI', 10),
 			text=f'{self.key} {self.scale}',
 		)
-		for i, chord in enumerate(self.chords):
-			x = 28 + i * 74
-			active = i == self.chord_idx
-			cv.create_rectangle(
-				x, 78, x + 66, 118, fill='#e8ecff' if active else '#161a2a',
-				outline='#8d99c8' if active else '#2a3048', width=2,
-			)
-			cv.create_text(
-				x + 33, 92, text=chord['label'], fill='#0b0d14' if active else '#9aa4c8',
-				font=('Segoe UI', 13, 'bold'),
-			)
-			cv.create_text(
-				x + 33, 109, text=chord['numeral'], fill='#555d7e' if active else '#555d7e',
-				font=('Segoe UI', 8),
-			)
-		# Volume fader.
-		cv.create_text(28, 132, anchor='nw', text='VOL', fill='#7f89ad', font=('Segoe UI', 9, 'bold'))
-		cv.create_rectangle(62, 134, 62 + 200, 146, fill='#161a2a', outline='')
-		cv.create_rectangle(62, 134, 62 + 200 * self.volume, 146, fill='#8d99c8', outline='')
+		if not self.instrument.owns_left_hand:
+			for i, chord in enumerate(self.chords):
+				x = 28 + i * 74
+				active = i == self.chord_idx
+				cv.create_rectangle(
+					x, 78, x + 66, 118, fill='#e8ecff' if active else '#161a2a',
+					outline='#8d99c8' if active else '#2a3048', width=2,
+				)
+				cv.create_text(
+					x + 33, 92, text=chord['label'], fill='#0b0d14' if active else '#9aa4c8',
+					font=('Segoe UI', 13, 'bold'),
+				)
+				cv.create_text(
+					x + 33, 109, text=chord['numeral'], fill='#555d7e' if active else '#555d7e',
+					font=('Segoe UI', 8),
+				)
+			# Volume fader.
+			cv.create_text(28, 132, anchor='nw', text='VOL', fill='#7f89ad', font=('Segoe UI', 9, 'bold'))
+			cv.create_rectangle(62, 134, 62 + 200, 146, fill='#161a2a', outline='')
+			cv.create_rectangle(62, 134, 62 + 200 * self.volume, 146, fill='#8d99c8', outline='')
 
 		cv.create_text(
 			self.W / 2, self.H - 18, fill='#4d5575', font=('Segoe UI', 10),
-			text=self.instrument.footer + '   |   thumb held = next instrument   |   shaka = pause',
+			text=self.instrument.footer + ('' if self.instrument.owns_left_hand else '   |   thumb held = next instrument   |   shaka = pause'),
 		)
 
 		if not self.engine.available:

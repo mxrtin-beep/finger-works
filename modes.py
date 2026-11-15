@@ -21,6 +21,9 @@ INSTRUMENTS = [
 	('harp', 'Harp', 'Sweep your fingers across the strings to strum.'),
 	('keys', 'Keys', 'Pinch over a key to play it; slide while pinched for a glissando.'),
 	('theremin', 'Theremin', 'Move your hand left/right for pitch. Fist = silence.'),
+	('violin', 'Violin', 'Bow with your right hand; your left hand\'s height fingers the notes. Pinch to pluck.'),
+	('viola', 'Viola', 'Like the violin, a fifth lower and darker.'),
+	('cello', 'Cello', 'Like the violin, two octaves lower and richer.'),
 ]
 
 INSTRUMENT_IDS = [i[0] for i in INSTRUMENTS]

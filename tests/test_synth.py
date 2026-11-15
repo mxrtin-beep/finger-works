@@ -127,6 +127,71 @@ class ThereminTests(unittest.TestCase):
 		self.assertLess(float(np.max(np.abs(chunk))), 1e-4)
 
 
+class BowedVoiceTests(unittest.TestCase):
+	def make(self, timbre):
+		return synth.BowedVoice(types.SimpleNamespace(sample_rate=SR, available=False), timbre)
+
+	def settle(self, v, freq, amp=0.8, vibrato=0.0, secs=1.0):
+		v.set(freq=freq, amp=amp, vibrato=vibrato)
+		for _ in range(30):
+			v._render_chunk()
+		return np.concatenate([v._render_chunk() for _ in range(int(secs * SR / 1024))])
+
+	def test_pitch_is_exact_for_every_voice(self):
+		for timbre in synth.BOWED_TIMBRES:
+			y = self.settle(self.make(timbre), 196.0)
+			self.assertAlmostEqual(dominant_freq(y, 0, len(y)), 196.0, delta=2.0, msg=timbre)
+
+	def test_brightness_orders_violin_viola_cello(self):
+		# Measure the harmonics themselves -- not all high-frequency energy,
+		# which would also count the bow-hiss (and the cello has the most).
+		def bright(timbre):
+			y = self.settle(self.make(timbre), 220.0, secs=1.0)
+			spec = np.abs(np.fft.rfft(y * np.hanning(len(y))))
+			def partial(k):
+				c = int(round(220.0 * k * len(y) / SR))
+				return float(spec[c - 2:c + 3].max())
+			parts = [partial(k) for k in range(1, 11)]
+			return sum(parts[3:]) / sum(parts)          # 4th harmonic and up
+		# a clear step between each (measured: ~16-19%), not a hair's difference
+		self.assertGreater(bright('violin'), bright('viola') * 1.08)
+		self.assertGreater(bright('viola'), bright('cello') * 1.08)
+
+	def test_a_bowed_tone_has_far_more_harmonics_than_the_theremin(self):
+		bowed = self.settle(self.make('violin'), 220.0)
+		theremin = self.settle(synth.ThereminVoice(types.SimpleNamespace(sample_rate=SR, available=False)), 220.0)
+		def high_share(y):
+			spec = np.abs(np.fft.rfft(y * np.hanning(len(y))))
+			return float(spec[int(1500 * len(y) / SR):].sum() / spec.sum())
+		self.assertGreater(high_share(bowed), 10 * max(high_share(theremin), 1e-4))
+
+	def test_level_is_safe_and_audible(self):
+		for timbre in synth.BOWED_TIMBRES:
+			y = self.settle(self.make(timbre), 110.0, amp=1.0)
+			self.assertLess(float(np.max(np.abs(y))), 0.95, timbre)
+			self.assertGreater(float(np.sqrt((y ** 2).mean())), 0.05, timbre)
+
+	def test_silent_when_the_bow_is_still(self):
+		v = self.make('cello')
+		y = self.settle(v, 110.0, amp=0.0, secs=0.5)
+		self.assertLess(float(np.max(np.abs(y))), 0.02)
+
+	def test_chunks_join_cleanly_through_a_pitch_slide_and_vibrato(self):
+		v = self.make('violin')
+		v.set(freq=330.0, amp=0.8, vibrato=0.5)
+		a = np.concatenate([v._render_chunk() for _ in range(30)])
+		v.set(freq=440.0)
+		b = np.concatenate([v._render_chunk() for _ in range(30)])
+		out = np.concatenate([a, b])
+		# rosin hiss makes single samples jumpy, so look at a smoothed signal for seams
+		smooth = np.convolve(out, np.ones(8) / 8, mode='valid')
+		self.assertLess(float(np.max(np.abs(np.diff(smooth)))), 0.3)
+
+	def test_a_bow_takes_a_moment_to_speak(self):
+		bow, theremin = self.make('violin'), synth.ThereminVoice(types.SimpleNamespace(sample_rate=SR, available=False))
+		self.assertGreater(bow.AMP_TAU, theremin.AMP_TAU)
+
+
 class EngineTests(unittest.TestCase):
 	def test_engine_never_raises_without_audio(self):
 		# With no usable audio device AudioEngine must degrade to available=False

@@ -290,6 +290,9 @@ class ThereminVoice:
 	"""
 
 	CHUNK = 1024
+	GLIDE_TAU = 0.045         # seconds: how quickly pitch follows its target
+	AMP_TAU = 0.05            # ...and loudness (an attack/release time)
+	GAIN = 0.32
 
 	def __init__(self, engine):
 		self.engine = engine
@@ -334,8 +337,8 @@ class ThereminVoice:
 		dt = n / sr
 
 		# Exponential glide toward the targets, interpolated across the chunk.
-		f_next = self._freq + (self.freq_target - self._freq) * (1.0 - np.exp(-dt / 0.045))
-		a_next = self._amp + (self.amp_target - self._amp) * (1.0 - np.exp(-dt / 0.05))
+		f_next = self._freq + (self.freq_target - self._freq) * (1.0 - np.exp(-dt / self.GLIDE_TAU))
+		a_next = self._amp + (self.amp_target - self._amp) * (1.0 - np.exp(-dt / self.AMP_TAU))
 		freq = np.linspace(self._freq, f_next, n, endpoint=False)
 		amp = np.linspace(self._amp, a_next, n, endpoint=False)
 		self._freq, self._amp = f_next, a_next
@@ -348,8 +351,11 @@ class ThereminVoice:
 		self._phase = float(phase[-1] % (2 * np.pi))
 		# A pure sine is too clinical; a little 2nd/3rd harmonic gives the
 		# thin, vocal edge a real theremin has.
-		wave = np.sin(phase) + 0.28 * np.sin(2 * phase) + 0.10 * np.sin(3 * phase)
-		return wave * amp * 0.32
+		return self._wave(phase) * amp * self.GAIN
+
+	def _wave(self, phase):
+		"""The timbre, as a function of phase. Overridden by BowedVoice."""
+		return np.sin(phase) + 0.28 * np.sin(2 * phase) + 0.10 * np.sin(3 * phase)
 
 	def _run(self):
 		pg = self.engine._pg
@@ -365,3 +371,46 @@ class ThereminVoice:
 				time.sleep(0.004)
 			except Exception:
 				time.sleep(0.05)
+
+
+# Timbre per bowed instrument: (harmonic roll-off exponent, number of
+# harmonics, bow-noise level). Lower exponent = brighter; the cello is the
+# darkest and the most rosiny.
+BOWED_TIMBRES = {
+	'violin': (0.90, 14, 0.010),
+	'viola': (1.10, 12, 0.012),
+	'cello': (1.25, 10, 0.016),
+}
+
+
+class BowedVoice(ThereminVoice):
+	"""A sustained bowed-string tone, steered exactly like the theremin
+	(`set(freq, amp, vibrato)`; a worker thread streams chunks) but with a
+	string's character: a sawtooth-like stack of harmonics whose brightness
+	depends on the instrument, a faint rosin hiss that follows the bow, and a
+	slower attack/release than a bare oscillator -- bows take a moment to
+	set a string vibrating.
+	"""
+
+	GLIDE_TAU = 0.06
+	AMP_TAU = 0.07
+	GAIN = 0.5
+
+	def __init__(self, engine, timbre='violin'):
+		super().__init__(engine)
+		self.set_timbre(timbre)
+		self._rng = np.random.default_rng(1)
+
+	def set_timbre(self, timbre):
+		self.timbre = timbre if timbre in BOWED_TIMBRES else 'violin'
+		rolloff, count, noise = BOWED_TIMBRES[self.timbre]
+		self._k = np.arange(1, count + 1)
+		self._weights = 1.0 / self._k ** rolloff
+		self._weights /= self._weights.sum() * 0.55
+		self._noise = noise
+
+	def _wave(self, phase):
+		wave = np.zeros_like(phase)
+		for k, w in zip(self._k, self._weights):
+			wave += w * np.sin(k * phase)
+		return wave + self._noise * self._rng.standard_normal(len(phase)) * 3.0
