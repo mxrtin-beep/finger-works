@@ -73,6 +73,11 @@ DEFAULTS = {
 	# 'scale' = every note of the scale like a real harp, so melodies can be
 	# played.
 	'harp_tuning': 'chord',
+	# The Music keys: True = every note of the scale (like a piano, so tunes
+	# are playable; pentatonic/blues choices use their seven-note parent),
+	# False = only the chosen scale's own notes (the pentatonic layout, where
+	# any keys sound good together).
+	'keys_full_scale': True,
 }
 
 # Settings persisted to disk across restarts -- everything in DEFAULTS

@@ -289,8 +289,13 @@ class Keys(_Instrument):
 
 	def retune(self):
 		s = self.s
-		count = 2 * len(mt.SCALES[s.scale]) + 1
-		self.notes = mt.scale_notes(s.key, s.scale, count, lowest=60)
+		# Every note of the scale by default -- like a piano, so tunes are
+		# playable (pentatonic/blues use their seven-note parent). With the
+		# setting off, only the chosen scale's own notes: the pentatonic
+		# layout, where any keys sound good together.
+		scale = mt.diatonic_scale(s.scale) if s.keys_full_scale else s.scale
+		count = 2 * len(mt.SCALES[scale]) + 1
+		self.notes = mt.scale_notes(s.key, scale, count, lowest=60)
 		s.bank.warm('keys', self.notes)
 
 	def _geometry(self):
@@ -819,6 +824,7 @@ class MusicSession:
 		self.key = settings.get('music_key', mt.DEFAULT_KEY)
 		self.scale = settings.get('music_scale', mt.DEFAULT_SCALE)
 		self.harp_tuning = settings.get('harp_tuning', 'chord') if settings.get('harp_tuning') in ('chord', 'scale') else 'chord'
+		self.keys_full_scale = bool(settings.get('keys_full_scale', True))
 		if self.scale not in mt.SCALES:
 			self.scale = mt.DEFAULT_SCALE
 		self.chords = mt.chord_set(self.key, self.scale)
@@ -891,6 +897,11 @@ class MusicSession:
 			self._flash('Harp: scale notes (play melodies)' if tuning == 'scale' else 'Harp: chord tones', 2.2)
 			if 'harp' in self._instruments:
 				self._instruments['harp'].retune()
+		full = bool(settings.get('keys_full_scale', self.keys_full_scale))
+		if full != self.keys_full_scale:
+			self.keys_full_scale = full
+			if 'keys' in self._instruments:
+				self._instruments['keys'].retune()
 		if (key, scale) == (self.key, self.scale):
 			return
 		self.key, self.scale = key, scale

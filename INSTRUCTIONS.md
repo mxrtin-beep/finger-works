@@ -101,6 +101,8 @@ Click **Settings** in the control bar to open a small settings window:
   applied live if Music mode is running. See "Music mode" below.
 - **Paint sounds** -- the soft pad, pen tone and chimes in Paint mode (on by
   default; needs pygame). See "Paint mode".
+- **Harp strings** -- *Chord tones* (the default) or *Scale notes* for the Music harp. See "Music mode". The control bar's **Harp strings** button flips it too.
+- **Keys: every scale note** -- on by default: the Music keys cover every note of the scale like a piano (pentatonic/blues choices use their seven-note parent) so tunes can be played; off gives only the chosen scale's own notes (the pentatonic layout).
 - **Click sounds** / **Keyboard sounds** -- both off by default. A short,
   quiet tone on every left/right-click, or every on-screen keyboard key
   press, respectively -- see `sounds.py`. Deliberately light rather than
@@ -177,6 +179,8 @@ never persists either way).
 ## Debug mode
 
 Off by default:
+
+In **Paint and Music** the camera preview is a smaller window tucked into the bottom-right corner, just above the control bar (the fullscreen canvas would cover the usual top-left one), so you can see your hands; it moves back to the top-left in Control mode. Hand skeletons and labels are drawn on it as usual, and the canvas also shows a readout of the frame rate, hand count, which fingers read as extended and the pinch distances.
 
 - The overlay panel (bottom-right corner of the screen) is **hidden**
   unless the on-screen keyboard is toggled on. It only appears when you
@@ -353,7 +357,7 @@ Every note and chord is drawn from the key and scale in Settings (see
 | Instrument | Gesture |
 |---|---|
 | **Harp** | Ten strings in a compact band in the top half of the screen, tuned either to the **current chord** (`harp_tuning: chord`, the default: root/3rd/5th upward, ~3 octaves; left-hand chords retune them) or to **every note of the scale** (`harp_tuning: scale`: ten consecutive scale notes from middle C, so melodies are playable; pentatonic and blues choices use their diatonic parent -- `music_theory.diatonic_scale` -- because their gaps would make tunes impossible, e.g. Twinkle Twinkle needs the F). Toggle with the control bar's **Harp strings** button or Settings; it is remembered. In scale tuning chord changes still move the pad and the current chord's strings are drawn brighter. Strings are numbered under their note names. Any of your five fingertips crossing a string plucks it, so a whole-hand sweep is a strum. Pluck speed sets loudness; position sets stereo pan. A string needs a crossing at >=170 px/s measured over 4 frames (so tracking jitter on a resting hand doesn't pluck), and re-triggers at most every 80 ms. |
-| **Keys** | Eleven-plus keys of the scale across two octaves (more for 7-note scales). Pinch thumb + index over a key to play it; strike nearer the bottom of a key for a harder note. Slide while pinched to glissando -- a neighbouring key only takes over once the pointer is clearly inside it (hysteresis). Keys in the current chord are lit. Release = the note fades. |
+| **Keys** | Two octaves-plus of the scale, **every note by default** (`keys_full_scale`: 15 keys in a major scale, like a piano, so tunes are playable; turn it off in Settings for the pentatonic layout, 11 keys where any keys sound good together). Pinch thumb + index over a key to play it; strike nearer the bottom of a key for a harder note. Slide while pinched to glissando -- a neighbouring key only takes over once the pointer is clearly inside it (hysteresis). Keys in the current chord are lit. Release = the note fades. |
 | **Theremin** | A continuous tone: hand left/right = pitch over three octaves (pulled 70% toward the nearest scale note, with glide), hand height = vibrato depth, fist or no hand = silent. Volume is the left hand's height. |
 | **Strings** | See "Strings" below. |
 

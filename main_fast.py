@@ -685,6 +685,7 @@ def main(settings):
 	music_instrument = modes.normalize_instrument(settings.get('music_instrument'))
 	paint_sound = settings.get('paint_sound', True)
 	harp_tuning = settings.get('harp_tuning', 'chord')
+	keys_full_scale = settings.get('keys_full_scale', True)
 	mode = modes.CONTROL
 	art = None
 	# The last Paint canvas (and brush), kept while you're in another mode
@@ -788,7 +789,7 @@ def main(settings):
 		return True
 
 	def handle_settings_changed(new_settings):
-		nonlocal cap_device, camera_device_setting, button_list, music_key, music_scale, paint_sound, harp_tuning
+		nonlocal cap_device, camera_device_setting, button_list, music_key, music_scale, paint_sound, harp_tuning, keys_full_scale
 		# The Settings window only knows about the settings it shows; keep
 		# everything else (e.g. the remembered Music instrument) as it was
 		# instead of letting save_settings() reset it to its default.
@@ -798,6 +799,7 @@ def main(settings):
 		music_scale = new_settings['music_scale']
 		paint_sound = new_settings['paint_sound']
 		harp_tuning = new_settings['harp_tuning']
+		keys_full_scale = new_settings['keys_full_scale']
 		if art is not None:
 			art.apply_settings(new_settings)
 
@@ -842,6 +844,7 @@ def main(settings):
 			'music_scale': music_scale,
 			'paint_sound': paint_sound,
 			'harp_tuning': harp_tuning,
+			'keys_full_scale': keys_full_scale,
 			'music_instrument': (
 				art.instrument_name() if (art is not None and art.mode == modes.MUSIC)
 				else music_instrument

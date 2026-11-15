@@ -138,7 +138,7 @@ C major pentatonic), so there are no wrong notes.
   single notes, point with just your index finger and flick it across one
   string, lifting off before moving to the next. The left hand's chords still
   change the pad underneath, and the current chord's strings glow brighter.
-- **Keys** -- pinch thumb + index over a key to play it; slide while
+- **Keys** -- a piano-style keyboard of every note in your scale (turn off "Keys: every scale note" in Settings for the simpler pentatonic layout). Pinch thumb + index over a key to play it; slide while
   pinched for a glissando. Keys that belong to the current chord are lit.
 - **Strings** (a violin-family instrument) -- your fingers *are* the bow and
   the strings; there's a how-to panel on screen. **Right index finger**: touch
@@ -172,6 +172,11 @@ a live camera feed with your hand tracking overlaid, plus diagnostic text
 (current event, mouse sensitivity, which hand is doing what, live
 zoom/paste gesture state) -- see `INSTRUCTIONS.md` for the full rundown of
 gestures, parameters, and what the debug output means.
+
+In **Paint and Music** the camera preview is a small window in the
+bottom-right corner, just above the control bar, so you can see your hands
+while you play (and the screen shows the frame rate and what each hand is
+reading as).
 
 If you're running a packaged `.exe` build (Windows) rather than
 `python main_fast.py` directly, its console window is hidden the same way

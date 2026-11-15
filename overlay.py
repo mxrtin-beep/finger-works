@@ -499,6 +499,14 @@ class Overlay:
 		canvas appears, or Pause/Mode/Quit would be buried under it."""
 		if min_interval and time.time() - self._last_raise < min_interval:
 			return      # event-driven callers: raising changes stacking, which fires events -- don't loop
+		# The debug camera preview sits above the art canvas (lifted first, so
+		# the control bar still ends up on top of it).
+		if self.video_canvas is not None:
+			try:
+				self.video_window.lift()
+				self.video_window.attributes('-topmost', True)
+			except tk.TclError:
+				pass
 		self.control_window.lift()
 		self.control_window.attributes('-topmost', True)
 		# The dialogs (Settings / Mode / Help) belong above the canvas and the
@@ -538,6 +546,8 @@ class Overlay:
 			self.root.withdraw()
 			self._visible = False
 		self._refit_control_bar()
+		self._layout_video_window()
+		self.raise_controls()
 		if self._instructions_win is not None and self._instructions_win.winfo_exists():
 			self._instructions_win.destroy()
 			self._instructions_win = None
@@ -724,12 +734,19 @@ class Overlay:
 		tk.OptionMenu(win, harp_var, *harp_labels.values()).grid(
 			row=10, column=1, sticky='ew', padx=10, pady=4)
 
+		keys_full_var = tk.BooleanVar(value=current.get('keys_full_scale', True))
+		tk.Checkbutton(
+			win, text='Keys: every scale note (needed for tunes)', variable=keys_full_var,
+			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
+			activebackground='#1e1e1e', activeforeground='#dddddd',
+		).grid(row=11, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+
 		paint_sound_var = tk.BooleanVar(value=current.get('paint_sound', True))
 		tk.Checkbutton(
 			win, text='Paint sounds (soft pad, pen tone, chimes)', variable=paint_sound_var,
 			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
 			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=11, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+		).grid(row=12, column=0, columnspan=2, sticky='w', padx=10, pady=4)
 
 		# Debug mode is deliberately excluded from "remembered for next
 		# time" (see settings.py's _PERSISTED_KEYS) -- it only ever applies
@@ -739,7 +756,7 @@ class Overlay:
 			win, text='Debug mode (event text + live camera view)', variable=debug_var,
 			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
 			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=12, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
+		).grid(row=13, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
 
 		def apply_and_close():
 			chosen = camera_var.get()
@@ -758,6 +775,7 @@ class Overlay:
 				'music_scale': music_scale_var.get(),
 				'paint_sound': paint_sound_var.get(),
 				'harp_tuning': harp_by_label[harp_var.get()],
+				'keys_full_scale': keys_full_var.get(),
 			}
 			if self.on_settings_changed:
 				self.on_settings_changed(new_settings)
@@ -780,10 +798,11 @@ class Overlay:
 			music_scale_var.set(d['music_scale'])
 			paint_sound_var.set(d['paint_sound'])
 			harp_var.set(harp_labels[d['harp_tuning']])
+			keys_full_var.set(d['keys_full_scale'])
 			debug_var.set(d['debug'])
 
 		btn_frame = tk.Frame(win, bg='#1e1e1e')
-		btn_frame.grid(row=13, column=0, columnspan=2, pady=(0, 10))
+		btn_frame.grid(row=14, column=0, columnspan=2, pady=(0, 10))
 		_make_flat_button(btn_frame, 'Apply', apply_and_close, bg='#2ecc71').pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Cancel', close).pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Reset to Defaults', reset_to_defaults).pack(side='left', padx=4)
@@ -902,20 +921,42 @@ class Overlay:
 
 	# --- Debug video window ----------------------------------------------
 
+	def _video_layout(self):
+		"""(width, height, x, y) for the debug camera preview.
+
+		Control mode: the usual large preview in the top-left corner. Paint
+		and Music: a smaller one just above the control bar in the bottom
+		right, so it's tucked out of the way of the art but still visible --
+		the fullscreen canvas would otherwise cover a top-left window, and
+		the point of the preview there is to see where your hands are.
+		Always 4:3, scaled off the screen width like everything else."""
+		if modes.is_art_mode(self.mode):
+			width = max(240, min(420, round(self.screen_width * 0.17)))
+			height = round(width * 0.75)
+			x = self.screen_width - width - self._margin
+			bar_top = self.screen_height - self.control_height - self._bottom_clearance
+			y = max(0, bar_top - height - 12)
+			return width, height, x, y
+		width = max(360, min(640, round(self.screen_width * 0.28)))
+		return width, round(width * 0.75), self._margin, self._margin
+
+	def _layout_video_window(self):
+		"""Move/resize an existing preview for the current mode."""
+		if self.video_canvas is None:
+			return
+		width, height, x, y = self._video_layout()
+		self.video_width, self.video_height = width, height
+		self.video_window.geometry(f'{width}x{height}+{x}+{y}')
+		self.video_canvas.config(width=width, height=height)
+
 	def _create_video_window(self):
-		# Scaled off screen width (clamped) rather than a fixed 480x360,
-		# same reasoning as the control bar/margins above; kept at a 4:3
-		# aspect ratio regardless of screen size.
-		self.video_width = max(360, min(640, round(self.screen_width * 0.28)))
-		self.video_height = round(self.video_width * 0.75)
+		self.video_width, self.video_height, vx, vy = self._video_layout()
 
 		self.video_window = tk.Toplevel(self.root)
 		self.video_window.title('finger-works -- camera')
 		self.video_window.overrideredirect(True)
 		self.video_window.attributes('-topmost', True)
-		self.video_window.geometry(
-			f'{self.video_width}x{self.video_height}+{self._margin}+{self._margin}'
-		)
+		self.video_window.geometry(f'{self.video_width}x{self.video_height}+{vx}+{vy}')
 		self.video_window.bind('<Escape>', lambda _event: self._quit())
 		self.video_window.protocol('WM_DELETE_WINDOW', self._quit)
 
