@@ -209,6 +209,28 @@ def capture_focused_window():
 		print(f'[WARN] capture_focused_window() failed: {exc}')
 
 
+# How long the main loop tolerates a camera that has stopped delivering
+# frames before giving up with an error.
+CAMERA_STALL_SECONDS = 5.0
+
+
+def _camera_delivers_frame(cap, seconds=2.5):
+	"""Whether `cap` actually returns a frame within `seconds`.
+
+	isOpened() only says the device was claimed, not that it works: some
+	backends (notably Windows' default one, right after DirectShow failed)
+	report opened and then fail their first reads for a moment -- or for
+	good. A backend is only worth keeping if a real frame comes out."""
+	deadline = time.time() + seconds
+	while True:
+		ok, frame = cap.read()
+		if ok and frame is not None:
+			return True
+		if time.time() >= deadline:
+			return False
+		time.sleep(0.05)
+
+
 def _open_camera(device, cap_width, cap_height):
 	"""Open one camera device, sized and (on Windows) backended for speed.
 
@@ -221,7 +243,10 @@ def _open_camera(device, cap_width, cap_height):
 	after a short pause before giving up. Other platforms have no
 	Windows-only backend to try (passing one elsewhere would just error).
 
-	Always returns a VideoCapture; if nothing opened it's the last, unopened
+	A backend only counts if it actually delivers a frame (see
+	_camera_delivers_frame), not merely if it says it opened.
+
+	Always returns a VideoCapture; if nothing worked it's the last, released
 	one, which callers check with isOpened()."""
 	backends = [cv2.CAP_DSHOW, cv2.CAP_ANY] if sys.platform == 'win32' else [cv2.CAP_ANY]
 	cap = None
@@ -231,7 +256,8 @@ def _open_camera(device, cap_width, cap_height):
 			if cap.isOpened():
 				cap.set(cv2.CAP_PROP_FRAME_WIDTH, cap_width)
 				cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cap_height)
-				return cap
+				if _camera_delivers_frame(cap):
+					return cap
 			cap.release()
 		if attempt == 0:
 			time.sleep(0.6)       # camera may just be releasing from a previous run
@@ -975,12 +1001,33 @@ def main(settings):
 	if settings.get('mode', modes.CONTROL) != modes.CONTROL:
 		start_mode(settings['mode'])
 
+	failed_reads = 0
+	first_failed_read = 0.0
 	try:
 		while not overlay.should_quit:
 
 			ret, image = cap.read()
 			if not ret:
-				break
+				# One failed read is not the end of the program: cameras
+				# hiccup, and some backends fail their first reads while
+				# warming up. This used to `break` straight out of the loop,
+				# silently -- the program just vanished. Keep the UI alive and
+				# keep trying; only give up (loudly) if it stays dead.
+				if failed_reads == 0:
+					first_failed_read = time.time()
+				failed_reads += 1
+				overlay.pump()
+				time.sleep(0.01)
+				if time.time() - first_failed_read > CAMERA_STALL_SECONDS:
+					message = (
+						f'The camera stopped delivering frames for {CAMERA_STALL_SECONDS:g} seconds. '
+						'Check that it is connected and not in use by another app, then restart FingerWorks.'
+					)
+					print(f'[ERROR] {message}')
+					overlay.show_message('FingerWorks', message)
+					break
+				continue
+			failed_reads = 0
 			try:
 				image = cv2.flip(image, 1)  # Mirror display
 
