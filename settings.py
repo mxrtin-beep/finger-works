@@ -52,13 +52,35 @@ DEFAULTS = {
 	# keyboard_sounds' own audio; doesn't touch anything else on the
 	# system.
 	'sound_volume': 0.7,
+	# Which way FingerWorks is being used: 'control' (drive the computer),
+	# 'paint' or 'music' (the two artistic modes) -- see modes.py. Session-
+	# only, like 'debug' (see _SESSION_ONLY_KEYS below): every launch
+	# starts in Control mode unless --mode says otherwise, so the program
+	# always opens as the computer-control tool it's always been rather
+	# than waking up mid-painting.
+	'mode': 'control',
+	# Music mode's key/scale (see music_theory.py) and last-used instrument.
+	# These *are* remembered, since they're taste rather than a per-run
+	# choice.
+	'music_key': 'C',
+	'music_scale': 'Major pentatonic',
+	'music_instrument': 'harp',
+	# Paint mode's soft sound design (ambient pad, pen tone, burst chime);
+	# needs pygame, silently does nothing without it. See paint.py.
+	'paint_sound': True,
+	# The Music keys: True = every note of the scale (like a piano, so tunes
+	# are playable; pentatonic/blues choices use their seven-note parent),
+	# False = only the chosen scale's own notes (the pentatonic layout, where
+	# any keys sound good together).
+	'keys_full_scale': True,
 }
 
 # Settings persisted to disk across restarts -- everything in DEFAULTS
-# except 'debug', which is deliberately session-only: --debug (or the
-# Settings checkbox) should only ever affect the run you set it for, not
-# silently turn debug mode on for every future launch too.
-_PERSISTED_KEYS = [key for key in DEFAULTS if key != 'debug']
+# except the session-only keys: --debug (or the Settings checkbox) should
+# only ever affect the run you set it for, not silently turn debug mode on
+# for every future launch too, and likewise the mode (see DEFAULTS).
+_SESSION_ONLY_KEYS = ('debug', 'mode')
+_PERSISTED_KEYS = [key for key in DEFAULTS if key not in _SESSION_ONLY_KEYS]
 
 
 def load_settings():
@@ -79,9 +101,9 @@ def load_settings():
 	for key in _PERSISTED_KEYS:
 		if key in data:
 			settings[key] = data[key]
-	# 'debug' is deliberately never read back from disk either, even if an
-	# older settings file (from before it became session-only) still has
-	# one -- see _PERSISTED_KEYS above.
+	# The session-only keys are deliberately never read back from disk
+	# either, even if an older settings file (from before 'debug' became
+	# session-only) still has one -- see _PERSISTED_KEYS above.
 	return settings
 
 

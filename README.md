@@ -1,7 +1,9 @@
 # 🖐️ FingerWorks
 
 Control your computer using hand gestures recognized by your webcam --
-no touching required.
+no touching required. Or put the same hand tracking to creative use:
+**paint** on a canvas in the air, or **play music** with nothing but your
+hands (see [Modes](#modes)).
 
 ## License
 
@@ -18,12 +20,12 @@ no Python install needed.
 
 **From source:**
 
-    python main_fast.py [--sensitivity MULTIPLIER] [--debug]
+    python main_fast.py [--sensitivity MULTIPLIER] [--mode control|paint|music] [--debug]
 
-A small control bar (**Pause**, **Help**, **Settings**, **Quit**) sits in
-the bottom-right corner of the screen at all times, so you can pause
-tracking, look up the gestures, or quit without needing a gesture or the
-command line. Minimize the console once it's running.
+A small control bar (**Pause**, **Mode**, **Help**, **Settings**, **Quit**)
+sits in the bottom-right corner of the screen at all times, so you can
+pause tracking, switch modes, look up the gestures, or quit without
+needing a gesture or the command line. Minimize the console once it's running.
 
 Demo: https://www.youtube.com/watch?v=EUsH5B4Lh8c&feature=youtu.be
 
@@ -44,6 +46,120 @@ Demo: https://www.youtube.com/watch?v=EUsH5B4Lh8c&feature=youtu.be
 Click **Help** in the control bar any time for the full gesture list, or
 see the [Gestures](#gestures) section below for the complete rundown.
 
+## Modes
+
+FingerWorks has three modes. The one you've always had -- **Control** --
+is what it starts in. Switch with the control bar's **Mode** button (or
+`--mode paint` / `--mode music` on the command line); it always starts in
+Control mode next time, however you left it.
+
+| Mode | What it does |
+|---|---|
+| **Control** | Your hands run the computer: cursor, clicks, on-screen keyboard, zoom, scroll. |
+| **Paint** | Paint with living light: pinch to ignite, clench to gather, snap open to burst; tilt your left hand to tune. |
+| **Music** | An instrument in the air: a harp you strum, keys you pinch, or a theremin you wave at. |
+
+Both artistic modes have no keyboard, zoom or scroll, and they never touch
+your real mouse -- the hands only drive the canvas. Your hand is mapped to
+the screen generously (the middle ~55% of the camera's view covers all of
+it), so you can sit back and keep your whole hand in frame. The 🤙 **Hang Ten**
+sign (thumb and pinky out, on *either* hand, held for a moment) still
+pauses; the control bar stays on top so you can switch mode, un-pause or
+quit with your physical mouse.
+
+### 🎨 Paint
+
+Not a drawing tool -- a calm piece of living light. Soft glowing orbs drift
+through an invisible flow, alive even with nobody in front of it (leave it
+alone and a ghost painter takes over). Your hands act on it. It's drawn as
+crisp vector shapes, so it stays sharp at any resolution and runs smoothly.
+
+**Right hand -- the conductor.** It aims where your **middle finger
+points**, exactly like the cursor in Control mode.
+
+- 🤏 Pinch thumb + index → **ignite**: a glowing ribbon of light follows
+  your fingertip, fading as it ages, and throws off sparks. Lift the pen and
+  put it down somewhere else and you start a **separate line** (they never
+  join up); a quick tap leaves a dot. A flicker of the pinch right where you
+  were doesn't break your line.
+- ✊ Clench your fist → **gather**: the orbs are drawn into orbit around
+  your fingertip
+- 🖐️ Snap the fist open → **burst**: a ring of light shoves them outward
+- Just moving stirs the swarm, and every fingertip sheds sparks
+
+**Left hand -- the atmosphere.** Hold a pose, then **tilt your hand like a
+joystick**: lean right to keep raising a value, lean left to keep lowering
+it, straighten up to hold it. There's no range limit -- it can go as far as
+you like -- and a small wrist movement is enough.
+
+| Pose | Tilting changes |
+|---|---|
+| ☝️ One finger | **Colour** -- rotates everything through the palette |
+| ✌️ Two fingers | **Glow** -- small crisp orbs ↔ big soft ones |
+| Three fingers | **Flow** -- calm ↔ turbulent |
+| 🖐️ Four fingers / open hand | **Trail** -- short ribbon ↔ long ribbon |
+| ✊ Fist, held | **Stops time** -- everything hangs in the air; open to resume |
+| 👍 Thumb alone, held | Next **palette** (Aurora, Ember, Ocean, Nebula, Prism) |
+
+**Sound** (needs `pygame`; turn off with *Paint sounds* in Settings) is smooth and
+oceanic: a slow bed of surf whose waves swell and recede, and a deep, dreamy pad
+that follows the palette (changing palette moves to a new mood) and breathes like
+a tide. Drawing plays soft droplet notes, always in key, more often the faster
+you go; clenching swells the surf; a burst is a wave washing through; and the
+whole thing hushes while time is stopped.
+
+The control bar gains **Palette**, **Reset** and **Save** buttons (Save
+writes a full-resolution PNG to `Pictures/FingerWorks`).
+
+### 🎵 Music
+
+Every note comes from the **key and scale** you pick in Settings (default
+C major pentatonic), so there are no wrong notes.
+
+**Left hand -- harmony and dynamics.**
+
+- Hold up **1 · 2 · 3 · 4 fingers** → chord **I · IV · V · vi** (in a
+  minor scale: **i · iv · VI · VII**). The chord stays until you pick
+  another.
+- Hand **height** is the volume: raise it to swell, lower it to soften.
+- A soft **chord pad** plays underneath whatever instrument you're on, so a
+  chord change is always audible -- including on Keys, whose notes are
+  scale notes and so don't depend on the chord.
+- 👍 Thumb alone, held a moment → next instrument.
+
+**Right hand -- the instrument** (the control bar's **Mode** window or
+**Next instrument** button also switch between them):
+
+- **Harp** -- a compact harp in the top half of the screen: sweep your
+  **fingers** across ten strings to strum. They're tuned to the current
+  chord, and plucks pan left-to-right with the string.
+- **Keys** -- a piano-style keyboard of every note in your scale (turn off "Keys: every scale note" in Settings for the simpler pentatonic layout). Pinch thumb + index over a key to play it; slide while
+  pinched for a glissando. Keys that belong to the current chord are lit.
+- **Strings** (a violin-family instrument) -- your fingers *are* the bow and
+  the strings; there's a how-to panel on screen. **Right index finger**: touch
+  a string (the one under your fingertip lights up), then **drag sideways** to
+  bow it -- the faster you drag, the louder, and a held note gradually gains
+  vibrato. Moving up/down just changes string. **Left index finger**: point it
+  up or down to press the string -- higher is a higher note, from the open
+  string up about an octave and a half, shown on a ladder at the left and
+  pulled toward your key and scale so it stays in tune. **Pinch** your right
+  thumb + index to pluck instead. The left hand is the fingerboard, so this
+  instrument has no chord poses or chord pad; switch away with the control
+  bar's **Next instrument** button or the Mode window.
+- **Theremin** -- hand left/right is pitch (gently pulled toward the
+  scale), hand height is vibrato, a fist is silence.
+
+Sound needs `pygame` (optional for the rest of FingerWorks). Without it
+the visuals still run and the window says so. Install it with
+`pip install pygame`, **or `pip install pygame-ce` if that fails** -- on
+newer Pythons (3.14 at the time of writing) plain `pygame` has no
+prebuilt Windows wheel and tries to compile from source, which usually
+errors out. `pygame-ce` is a maintained drop-in fork with prebuilt wheels;
+it's still imported as `pygame`. Install one or the other, not both. All sounds are synthesized -- there are
+no audio files to ship.
+
+See `INSTRUCTIONS.md` for the complete reference.
+
 ## 🐞 Debug Mode
 
 Off by default. Turn it on in **Settings** (or run with `--debug`) to see
@@ -51,6 +167,11 @@ a live camera feed with your hand tracking overlaid, plus diagnostic text
 (current event, mouse sensitivity, which hand is doing what, live
 zoom/paste gesture state) -- see `INSTRUCTIONS.md` for the full rundown of
 gestures, parameters, and what the debug output means.
+
+In **Paint and Music** the camera preview is a small window in the
+bottom-right corner, just above the control bar, so you can see your hands
+while you play (and the screen shows the frame rate and what each hand is
+reading as).
 
 If you're running a packaged `.exe` build (Windows) rather than
 `python main_fast.py` directly, its console window is hidden the same way
@@ -274,6 +395,14 @@ detection itself isn't recognizing it (check lighting/framing, or that
 zoom, the gesture is fine and the problem is downstream, in the OS
 hotkey `execute_zoom()` sends (e.g. the OS magnifier isn't installed/
 enabled, or another app is capturing that shortcut).
+
+## Tests
+
+    python -m unittest discover -s tests -t .
+
+Covers the gesture helpers, music theory, the light swarm and the synth.
+(`settings` tests need OpenCV installed, and the audio-engine test needs
+`pygame`; each is skipped or degrades gracefully if missing.)
 
 ## Using this with gloves on
 

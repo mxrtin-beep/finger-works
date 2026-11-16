@@ -346,6 +346,18 @@ def is_zoomed_in():
 	return _is_zoomed_in
 
 
+def reset_zoom_state():
+	"""Forget that the screen is zoomed in. Called after switching away
+	from Control mode, where main_fast.py zooms the magnifier back out
+	itself -- without this the gesture state would still think it's zoomed
+	in, and the next open-hand gesture back in Control mode would do
+	nothing."""
+	global _is_zoomed_in, _zoom_in_frames, _zoom_out_frames
+	_is_zoomed_in = False
+	_zoom_in_frames = 0
+	_zoom_out_frames = 0
+
+
 # --- Left hand: paste gesture -------------------------------------------
 #
 # Same "scissors" pose (index + middle extended, other three folded) as

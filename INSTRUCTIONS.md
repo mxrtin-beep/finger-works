@@ -6,13 +6,17 @@ and more narrative detail; this file is meant as a flat lookup.
 
 ## Running
 
-    python main_fast.py [--sensitivity MULTIPLIER] [--debug]
+    python main_fast.py [--sensitivity MULTIPLIER] [--mode MODE] [--debug]
 
 - `--sensitivity MULTIPLIER` -- mouse-speed multiplier. Defaults to
   whatever's saved in settings (`1.0` the first time you run it). `1.5`
   moves the cursor faster, `0.5` slower. A multiplier on top of
   `constants.MOUSE_SPEED`. Passing it here overrides (and re-saves) the
   settings value; it's also changeable at runtime from the Settings window.
+- `--mode MODE` -- `control` (the default), `paint` or `music`. Which way
+  to use FingerWorks; see "Modes" below. Never remembered: every launch
+  starts in Control mode unless you pass this. Switchable at runtime with
+  the control bar's **Mode** button.
 - `--debug` -- defaults to whatever's saved in settings (off the first
   time you run it). See "Debug mode" below. Also toggleable at runtime
   from the Settings window.
@@ -36,7 +40,14 @@ gesture with, or to already know a gesture at all:
   (the camera keeps running, just isn't acted on) until you resume. Useful
   for stepping away or using your physical mouse/keyboard for a bit
   without quitting the program outright.
-- **Help** -- opens a quick gesture cheat sheet (see "Gestures" below).
+- **Mode: ...** -- shows the current mode and opens the Mode window to
+  switch between Control, Paint and Music (and pick a Music instrument).
+  See "Modes" below.
+- **Mode-specific buttons** -- appear between Mode and Help while an
+  artistic mode is active: **Undo / Clear / Save** in Paint, **Next
+  instrument** in Music.
+- **Help** -- opens a quick gesture cheat sheet for the *current* mode
+  (see "Gestures" and "Modes" below).
 - **Settings** -- opens the Settings window (see "Settings" below).
 - **Quit** -- quits the program. Same effect as Escape. (The thumb+pinky
   gesture that used to quit now pauses instead -- see "Gestures" below --
@@ -84,6 +95,13 @@ Click **Settings** in the control bar to open a small settings window:
 - **Keyboard size** -- scales the overlay panel (and so the on-screen
   keyboard drawn on it) up or down. The panel repositions itself to stay
   clear of the control bar at any size.
+- **Music key** / **Music scale** -- the key (C ... B) and scale (major/
+  minor pentatonic, major, natural minor, dorian, lydian, blues) Music
+  mode draws every note and chord from. Remembered across restarts, and
+  applied live if Music mode is running. See "Music mode" below.
+- **Paint sounds** -- the soft pad, pen tone and chimes in Paint mode (on by
+  default; needs pygame). See "Paint mode".
+- **Keys: every scale note** -- on by default: the Music keys cover every note of the scale like a piano (pentatonic/blues choices use their seven-note parent) so tunes can be played; off gives only the chosen scale's own notes (the pentatonic layout).
 - **Click sounds** / **Keyboard sounds** -- both off by default. A short,
   quiet tone on every left/right-click, or every on-screen keyboard key
   press, respectively -- see `sounds.py`. Deliberately light rather than
@@ -161,6 +179,8 @@ never persists either way).
 
 Off by default:
 
+In **Paint and Music** the camera preview is a smaller window tucked into the bottom-right corner, just above the control bar (the fullscreen canvas would cover the usual top-left one), so you can see your hands; it moves back to the top-left in Control mode. Hand skeletons and labels are drawn on it as usual, and the canvas also shows a readout of the frame rate, hand count, which fingers read as extended and the pinch distances.
+
 - The overlay panel (bottom-right corner of the screen) is **hidden**
   unless the on-screen keyboard is toggled on. It only appears when you
   actually need it -- to see and aim at the keyboard's keys -- and stays
@@ -211,7 +231,185 @@ With `--debug`:
     the action still doesn't happen, the gesture is fine and the problem
     is downstream (OS hotkey, focused app, etc.).
 
+## Modes
+
+FingerWorks has three ways of being used, switched with the control bar's
+**Mode** button (or `--mode`):
+
+| Mode | Purpose |
+|---|---|
+| **Control** | The default. Hands drive the computer. Everything under "Gestures" below. |
+| **Paint** | Fullscreen living-light piece: right hand ignites/gathers/bursts, left hand tunes by tilting. |
+| **Music** | Fullscreen instrument: left hand picks chords/volume, right hand plays. |
+
+Switching modes lets go of whatever the old one held: a pressed mouse
+button is released, and a zoomed-in screen is zoomed back out. Coming back
+to Control mode, everything (including the zoom gesture) works as before.
+
+What the artistic modes have in common:
+
+- They **never move your real cursor or click**; the hands drive an
+  in-app pointer on a fullscreen canvas. There is no keyboard, zoom or
+  scroll.
+- A faint skeleton of each tracked hand is drawn on the canvas, since
+  there's no real cursor to show you where your hands are.
+- **Pause** is the Hang Ten sign (thumb + pinky out, middle three
+  folded), on *either* hand, held for ~4 frames (Control mode pauses on
+  the first frame; here an accidental pause would cut a stroke or a note
+  in half). Pausing silences all sound and ends any stroke. Resume with
+  the control bar's **Resume** button.
+- The canvas is a normal always-on-top window that never takes keyboard
+  focus. The control bar (and any Settings/Mode/Help window) is kept above
+  it: a click on a topmost window re-stacks it, which used to bury the bar,
+  so the bar re-raises itself when the canvas is clicked and once a second
+  in every mode. **Escape** and **Quit** still
+  quit.
+- Hand position maps to the screen with generous margins (`art_gestures.
+  FRAME_MARGIN_X/Y`: the central ~56% x ~48% of the camera frame covers
+  the whole screen) so you can keep your hand well back, fully in view, and pointer motion goes through a
+  one-euro filter: steady when your hand is still, responsive when it
+  moves.
+- The **left hand's label stability** delay from Control mode doesn't
+  apply here; instead poses are debounced over 3 frames before they
+  count.
+
+### Paint mode
+
+Paint with living light (`lightswarm.py` simulates it, `paint.py` draws it
+and reads the gestures). Around 80 soft orbs drift through a divergence-free
+"curl" flow -- alive on its own -- and your hands act on it. It is
+deliberately small (a couple of hundred things) and drawn as **crisp vector
+shapes** on the Tk canvas.
+
+**Right hand.** The aim point is the **middle fingertip** (as in Control
+mode), smoothed with a one-euro filter.
+
+| Gesture | Effect |
+|---|---|
+| Thumb + index pinch | **Ignite**: each frame adds a point to the pen's *ribbon* -- a glowing line, widest and brightest at the newest end, that ages out over the **Trail** time -- and throws a few sparks that drift away with the flow. Colour shades along the stroke. **Strokes are separate**: points are only joined to others in the same stroke (`LightSwarm.end_stroke`, `ribbon_segments`), so lifting the pen and putting it down elsewhere starts a new line, and a tap leaves a dot. A stroke ends once the pen has been up for `STROKE_GAP_SECONDS` (0.18 s) -- and if it comes back down sooner *and* within `STROKE_GAP_DISTANCE` (70 px at 1920 wide) of where it lifted, that was pinch flicker from tracking noise and the line carries on; a quick hop further away is a new stroke. |
+| Clench (openness -> 0) | **Gather**: an attractor at the aim point, strength `0.1 + 0.9 (1-openness)^2`, with a sideways component (orbs orbit) and extra drag near the centre. Even an open hand has a faint pull. |
+| Snap open | **Burst**: an expanding shockwave ring that shoves and flashes orbs, plus a spray of sparks. Needs a *recent clench* (within 0.7 s) and a fast opening (openness velocity > 2.2/s); one burst per clench, 0.5 s cooldown; strength follows the speed. |
+| Moving | **Stir**: orbs near the fingertip are dragged along with it. Fast-moving fingertips of either hand shed sparks, and both hands are drawn as faint skeletons. |
+
+Pinch uses hysteresis (closes at `LEFT_CLICK_CUTOFF`, opens at 1.35x).
+"Openness" (`Hand.openness()`) is the mean wrist-to-fingertip distance of
+the four fingers, mapped so a fist is 0 and a spread hand is 1
+(`OPEN_FIST_DIST`/`OPEN_SPREAD_DIST` in `art_gestures.py`).
+
+**Left hand -- tilt joystick.** The pose picks a parameter; the hand's
+*roll* (`Hand.roll_degrees()`: the angle of the wrist -> middle-knuckle
+line from vertical) sets its *rate of change* via `tilt_rate()`: nothing
+inside a 12 degree dead zone, ramping to full speed at 40 degrees, sign
+following the lean. Value moves for as long as you hold the tilt, so there
+is no range limit.
+
+| Pose | Parameter | Full-tilt rate (`PaintSession`) | Range |
+|---|---|---|---|
+| One finger | Colour (palette rotation) | `HUE_RATE` 0.45 turns/s | wraps |
+| Two fingers | Glow (orb size and ribbon fatness) | `GLOW_RATE` 1.1 (log, per s) | 0.5 - 3.5 |
+| Three fingers | Flow (how hard the flow stirs) | `SWIRL_RATE` 1.4 /s | 0 - 3 |
+| Four fingers / open | Trail (how long the ribbon lasts) | `TRAIL_RATE` 1.2 (log, per s) | 0.15 - 5 s |
+| Fist (held) | Time stops (timescale eases to 0.03) | -- | -- |
+| Thumb alone, held 0.7 s | Next palette | -- | 5 palettes |
+
+A small gauge appears at the top of the screen while you tune.
+
+**Sound** (`PaintSession._audio`/`_chime`, using the `synth` engine; silent without pygame; *Paint sounds* checkbox in Settings, `paint_sound`) is built to be smooth and oceanic, never sharp -- all of it synthesized, with every loop seamless by construction:
+
+| Layer | What it is |
+|---|---|
+| **Surf** (`synth.render_surf`, `SurfVoice`) | A 12 s stereo loop of low-passed noise (12 dB/octave roll-off from 750 Hz, high-passed at 40 Hz) whose loudness rises and falls like waves arriving, two per loop, the right channel's waves a beat behind the left so it moves across the stereo field. Its level is `0.10 + 0.20 (1-openness)^2 + 0.08 x pen speed`: clenching and moving swell it. Rendered on a background thread; plays on reserved channel 3. |
+| **Pad** (`synth.render_ocean_pad`) | A deep stereo pad of pure sines in an open add9 chord, each note doubled with a hair-detuned partner for slow shimmer and breathing on its own slow cycle (8 s loop, gently swelling and ebbing). Each palette has a mood in `PALETTE_MOODS` (Aurora D, Ember Am, Ocean G, Nebula Em, Prism C); changing palette crossfades to it over 0.7 s. Level `0.16 + 0.16 (1-openness)^2`. All five moods are pre-rendered in the background. |
+| **Droplets** (`synth.render_drop`) | While you draw and move, an occasional soft rounded note (pitch from the pen's height over two octaves, snapped 95% to the mood's pentatonic scale; panned by position): a gentle attack (no pluck transient), a trace of upper harmonics and a detuned partner, a long smooth decay. Interval `max(0.30 s, 0.85 s - speed/1500)`: faster = more. Quiet (volume 0.20). |
+| **Wave** (`synth.render_whoosh`) | A burst, and a palette change, play one wave washing in and out (stereo noise that swells, brightens a little at the crest and fades to silence) with three soft droplets (root, fifth, octave) above it. |
+| **Hush** | While time is stopped the pad drops to 40%, the surf to 35%, and droplets stop. |
+
+(An earlier version played a continuous synthesized pen tone and a bright FM chime; both are gone.)
+
+**Idle:** after `IDLE_SECONDS` (4 s) with no hands a ghost painter -- a
+slow Lissajous wisp that paints, with an occasional soft burst -- takes
+over so an unattended screen is never blank.
+
+**Performance.** Every shape (orbs, sparks, ribbon segments, rings, pointer)
+is created **once** as a canvas item and then only *moved* and recoloured
+each frame -- creating and deleting hundreds of canvas items per frame is
+what makes Tk stutter. Colours are quantized (32 palette steps x 16
+brightness levels) so the colour strings are precomputed, and an item's
+colour/width is only touched when it actually changes. The simulation is a
+few dozen numpy operations on ~250 elements. Frame cost is ~6 ms at 1080p
+in testing (an earlier pixel-field version cost 20-35 ms and looked blocky
+when scaled up). Halos *add* to the sky colour (`glow_colour`) rather than
+using a plain faint colour, which would be darker than the lit sky and show
+up as a dark ring.
+
+**Save** renders the current state at full screen resolution with Pillow
+(supersampled glow, since it's one-off) as `light-YYYYmmdd-HHMMSS.png` in
+`~/Pictures/FingerWorks` (or `~/FingerWorks`). **Reset** clears the ribbon and sparks; **Palette**
+cycles palettes. The swarm survives leaving and returning to Paint within
+a run.
+
+### Music mode
+
+Every note and chord is drawn from the key and scale in Settings (see
+`music_theory.py`), so any combination of gestures sounds consonant.
+
+**Left hand.**
+
+| Gesture | Action |
+|---|---|
+| Index only / index+middle / 3 fingers / 4 fingers | Chord I / IV / V / vi (minor scales: i / iv / VI / VII). Latched until you pick another; a fist or no hand keeps it. |
+| Hand height | Volume (`0.25`-`1.0`; raise to swell). Stays where you left it if the hand leaves. |
+| Thumb alone, held 0.8s | Next instrument. |
+
+**Instruments** (right hand):
+
+| Instrument | Gesture |
+|---|---|
+| **Harp** | Ten strings tuned to the current chord (root/3rd/5th upward, ~3 octaves), in a compact band in the top half of the screen. Any of your five fingertips crossing a string plucks it, so a whole-hand sweep is a strum. Pluck speed sets loudness; position sets stereo pan. A string needs a crossing at >=170 px/s measured over 4 frames (so tracking jitter on a resting hand doesn't pluck), and re-triggers at most every 80 ms. |
+| **Keys** | Two octaves-plus of the scale, **every note by default** (`keys_full_scale`: 15 keys in a major scale, like a piano, so tunes are playable; turn it off in Settings for the pentatonic layout, 11 keys where any keys sound good together). Pinch thumb + index over a key to play it; strike nearer the bottom of a key for a harder note. Slide while pinched to glissando -- a neighbouring key only takes over once the pointer is clearly inside it (hysteresis). Keys in the current chord are lit. Release = the note fades. |
+| **Theremin** | A continuous tone: hand left/right = pitch over three octaves (pulled 70% toward the nearest scale note, with glide), hand height = vibrato depth, fist or no hand = silent. Volume is the left hand's height. |
+| **Strings** | See "Strings" below. |
+
+**Strings** -- `music.Strings`, with `BowedVoice` in `synth.py` for the sound.
+One violin-family instrument (open strings C3 G3 D4 A4, between violin and
+cello). Your *fingers* are the controls -- there is no drawn bow -- and a
+how-to panel is shown for the first 35 s and whenever the hands have been
+away for 2 s. The hands swap roles compared with the other instruments: the
+left hand is the fingerboard, so it is *not* used for chords, volume or
+switching instruments (those poses are ignored, the chord pad is stopped, and
+the header's chord chips/volume bar are hidden). Change instrument with the
+control bar's **Next instrument** button or the Mode window.
+
+| Hand | Gesture | Effect |
+|---|---|---|
+| Right | Put the **index fingertip** inside a string's lane | **Select** that string: its lane lights up and a ring marks your fingertip (silent so far; "drag sideways to bow" is shown). Four lanes between 30% and 80% of the screen height, top lane = highest string, 18% hysteresis on the boundaries. |
+| Right | **Drag the fingertip sideways** along the string | **Bow.** Only *horizontal* speed counts (moving up/down just changes string). Nothing below `MIN_SPEED` (90 px/s), full volume at `FULL_SPEED` (1100 px/s), eased with an exponent of 0.7. An arrow shows the direction. Outside the lanes it is silent and says "move onto a string". |
+| Right | Pinch thumb + index | **Pluck** (pizzicato) on the closing edge: a harp-voice note at the current fingered pitch. No bowing while pinched. |
+| Right | Hold a bowed note | **Vibrato** fades in after 0.5 s of sounding (full by 1.5 s) and only drains slowly in a gap, so it carries through bow changes. |
+| Left | **Index fingertip** height | **Pitch**: the open string at the bottom of the range up `SPAN` (14) semitones at the top, pulled `MAGNET` (85%) toward the key/scale from Settings (fingertip heights 70% -> 22% of the camera frame). The last position is remembered if the hand leaves. Point with your index finger -- the fingertip is what's read. |
+
+A ladder on the left shows the scale notes available on the current string and
+the fingered note. The bowed voice streams exactly like the theremin (one
+reserved mixer channel, glide, click-free chunk joins) but with a stack of 13
+harmonics, a faint rosin hiss that follows the bow, and slower attack/release.
+(`synth.BOWED_TIMBRES` is a table, so more instruments could be added.) An
+older saved choice of `violin`, `viola` or `cello` maps to `strings`.
+
+**Chord pad.** A soft, seamlessly-looping chord (`synth.render_pad`: root, then an octave-up triad, each note doubled with a quarter-hertz partner for a slow chorus shimmer, with a gentle tremolo) plays under every instrument, on two reserved mixer channels that crossfade over 0.7 s when the chord changes. It exists so a chord change is always *audible* -- Keys' notes are scale notes and so identical whatever the chord. Its level follows the left hand's height.
+
+**Backdrop.** Pure vector drawing, so it stays crisp at any resolution and costs almost nothing per frame: a soft navy-to-violet sky, slowly drifting twinkling stars, and glow halos (concentric discs fading into the sky) that bloom in the note's colour at each pluck/key press, alongside the expanding colour rings. The theremin leaves a trail of halos, and a chord change blooms one mid-screen.
+
+**Sound** is synthesized with numpy and played through `pygame.mixer`
+(`synth.py`) -- harp is an additive "plucked string" (upper harmonics decay
+faster), keys an FM electric piano, theremin a streaming oscillator on one
+reserved mixer channel with glide, vibrato and click-free chunk joins.
+Notes are cached and the other chords' harp notes are rendered in the
+background so a chord change never stalls a strum. Without `pygame` (or an
+audio device) Music mode still runs silently and says so on screen.
+
 ## Gestures
+
+*(This section is Control mode -- see "Modes" above for Paint and Music.)*
 
 ### Right hand -- mouse & keyboard
 
@@ -333,6 +531,17 @@ is active, matching whatever's currently shown on the button -- via
 `pyautogui.typewrite()` rather than `press()`, so shifted punctuation (on
 the symbols page, or anywhere else) comes out correct without needing
 special-casing for each character.
+
+## Tests
+
+    python -m unittest discover -s tests -t .
+
+`tests/` covers the pure logic: gesture helpers (`art_gestures.py`: poses,
+debouncing, openness, tilt, burst detection), music theory, the light
+swarm (flow, attractors, shockwaves, ribbon, colours) and the synth's
+pitch/envelope/click-free behaviour (including the chord pad's loop seam), and settings persistence (which skips itself without OpenCV).
+`tests/handmodel.py` builds synthetic hands whose finger-out and pinch
+distances are scaled to the real cutoffs in `constants.py`.
 
 ## Parameters (`constants.py`)
 

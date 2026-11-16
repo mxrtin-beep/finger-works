@@ -6,14 +6,19 @@ pyperclip
 Pillow
 nltk
 
-# pygame is deliberately NOT listed here: it's only used for Click sounds/
-# Keyboard sounds (see sounds.py), and only if it's actually importable --
-# everything else works fine without it, and those two Settings toggles
-# just fall back to a simpler per-platform player if it's missing. It's
+# pygame is deliberately NOT listed here: it's used for Click sounds/
+# Keyboard sounds (see sounds.py) and for Music mode's instruments (see
+# synth.py), and only if it's actually importable -- everything else works
+# fine without it. The two Settings toggles fall back to a simpler
+# per-platform player if it's missing; Music mode has no fallback (it
+# needs a real mixer for polyphony and low latency), so it runs silently
+# and says so on screen. If you build the Windows .exe yourself and want
+# Music mode to make sound in it, have pygame installed when you run
+# PyInstaller so it gets bundled. It's
 # also only installable where a prebuilt wheel exists for your Python
 # version; it has no prebuilt wheel yet for very new Python releases (e.g.
 # fails to build from source on Python 3.14, missing MSVC build
-# tools/distutils) -- not worth chasing unless you already have a full
-# Visual Studio Build Tools setup. If you want it and your Python version
-# has a wheel for it, `pip install pygame` separately; nothing else in
-# this project depends on it.
+# tools/distutils). On such a Python, install `pygame-ce` instead -- a
+# maintained drop-in fork with prebuilt wheels that is still imported as
+# `pygame` (install one or the other, not both). Otherwise `pip install
+# pygame` separately; nothing else in this project depends on it.
