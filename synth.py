@@ -53,10 +53,10 @@ class AudioEngine:
 			self.sample_rate = freq
 			self.channels = channels
 			pygame.mixer.set_num_channels(self.CHANNELS)
-			# Channel 0 is the theremin's stream and channels 1-2 the chord
-			# pad's two crossfading halves, so a burst of plucked notes can
-			# never steal any of them.
-			pygame.mixer.set_reserved(3)
+			# Channel 0 is the theremin's/strings' stream, channels 1-2 the chord
+			# pad's two crossfading halves and channel 3 Paint's surf bed, so a
+			# burst of plucked notes can never steal any of them.
+			pygame.mixer.set_reserved(4)
 			self._pg = pygame
 			self.available = True
 		except Exception as exc:    # no pygame, no device, ...
@@ -68,6 +68,17 @@ class AudioEngine:
 		if self.channels >= 2:
 			pcm = np.ascontiguousarray(np.stack([pcm] * self.channels, axis=1))
 		return self._pg.sndarray.make_sound(pcm)
+
+	def make_stereo_sound(self, left, right):
+		"""Two float arrays (-1..1) -> a pygame Sound with a real left/right
+		image (for wide, enveloping sounds like surf)."""
+		pcm = np.stack([
+			(np.clip(left, -1.0, 1.0) * 32767.0).astype(np.int16),
+			(np.clip(right, -1.0, 1.0) * 32767.0).astype(np.int16),
+		], axis=1)
+		if self.channels < 2:
+			pcm = pcm.mean(axis=1).astype(np.int16)
+		return self._pg.sndarray.make_sound(np.ascontiguousarray(pcm))
 
 	def play(self, sound, volume=1.0, pan=0.0):
 		"""Fire `sound` on a free channel at `volume` (0..1), panned
@@ -161,7 +172,23 @@ def render_keys(freq, sr, duration=5.0):
 	return y / max(np.max(np.abs(y)), 1e-6) * 0.55
 
 
-VOICES = {'harp': render_harp, 'keys': render_keys}
+def render_drop(freq, sr, duration=3.4):
+	"""A soft, rounded droplet: no pluck transient and a gentle attack, so
+	it never clicks or stings; a fundamental with a trace of upper harmonics
+	and a slightly detuned partner for a watery shimmer; a long, smooth decay.
+	Quiet and smooth by design -- the opposite of the harp's pluck."""
+	n = int(duration * sr)
+	t = np.arange(n) / sr
+	y = (np.sin(2 * np.pi * freq * t)
+		+ 0.16 * np.sin(2 * np.pi * 2 * freq * t) * np.exp(-t / 0.5)
+		+ 0.05 * np.sin(2 * np.pi * 3 * freq * t) * np.exp(-t / 0.25)
+		+ 0.45 * np.sin(2 * np.pi * freq * 1.0035 * t))
+	y *= (1.0 - np.exp(-t / 0.032)) * np.exp(-t / 1.15)
+	y = _fade_tail(y, sr, 0.25)
+	return y / max(np.max(np.abs(y)), 1e-6) * 0.5
+
+
+VOICES = {'harp': render_harp, 'keys': render_keys, 'drop': render_drop}
 
 
 class NoteBank:
@@ -230,6 +257,159 @@ def render_pad(root_midi, quality, sr):
 	return y / max(np.max(np.abs(y)), 1e-6) * 0.5
 
 
+def _periodic_noise(n, sr, rng, cutoff):
+	"""Low-passed, pink-ish noise that repeats exactly every `n` samples.
+
+	It is made by shaping a random spectrum and inverting it, so it is
+	periodic by construction -- the end lands on the start with no seam and
+	it can loop forever."""
+	spec = rng.standard_normal(n // 2 + 1) + 1j * rng.standard_normal(n // 2 + 1)
+	f = np.fft.rfftfreq(n, 1.0 / sr)
+	# a steep (12 dB/octave) roll-off, like water heard through distance, on a
+	# gentle pink tilt
+	shape = 1.0 / (1.0 + (f / cutoff) ** 2) / np.sqrt(np.maximum(f, 25.0) / 25.0)
+	shape *= (f / 40.0) ** 2 / (1.0 + (f / 40.0) ** 2)      # nothing inaudible below ~40 Hz
+	spec *= shape
+	spec[0] = 0.0
+	y = np.fft.irfft(spec, n)
+	return y / max(np.max(np.abs(y)), 1e-9)
+
+
+SURF_SECONDS = 12.0
+
+
+def render_surf(sr, seconds=SURF_SECONDS, seed=7):
+	"""A bed of surf as a seamless stereo loop: soft, low-passed noise whose
+	loudness rises and falls like waves arriving (two per loop, with a slower
+	drift on top), the right channel's waves a beat behind the left so it
+	moves across the stereo field. Returns (left, right)."""
+	n = int(seconds * sr)
+	rng = np.random.default_rng(seed)
+	t = np.arange(n) / n                       # loop phase 0..1
+	out = []
+	for shift in (0.0, 0.035):
+		wave = 0.5 + 0.5 * np.sin(2 * np.pi * 2 * (t - shift) - np.pi / 2)
+		env = (0.22 + 0.78 * wave ** 1.7) * (0.86 + 0.14 * np.sin(2 * np.pi * (t - shift) + 1.0))
+		out.append(_periodic_noise(n, sr, rng, cutoff=750.0) * env)
+	peak = max(np.max(np.abs(out[0])), np.max(np.abs(out[1])), 1e-9)
+	return out[0] / peak * 0.5, out[1] / peak * 0.5
+
+
+def render_whoosh(sr, seconds=2.4, seed=11):
+	"""One wave washing in and out, once: soft noise that swells, brightens a
+	little at its crest, and fades back to nothing (starts and ends silent).
+	Stereo. Used for a burst."""
+	n = int(seconds * sr)
+	rng = np.random.default_rng(seed)
+	t = np.arange(n) / n
+	env = np.sin(np.pi * t ** 0.65) ** 2
+	bright = env ** 2
+	out = []
+	for _ in range(2):
+		lo = _periodic_noise(n, sr, rng, cutoff=500.0)
+		hi = _periodic_noise(n, sr, rng, cutoff=1800.0)
+		out.append((lo * (1 - bright) + hi * bright) * env)
+	peak = max(np.max(np.abs(out[0])), np.max(np.abs(out[1])), 1e-9)
+	return out[0] / peak * 0.5, out[1] / peak * 0.5
+
+
+OCEAN_PAD_SECONDS = 8.0
+
+
+def render_ocean_pad(root_midi, quality, sr):
+	"""A deep, dreamy pad as a seamless stereo loop: pure sines only (no
+	sharp edges), the notes of an open add9 chord, each doubled with a
+	partner a hair away so it shimmers slowly, and every note breathing on
+	its own slow cycle so the chord swells and ebbs like a tide. Every
+	frequency and every breath is a whole number of cycles per loop, so it
+	repeats without a seam. Returns (left, right)."""
+	n = int(OCEAN_PAD_SECONDS * sr)
+	t = np.arange(n) / sr
+	third = 3 if quality == 'min' else 4
+	notes = [(root_midi - 12, 0.8), (root_midi, 1.0), (root_midi + 7, 0.7),
+		(root_midi + 12 + third, 0.5), (root_midi + 26, 0.35)]
+	sides = []
+	for side in (0, 1):
+		y = np.zeros(n)
+		for i, (midi, weight) in enumerate(notes):
+			f = round(midi_to_freq(midi) * OCEAN_PAD_SECONDS) / OCEAN_PAD_SECONDS
+			breath = 0.78 + 0.22 * np.sin(2 * np.pi * t / OCEAN_PAD_SECONDS + (i + 0.5 * side) * 1.3)
+			detune = (0.125, -0.125)[side]
+			ph = 2 * np.pi * f * t
+			note = np.sin(ph) + 0.3 * np.sin(2 * np.pi * (f + detune) * t)
+			if midi < 60:
+				note = note + 0.12 * np.sin(2 * ph)        # a touch of body on the low notes
+			y += weight * breath * note
+		sides.append(y)
+	peak = max(np.max(np.abs(sides[0])), np.max(np.abs(sides[1])), 1e-9)
+	return sides[0] / peak * 0.5, sides[1] / peak * 0.5
+
+
+class SurfVoice:
+	"""Paint's continuous bed of surf: one looping stereo sound on its own
+	reserved channel. The loop takes a moment to compute, so it is rendered
+	on a background thread and starts the moment it's ready."""
+
+	FADE_MS = 2500
+
+	def __init__(self, engine):
+		self.engine = engine
+		self._sound = None
+		self._channel = None
+		self._want = False
+		self.level = 0.0
+		self._thread = None
+
+	def start(self, level=0.0):
+		if not self.engine.available:
+			return
+		self.level = level
+		self._want = True
+		if self._sound is not None:
+			self._play()
+		elif self._thread is None:
+			self._thread = threading.Thread(target=self._prepare, daemon=True)
+			self._thread.start()
+
+	def _prepare(self):
+		try:
+			left, right = render_surf(self.engine.sample_rate)
+			self._sound = self.engine.make_stereo_sound(left, right)
+		except Exception:
+			self._thread = None
+			return
+		self._thread = None
+		if self._want:
+			self._play()
+
+	def _play(self):
+		try:
+			channel = self.engine._pg.mixer.Channel(3)
+			channel.play(self._sound, loops=-1, fade_ms=self.FADE_MS)
+			channel.set_volume(self.level, self.level)
+			self._channel = channel
+		except Exception:
+			self._channel = None
+
+	@property
+	def wanted(self):
+		return self._want
+
+	def set_level(self, level):
+		self.level = level
+		if self._channel is not None and self._want:
+			self._channel.set_volume(level, level)
+
+	def stop(self):
+		self._want = False
+		if self._channel is not None:
+			try:
+				self._channel.fadeout(600)
+			except Exception:
+				pass
+			self._channel = None
+
+
 class PadVoice:
 	"""The chord pad: plays under whichever instrument is active, so
 	changing the chord is always *audible* -- on the keys (whose notes are
@@ -240,8 +420,11 @@ class PadVoice:
 
 	FADE_MS = 700
 
-	def __init__(self, engine):
+	def __init__(self, engine, renderer=None):
+		"""`renderer(root_midi, quality, sample_rate)` returns a mono array or
+		a (left, right) pair; the default is the plain chord pad."""
 		self.engine = engine
+		self._renderer = renderer or render_pad
 		self._cache = {}
 		self._channels = [None, None]
 		self._current = None
@@ -257,7 +440,12 @@ class PadVoice:
 		root = 45 + ((root_pc - 45) % 12)
 		sound = self._cache.get(key)
 		if sound is None:
-			sound = self._cache[key] = self.engine.make_sound(render_pad(root, quality, self.engine.sample_rate))
+			data = self._renderer(root, quality, self.engine.sample_rate)
+			if isinstance(data, tuple):
+				sound = self.engine.make_stereo_sound(*data)
+			else:
+				sound = self.engine.make_sound(data)
+			self._cache[key] = sound
 		old = self._channels[self._side]
 		self._side ^= 1
 		channel = self.engine._pg.mixer.Channel(1 + self._side)
@@ -266,6 +454,27 @@ class PadVoice:
 		self._channels[self._side] = channel
 		if old is not None:
 			old.fadeout(self.FADE_MS)
+
+	def warm(self, chords):
+		"""Render `chords` (a list of (root_pc, quality)) on a background
+		thread, so switching to one later is instant rather than a hitch."""
+		if not self.engine.available:
+			return
+
+		def work():
+			for root_pc, quality in chords:
+				key = (int(root_pc), quality)
+				if key in self._cache:
+					continue
+				try:
+					data = self._renderer(45 + ((root_pc - 45) % 12), quality, self.engine.sample_rate)
+					self._cache[key] = (
+						self.engine.make_stereo_sound(*data) if isinstance(data, tuple) else self.engine.make_sound(data)
+					)
+				except Exception:
+					return
+
+		threading.Thread(target=work, daemon=True).start()
 
 	def set_level(self, level):
 		channel = self._channels[self._side]

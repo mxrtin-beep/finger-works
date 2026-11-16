@@ -113,10 +113,7 @@ LEFT HAND -- harmony & dynamics
 
 RIGHT HAND -- the instrument
  Harp -- sweep your fingers across the strings.
-   They are tuned to the current chord. Click Harp
-   strings in the control bar for every scale note,
-   so you can play tunes (point with one finger and
-   flick across a single string).
+   They are tuned to the current chord.
  Keys -- pinch thumb + index over a key to play it. Slide
    while pinched for a glissando. Keys in the current
    chord are lit.
@@ -725,28 +722,19 @@ class Overlay:
 		tk.OptionMenu(win, music_scale_var, *music_theory.SCALES).grid(
 			row=9, column=1, sticky='ew', padx=10, pady=4)
 
-		# Harp strings: chord tones (can't sound wrong) or every scale note (can play tunes).
-		harp_labels = {'chord': 'Chord tones (no wrong notes)', 'scale': 'Scale notes (play melodies)'}
-		harp_by_label = {v: k for k, v in harp_labels.items()}
-		tk.Label(win, text='Harp strings', **label_opts).grid(
-			row=10, column=0, sticky='w', padx=10, pady=4)
-		harp_var = tk.StringVar(value=harp_labels.get(current.get('harp_tuning', 'chord'), harp_labels['chord']))
-		tk.OptionMenu(win, harp_var, *harp_labels.values()).grid(
-			row=10, column=1, sticky='ew', padx=10, pady=4)
-
 		keys_full_var = tk.BooleanVar(value=current.get('keys_full_scale', True))
 		tk.Checkbutton(
 			win, text='Keys: every scale note (needed for tunes)', variable=keys_full_var,
 			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
 			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=11, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+		).grid(row=10, column=0, columnspan=2, sticky='w', padx=10, pady=4)
 
 		paint_sound_var = tk.BooleanVar(value=current.get('paint_sound', True))
 		tk.Checkbutton(
-			win, text='Paint sounds (soft pad, pen tone, chimes)', variable=paint_sound_var,
+			win, text='Paint sounds (ocean pad, waves, droplets)', variable=paint_sound_var,
 			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
 			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=12, column=0, columnspan=2, sticky='w', padx=10, pady=4)
+		).grid(row=11, column=0, columnspan=2, sticky='w', padx=10, pady=4)
 
 		# Debug mode is deliberately excluded from "remembered for next
 		# time" (see settings.py's _PERSISTED_KEYS) -- it only ever applies
@@ -756,7 +744,7 @@ class Overlay:
 			win, text='Debug mode (event text + live camera view)', variable=debug_var,
 			fg='#dddddd', bg='#1e1e1e', selectcolor='#3a3a3a',
 			activebackground='#1e1e1e', activeforeground='#dddddd',
-		).grid(row=13, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
+		).grid(row=12, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 10))
 
 		def apply_and_close():
 			chosen = camera_var.get()
@@ -774,7 +762,6 @@ class Overlay:
 				'music_key': music_key_var.get(),
 				'music_scale': music_scale_var.get(),
 				'paint_sound': paint_sound_var.get(),
-				'harp_tuning': harp_by_label[harp_var.get()],
 				'keys_full_scale': keys_full_var.get(),
 			}
 			if self.on_settings_changed:
@@ -797,12 +784,11 @@ class Overlay:
 			music_key_var.set(d['music_key'])
 			music_scale_var.set(d['music_scale'])
 			paint_sound_var.set(d['paint_sound'])
-			harp_var.set(harp_labels[d['harp_tuning']])
 			keys_full_var.set(d['keys_full_scale'])
 			debug_var.set(d['debug'])
 
 		btn_frame = tk.Frame(win, bg='#1e1e1e')
-		btn_frame.grid(row=14, column=0, columnspan=2, pady=(0, 10))
+		btn_frame.grid(row=13, column=0, columnspan=2, pady=(0, 10))
 		_make_flat_button(btn_frame, 'Apply', apply_and_close, bg='#2ecc71').pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Cancel', close).pack(side='left', padx=4)
 		_make_flat_button(btn_frame, 'Reset to Defaults', reset_to_defaults).pack(side='left', padx=4)

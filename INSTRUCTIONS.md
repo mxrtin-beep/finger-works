@@ -101,7 +101,6 @@ Click **Settings** in the control bar to open a small settings window:
   applied live if Music mode is running. See "Music mode" below.
 - **Paint sounds** -- the soft pad, pen tone and chimes in Paint mode (on by
   default; needs pygame). See "Paint mode".
-- **Harp strings** -- *Chord tones* (the default) or *Scale notes* for the Music harp. See "Music mode". The control bar's **Harp strings** button flips it too.
 - **Keys: every scale note** -- on by default: the Music keys cover every note of the scale like a piano (pentatonic/blues choices use their seven-note parent) so tunes can be played; off gives only the chosen scale's own notes (the pentatonic layout).
 - **Click sounds** / **Keyboard sounds** -- both off by default. A short,
   quiet tone on every left/right-click, or every on-screen keyboard key
@@ -287,7 +286,7 @@ mode), smoothed with a one-euro filter.
 
 | Gesture | Effect |
 |---|---|
-| Thumb + index pinch | **Ignite**: each frame adds a point to the pen's *ribbon* -- a glowing line, widest and brightest at the newest end, that ages out over the **Trail** time -- and throws a few sparks that drift away with the flow. Colour shades along the stroke. |
+| Thumb + index pinch | **Ignite**: each frame adds a point to the pen's *ribbon* -- a glowing line, widest and brightest at the newest end, that ages out over the **Trail** time -- and throws a few sparks that drift away with the flow. Colour shades along the stroke. **Strokes are separate**: points are only joined to others in the same stroke (`LightSwarm.end_stroke`, `ribbon_segments`), so lifting the pen and putting it down elsewhere starts a new line, and a tap leaves a dot. A stroke ends once the pen has been up for `STROKE_GAP_SECONDS` (0.18 s) -- and if it comes back down sooner *and* within `STROKE_GAP_DISTANCE` (70 px at 1920 wide) of where it lifted, that was pinch flicker from tracking noise and the line carries on; a quick hop further away is a new stroke. |
 | Clench (openness -> 0) | **Gather**: an attractor at the aim point, strength `0.1 + 0.9 (1-openness)^2`, with a sideways component (orbs orbit) and extra drag near the centre. Even an open hand has a faint pull. |
 | Snap open | **Burst**: an expanding shockwave ring that shoves and flashes orbs, plus a spray of sparks. Needs a *recent clench* (within 0.7 s) and a fast opening (openness velocity > 2.2/s); one burst per clench, 0.5 s cooldown; strength follows the speed. |
 | Moving | **Stir**: orbs near the fingertip are dragged along with it. Fast-moving fingertips of either hand shed sparks, and both hands are drawn as faint skeletons. |
@@ -315,7 +314,17 @@ is no range limit.
 
 A small gauge appears at the top of the screen while you tune.
 
-**Sound** (`PaintSession._audio`/`_chime`, using the same `synth` engine as Music; silent without pygame; *Paint sounds* checkbox in Settings, `paint_sound`): a soft chord pad (moods in `PALETTE_MOODS`: Aurora D, Ember Am, Ocean G, Nebula Em, Prism C) crossfades when the palette changes and swells with `(1-openness)^2` as you clench; while pinching, a quiet pen tone glides with the aim point (height -> pitch over two octaves, snapped 90% to the mood's pentatonic scale; speed -> volume); a snap-open burst, and a palette change, ring a four-note chime of the mood; while time is stopped the pad drops to 40% and the pen tone is silent.
+**Sound** (`PaintSession._audio`/`_chime`, using the `synth` engine; silent without pygame; *Paint sounds* checkbox in Settings, `paint_sound`) is built to be smooth and oceanic, never sharp -- all of it synthesized, with every loop seamless by construction:
+
+| Layer | What it is |
+|---|---|
+| **Surf** (`synth.render_surf`, `SurfVoice`) | A 12 s stereo loop of low-passed noise (12 dB/octave roll-off from 750 Hz, high-passed at 40 Hz) whose loudness rises and falls like waves arriving, two per loop, the right channel's waves a beat behind the left so it moves across the stereo field. Its level is `0.10 + 0.20 (1-openness)^2 + 0.08 x pen speed`: clenching and moving swell it. Rendered on a background thread; plays on reserved channel 3. |
+| **Pad** (`synth.render_ocean_pad`) | A deep stereo pad of pure sines in an open add9 chord, each note doubled with a hair-detuned partner for slow shimmer and breathing on its own slow cycle (8 s loop, gently swelling and ebbing). Each palette has a mood in `PALETTE_MOODS` (Aurora D, Ember Am, Ocean G, Nebula Em, Prism C); changing palette crossfades to it over 0.7 s. Level `0.16 + 0.16 (1-openness)^2`. All five moods are pre-rendered in the background. |
+| **Droplets** (`synth.render_drop`) | While you draw and move, an occasional soft rounded note (pitch from the pen's height over two octaves, snapped 95% to the mood's pentatonic scale; panned by position): a gentle attack (no pluck transient), a trace of upper harmonics and a detuned partner, a long smooth decay. Interval `max(0.30 s, 0.85 s - speed/1500)`: faster = more. Quiet (volume 0.20). |
+| **Wave** (`synth.render_whoosh`) | A burst, and a palette change, play one wave washing in and out (stereo noise that swells, brightens a little at the crest and fades to silence) with three soft droplets (root, fifth, octave) above it. |
+| **Hush** | While time is stopped the pad drops to 40%, the surf to 35%, and droplets stop. |
+
+(An earlier version played a continuous synthesized pen tone and a bright FM chime; both are gone.)
 
 **Idle:** after `IDLE_SECONDS` (4 s) with no hands a ghost painter -- a
 slow Lissajous wisp that paints, with an occasional soft burst -- takes
@@ -356,7 +365,7 @@ Every note and chord is drawn from the key and scale in Settings (see
 
 | Instrument | Gesture |
 |---|---|
-| **Harp** | Ten strings in a compact band in the top half of the screen, tuned either to the **current chord** (`harp_tuning: chord`, the default: root/3rd/5th upward, ~3 octaves; left-hand chords retune them) or to **every note of the scale** (`harp_tuning: scale`: ten consecutive scale notes from middle C, so melodies are playable; pentatonic and blues choices use their diatonic parent -- `music_theory.diatonic_scale` -- because their gaps would make tunes impossible, e.g. Twinkle Twinkle needs the F). Toggle with the control bar's **Harp strings** button or Settings; it is remembered. In scale tuning chord changes still move the pad and the current chord's strings are drawn brighter. Strings are numbered under their note names. Any of your five fingertips crossing a string plucks it, so a whole-hand sweep is a strum. Pluck speed sets loudness; position sets stereo pan. A string needs a crossing at >=170 px/s measured over 4 frames (so tracking jitter on a resting hand doesn't pluck), and re-triggers at most every 80 ms. |
+| **Harp** | Ten strings tuned to the current chord (root/3rd/5th upward, ~3 octaves), in a compact band in the top half of the screen. Any of your five fingertips crossing a string plucks it, so a whole-hand sweep is a strum. Pluck speed sets loudness; position sets stereo pan. A string needs a crossing at >=170 px/s measured over 4 frames (so tracking jitter on a resting hand doesn't pluck), and re-triggers at most every 80 ms. |
 | **Keys** | Two octaves-plus of the scale, **every note by default** (`keys_full_scale`: 15 keys in a major scale, like a piano, so tunes are playable; turn it off in Settings for the pentatonic layout, 11 keys where any keys sound good together). Pinch thumb + index over a key to play it; strike nearer the bottom of a key for a harder note. Slide while pinched to glissando -- a neighbouring key only takes over once the pointer is clearly inside it (hysteresis). Keys in the current chord are lit. Release = the note fades. |
 | **Theremin** | A continuous tone: hand left/right = pitch over three octaves (pulled 70% toward the nearest scale note, with glide), hand height = vibrato depth, fist or no hand = silent. Volume is the left hand's height. |
 | **Strings** | See "Strings" below. |

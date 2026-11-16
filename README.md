@@ -78,7 +78,10 @@ crisp vector shapes, so it stays sharp at any resolution and runs smoothly.
 points**, exactly like the cursor in Control mode.
 
 - 🤏 Pinch thumb + index → **ignite**: a glowing ribbon of light follows
-  your fingertip, fading as it ages, and throws off sparks
+  your fingertip, fading as it ages, and throws off sparks. Lift the pen and
+  put it down somewhere else and you start a **separate line** (they never
+  join up); a quick tap leaves a dot. A flicker of the pinch right where you
+  were doesn't break your line.
 - ✊ Clench your fist → **gather**: the orbs are drawn into orbit around
   your fingertip
 - 🖐️ Snap the fist open → **burst**: a ring of light shoves them outward
@@ -98,11 +101,12 @@ you like -- and a small wrist movement is enough.
 | ✊ Fist, held | **Stops time** -- everything hangs in the air; open to resume |
 | 👍 Thumb alone, held | Next **palette** (Aurora, Ember, Ocean, Nebula, Prism) |
 
-**Sound** (needs `pygame`; turn off with *Paint sounds* in Settings): a soft
-ambient pad whose harmony follows the palette (changing palette crossfades the
-mood), swelling as you clench; a gentle pen tone while you draw (higher when
-your hand is higher, louder when faster, always in key); a bright chime on a
-burst; and a hush while time is stopped.
+**Sound** (needs `pygame`; turn off with *Paint sounds* in Settings) is smooth and
+oceanic: a slow bed of surf whose waves swell and recede, and a deep, dreamy pad
+that follows the palette (changing palette moves to a new mood) and breathes like
+a tide. Drawing plays soft droplet notes, always in key, more often the faster
+you go; clenching swells the surf; a burst is a wave washing through; and the
+whole thing hushes while time is stopped.
 
 The control bar gains **Palette**, **Reset** and **Save** buttons (Save
 writes a full-resolution PNG to `Pictures/FingerWorks`).
@@ -127,17 +131,8 @@ C major pentatonic), so there are no wrong notes.
 **Next instrument** button also switch between them):
 
 - **Harp** -- a compact harp in the top half of the screen: sweep your
-  **fingers** across ten strings to strum, with plucks panning left-to-right.
-  By default the strings are tuned to the **current chord** (so it can't sound
-  wrong, and the left hand's chords retune it). Click **Harp strings** in the
-  control bar (or *Harp strings* in Settings) to switch to **scale notes**:
-  every step of the scale, like a real harp, so you can play **tunes**. Strings
-  are numbered 1-10 left to right; in C major, **Twinkle Twinkle Little Star**
-  is `1 1 5 5 6 6 5 | 4 4 3 3 2 2 1 | 5 5 4 4 3 3 2 | 5 5 4 4 3 3 2`, then the
-  first two lines again. To play
-  single notes, point with just your index finger and flick it across one
-  string, lifting off before moving to the next. The left hand's chords still
-  change the pad underneath, and the current chord's strings glow brighter.
+  **fingers** across ten strings to strum. They're tuned to the current
+  chord, and plucks pan left-to-right with the string.
 - **Keys** -- a piano-style keyboard of every note in your scale (turn off "Keys: every scale note" in Settings for the simpler pentatonic layout). Pinch thumb + index over a key to play it; slide while
   pinched for a glissando. Keys that belong to the current chord are lit.
 - **Strings** (a violin-family instrument) -- your fingers *are* the bow and

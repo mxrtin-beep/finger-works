@@ -36,13 +36,14 @@ keeps it smooth: a couple of hundred shapes, sharp at any resolution.
 import datetime
 import math
 import os
+import threading
 import time
 
 import art_gestures as ag
 import constants as c
 import music_theory as mt
 from lightswarm import LightSwarm
-from synth import AudioEngine, NoteBank, PadVoice, ThereminVoice
+from synth import AudioEngine, NoteBank, PadVoice, SurfVoice, render_ocean_pad, render_whoosh
 
 RIBBON_SEGMENTS = 110
 
@@ -93,6 +94,9 @@ class PaintSession:
 		self.shaka = ag.ShakaWatch()
 
 		self._aim = None
+		self._was_drawing = False     # a stroke is open (the pen is down, or only just lifted)
+		self._pen_up_at = 0.0
+		self._pen_up_pos = None
 		self._pen = None              # (x, y, openness, pinching) for drawing the pointer
 		self._tips = {}
 		self._time_scale = 1.0
@@ -106,16 +110,18 @@ class PaintSession:
 		self._ghost_burst = -1
 		self._pen_speed = 0.0
 
-		# Sound: a soft pad that follows the palette's mood and swells as you
-		# clench, a gentle pen tone while you draw (higher when your hand is
-		# higher, louder when faster, snapped to the mood's scale so it never
-		# sounds wrong), a chime on a burst or palette change, and a hush
-		# while time is stopped. Silent without pygame / an audio device.
+		# Sound -- smooth and oceanic, never sharp: a slow bed of surf whose
+		# waves swell and recede, a deep dreamy pad that follows the palette's
+		# mood and breathes like a tide, and soft droplet notes (in key) as you
+		# draw. Clenching swells the surf; a burst is a wave washing through;
+		# stopping time hushes everything. Silent without pygame / audio.
 		settings = settings or {}
 		self.audio = AudioEngine()
 		self.bank = NoteBank(self.audio)
-		self.pad = PadVoice(self.audio)
-		self.tone = ThereminVoice(self.audio)
+		self.pad = PadVoice(self.audio, renderer=render_ocean_pad)
+		self.surf = SurfVoice(self.audio)
+		self._whoosh = None
+		self._last_drop = 0.0
 		self._sound_pref = bool(settings.get('paint_sound', True))
 		self.sound_on = False
 		self._set_sound(self._sound_pref)
@@ -125,44 +131,65 @@ class PaintSession:
 	def _set_sound(self, wanted):
 		wanted = bool(wanted) and self.audio.available
 		if wanted and not self.sound_on:
-			self.tone.start()
+			self.surf.start(0.0)
+			self.pad.warm(PALETTE_MOODS)
+			threading.Thread(target=self._prepare_sounds, daemon=True).start()
 		elif not wanted and self.sound_on:
-			self.tone.set(amp=0.0)
 			self.pad.stop()
+			self.surf.stop()
 		self.sound_on = wanted
 
-	def _audio(self):
+	def _prepare_sounds(self):
+		"""Render the one-off sounds (the wave for a burst) off the main thread."""
+		try:
+			left, right = render_whoosh(self.audio.sample_rate)
+			self._whoosh = self.audio.make_stereo_sound(left, right)
+		except Exception:
+			self._whoosh = None
+
+	def _mood_scale(self):
+		root, quality = PALETTE_MOODS[self.engine.palette % len(PALETTE_MOODS)]
+		return root, quality, ('Major pentatonic' if quality == 'maj' else 'Minor pentatonic')
+
+	def _audio(self, now):
 		if not self.sound_on:
 			return
 		f = self.engine
-		root, quality = PALETTE_MOODS[f.palette % len(PALETTE_MOODS)]
+		if not self.surf.wanted:
+			self.surf.start(0.0)           # resuming after a pause
+		root, quality, scale = self._mood_scale()
 		frozen = self._time_scale < 0.5
 		openness = self._pen[2] if self._pen else 1.0
 		pull = (1.0 - openness) ** 2
-		level = (0.10 + 0.22 * pull) * (0.4 if frozen else 1.0)
+		hush = 0.4 if frozen else 1.0
+
+		level = (0.16 + 0.16 * pull) * hush
 		self.pad.set_chord(root, quality, level)
 		self.pad.set_level(level)
+		# the surf swells as you clench and as you move, and drops when time stops
+		self.surf.set_level((0.10 + 0.20 * pull + 0.08 * min(1.0, self._pen_speed / 1200.0)) * (0.35 if frozen else 1.0))
 
-		if self._pen and self._pen[3] and not frozen:
-			x, y, _o, _p = self._pen
-			midi = 60 + (1.0 - y / self.H) * 24
-			scale = 'Major pentatonic' if quality == 'maj' else 'Minor pentatonic'
-			midi = mt.snap_to_scale(midi, root, scale, 0.9)
-			amp = min(0.45, 0.05 + 0.4 * self._pen_speed / 1500.0)
-			self.tone.set(freq=mt.midi_to_freq(midi), amp=amp, vibrato=0.0)
-		else:
-			self.tone.set(amp=0.0)
+		# Drawing plays occasional soft droplets (pitch from height, in key),
+		# more often the faster you go -- not a continuous tone.
+		if self._pen and self._pen[3] and not frozen and self._pen_speed > 70.0:
+			interval = max(0.30, 0.85 - self._pen_speed / 1500.0)
+			if now - self._last_drop >= interval:
+				self._last_drop = now
+				x, y = self._pen[0], self._pen[1]
+				midi = mt.snap_to_scale(57 + (1.0 - y / self.H) * 24, root, scale, 0.95)
+				self.audio.play(self.bank.get('drop', int(round(midi))), 0.20, pan=(x / self.W * 2.0 - 1.0) * 0.6)
 
 	def _chime(self, strength):
-		"""A bright little chord of the current mood, louder for a harder burst."""
+		"""A wave washing through, with a few soft droplets above it: for a
+		burst (louder when harder) and for a palette change (gentle)."""
 		if not self.sound_on:
 			return
-		root, quality = PALETTE_MOODS[self.engine.palette % len(PALETTE_MOODS)]
-		base = 72 + ((root - 72) % 12)
-		third = 3 if quality == 'min' else 4
-		volume = min(0.55, 0.22 + 0.33 * strength)
-		for interval, weight, pan in ((0, 1.0, -0.3), (third, 0.7, 0.0), (7, 0.8, 0.3), (12, 0.6, 0.5)):
-			self.audio.play(self.bank.get('keys', base + interval), volume * weight, pan)
+		if self._whoosh is not None:
+			self.audio.play(self._whoosh, min(0.6, 0.22 + 0.4 * strength), 0.0)
+		root, quality, _scale = self._mood_scale()
+		base = 67 + ((root - 67) % 12)
+		for interval, volume, pan in ((0, 0.16, -0.3), (7, 0.12, 0.3), (12, 0.10, 0.0)):
+			self.audio.play(self.bank.get('drop', base + interval), volume * (0.7 + 0.6 * strength), pan)
 
 	# ---- item pool --------------------------------------------------------------------
 
@@ -250,15 +277,14 @@ class PaintSession:
 			self._set(item, (xi - r, yi - r, xi + r, yi + r), fill=f.colour(pal[i], level))
 
 		# the pen's ribbon: newest segment widest and brightest
-		pts = f.ribbon_points()[-(RIBBON_SEGMENTS + 1):]
-		segs = len(pts) - 1
+		segments = f.ribbon_segments()[-RIBBON_SEGMENTS:]
+		segs = len(segments)
 		for j in range(RIBBON_SEGMENTS):
 			if j >= segs:
 				self._hide(self._rib_glow[j])
 				self._hide(self._rib_core[j])
 				continue
-			x0, y0, _p0, _f0 = pts[j]
-			x1, y1, p1, f1 = pts[j + 1]
+			x0, y0, x1, y1, p1, f1 = segments[j]
 			width = max(1, int((2.0 + 8.0 * f1) * glow * k))
 			self._set(self._rib_glow[j], (x0, y0, x1, y1), fill=f.glow_colour(p1, f1 * 0.45), width=width * 3 + 2)
 			self._set(self._rib_core[j], (x0, y0, x1, y1), fill=f.colour(p1, min(1.0, 0.25 + f1)), width=width)
@@ -336,8 +362,8 @@ class PaintSession:
 		self._aim = None
 		self._pen = None
 		self._tips.clear()
-		self.tone.set(amp=0.0)
 		self.pad.stop()
+		self.surf.stop()
 
 	def apply_settings(self, settings):
 		self._sound_pref = bool(settings.get('paint_sound', self._sound_pref))
@@ -345,7 +371,7 @@ class PaintSession:
 
 	def close(self):
 		self.release()
-		self.tone.stop()
+		self.surf.stop()
 		self.audio.stop_all()
 		self.window.close()
 
@@ -372,6 +398,7 @@ class PaintSession:
 			self.openness.reset()
 			self._aim = None
 			self._pen = None
+			self._close_stroke()
 		self._left(left, now, dt)
 
 		for hand in hands:
@@ -380,7 +407,7 @@ class PaintSession:
 		if now - self._last_hands_time > self.IDLE_SECONDS:
 			self._ghost(now, dt)
 
-		self._audio()
+		self._audio(now)
 		f.step(dt)
 		self._draw_swarm()
 		self._redraw_hud(hands, now)
@@ -415,8 +442,43 @@ class PaintSession:
 			self._chime(burst)
 
 		if pinching:
+			if self._was_drawing and self._pen_up_pos is not None:
+				# The pen came back down shortly after lifting. Right where it
+				# lifted, that was tracking noise flickering the pinch: carry on
+				# the same line. Anywhere else it is a new stroke -- separate,
+				# never joined to the last one.
+				ux, uy = self._pen_up_pos
+				if math.hypot(x - ux, y - uy) > self.STROKE_GAP_DISTANCE * f.k:
+					f.end_stroke()
+			self._pen_up_pos = None
+			self._was_drawing = True
 			f.add_ribbon_point(x, y, f.stroke_pal(step * 0.0009))
 			f.emit_sparks(x, y, vx, vy, min(4, 1 + int(step / 25.0)), f.stroke_pal(), life=1.2, bright=0.9)
+			self._pen_up_at = now
+		else:
+			self._pen_lifted(x, y, now)
+
+	# How long the pen must stay up before the stroke counts as finished, and how
+	# far from where it lifted it may come back down and still be the same line.
+	# Together they absorb pinch flicker from hand-tracking noise (which would
+	# otherwise chop one line into pieces) without joining genuinely separate
+	# strokes, which are drawn apart.
+	STROKE_GAP_SECONDS = 0.18
+	STROKE_GAP_DISTANCE = 70.0
+
+	def _pen_lifted(self, x, y, now):
+		if not self._was_drawing:
+			return
+		if self._pen_up_pos is None:
+			self._pen_up_pos = (x, y)
+		if now - self._pen_up_at >= self.STROKE_GAP_SECONDS:
+			self._close_stroke()
+
+	def _close_stroke(self):
+		if self._was_drawing:
+			self.engine.end_stroke()
+		self._was_drawing = False
+		self._pen_up_pos = None
 
 	def _shed_sparks(self, hand, dt):
 		"""Every fingertip throws off sparks when it moves fast."""
@@ -486,6 +548,8 @@ class PaintSession:
 		if math.sin(0.19 * t) > -0.35:
 			f.add_ribbon_point(x, y, f.stroke_pal(0.0015))
 			f.emit_sparks(x, y, vx, vy, 1, f.stroke_pal(), life=1.2, bright=0.8)
+		else:
+			f.end_stroke()          # the wisp lifts its pen: the next line starts elsewhere, unjoined
 		cycle = int(t / 9.0)
 		if cycle != self._ghost_burst and t % 9.0 > 8.0:
 			self._ghost_burst = cycle

@@ -99,7 +99,8 @@ class LightSwarm:
 
 		self.t = 0.0
 		self._stroke_phase = 0.0
-		self.ribbon = deque(maxlen=160)     # [x, y, pal, age]
+		self.ribbon = deque(maxlen=160)     # [x, y, pal, age, stroke id]
+		self._stroke_id = 0
 		self.attractors = []                # (x, y, strength 0..1, radius px)
 		self.stirs = []                     # (x, y, vx, vy)
 		self.shocks = []                    # [x, y, t0, strength, pal]
@@ -141,7 +142,13 @@ class LightSwarm:
 	# ---- emitting ------------------------------------------------------------------
 
 	def add_ribbon_point(self, x, y, pal):
-		self.ribbon.append([x, y, pal, 0.0])
+		self.ribbon.append([x, y, pal, 0.0, self._stroke_id])
+
+	def end_stroke(self):
+		"""The pen has lifted: whatever is drawn next is a new, separate
+		stroke and is never joined to the previous one."""
+		if self.ribbon and self.ribbon[-1][4] == self._stroke_id:
+			self._stroke_id += 1
 
 	def emit_sparks(self, x, y, vx, vy, count, pal, life=1.3, bright=0.9, spread=40.0):
 		"""Throw off `count` short-lived sparks from (x, y), carrying some of
@@ -280,10 +287,37 @@ class LightSwarm:
 		return np.clip(self.bright * fade * twinkle + self.flash, 0.0, 1.0)
 
 	def ribbon_points(self):
-		"""Visible ribbon, oldest first: (x, y, pal, freshness 0..1 where 1 is
-		brand new and 0 is about to vanish)."""
+		"""Visible ribbon, oldest first: (x, y, pal, freshness, stroke id),
+		freshness being 1 for brand new down to 0 for about to vanish."""
 		span = max(self.trail, 1e-3)
-		return [(p[0], p[1], p[2], max(0.0, 1.0 - p[3] / span)) for p in self.ribbon]
+		return [(p[0], p[1], p[2], max(0.0, 1.0 - p[3] / span), p[4]) for p in self.ribbon]
+
+	def ribbon_segments(self):
+		"""What to draw for the ribbon: a list of (x0, y0, x1, y1, pal,
+		freshness). Points are only joined to others *in the same stroke*, so
+		two strokes drawn apart stay apart; a stroke of a single point (a
+		tap) becomes a tiny segment, which draws as a round dot."""
+		pts = self.ribbon_points()
+		out = []
+		i = 0
+		while i < len(pts):
+			j = i
+			while j + 1 < len(pts) and pts[j + 1][4] == pts[i][4]:
+				j += 1
+			if j == i:
+				x, y, pal, fresh, _ = pts[i]
+				out.append((x, y, x + 0.6, y, pal, fresh))
+			else:
+				for k in range(i, j):
+					a, b = pts[k], pts[k + 1]
+					x1, y1 = b[0], b[1]
+					if abs(x1 - a[0]) + abs(y1 - a[1]) < 0.6:
+						# A zero-length line isn't reliably drawn as a dot by Tk;
+						# a hair of length with round caps always is.
+						x1 = a[0] + 0.6
+					out.append((a[0], a[1], x1, y1, b[2], b[3]))
+			i = j + 1
+		return out
 
 	def colour(self, pal, level):
 		"""'#rrggbb' for palette coordinate `pal` (plus the hue offset) at
@@ -303,6 +337,7 @@ class LightSwarm:
 	def reset(self):
 		"""Back to calm: clear the ribbon and sparks; the ambient orbs carry on."""
 		self.ribbon.clear()
+		self._stroke_id += 1
 		self.life[self.n_amb:] = 0.0
 		self.flash[:] = 0.0
 		self.shocks.clear()
@@ -341,8 +376,7 @@ class LightSwarm:
 			if i < self.n_amb:
 				gd.ellipse((x - r * 3.2, y - r * 3.2, x + r * 3.2, y + r * 3.2), fill=rgb(self.pal[i], inten[i] * 0.55))
 			cd.ellipse((x - r, y - r, x + r, y + r), fill=rgb(self.pal[i], inten[i]))
-		pts = self.ribbon_points()
-		for (x0, y0, p0, f0), (x1, y1, p1, f1) in zip(pts, pts[1:]):
+		for x0, y0, x1, y1, p1, f1 in self.ribbon_segments():
 			wd = (2.0 + 9.0 * f1) * self.glow * self.k * sc
 			gd.line((x0 * sx, y0 * sy, x1 * sx, y1 * sy), fill=rgb(p1, f1 * 0.6), width=int(wd * 2.4) + 1)
 			cd.line((x0 * sx, y0 * sy, x1 * sx, y1 * sy), fill=rgb(p1, min(1.0, f1 * 1.1)), width=int(wd) + 1)

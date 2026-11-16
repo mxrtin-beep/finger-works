@@ -120,6 +120,76 @@ class RibbonTests(unittest.TestCase):
 		self.assertAlmostEqual(new[3], 1.0)
 
 
+class StrokeTests(unittest.TestCase):
+	def line(self, s, x0, x1, y):
+		for i in range(8):
+			s.add_ribbon_point(x0 + (x1 - x0) * i / 7, y, 0.2)
+
+	def test_separate_strokes_are_never_joined(self):
+		s = swarm()
+		s.trail = 5.0
+		self.line(s, 100, 300, 100)
+		s.end_stroke()
+		self.line(s, 700, 900, 400)              # far away, drawn after lifting the pen
+		segs = s.ribbon_segments()
+		self.assertEqual(len(segs), 7 + 7, 'each stroke is its own run of segments')
+		for x0, y0, x1, y1, _p, _f in segs:
+			self.assertLess(((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5, 60, 'no segment bridges the gap between strokes')
+
+	def test_without_lifting_the_pen_the_line_continues(self):
+		s = swarm()
+		self.line(s, 100, 300, 100)
+		self.line(s, 300, 500, 100)
+		self.assertEqual(len(s.ribbon_segments()), 15)
+
+	def test_a_tap_is_a_dot_not_nothing(self):
+		s = swarm()
+		s.add_ribbon_point(200, 200, 0.4)
+		s.end_stroke()
+		self.line(s, 500, 600, 300)
+		segs = s.ribbon_segments()
+		dots = [g for g in segs if abs(g[2] - g[0]) < 1 and g[1] == g[3]]
+		self.assertEqual(len(dots), 1)
+		self.assertEqual((dots[0][0], dots[0][1]), (200, 200))
+
+	def test_end_stroke_with_nothing_drawn_changes_nothing(self):
+		s = swarm()
+		s.end_stroke()
+		s.end_stroke()
+		self.line(s, 0, 70, 0)
+		self.assertEqual(len(s.ribbon_segments()), 7)
+
+	def test_old_strokes_fade_independently(self):
+		s = swarm()
+		s.trail = 1.0
+		self.line(s, 100, 300, 100)
+		s.end_stroke()
+		run(s, 20)
+		self.line(s, 100, 300, 300)
+		fresh = {round(seg[1]): seg[5] for seg in s.ribbon_segments()}
+		self.assertLess(fresh[100], fresh[300])
+
+	def test_the_snapshot_draws_strokes_apart(self):
+		s = swarm(ambient=0)
+		s.trail = 5.0
+		self.line(s, 100, 300, 100)
+		s.end_stroke()
+		self.line(s, 100, 300, 400)
+		img = np.asarray(s.snapshot((960, 540))).astype(float)
+		on_line = img[96:104, 150:250].mean()          # on the first stroke
+		in_gap = img[240:260, 150:250].mean()          # midway between the two strokes
+		self.assertGreater(on_line, in_gap * 2.0, 'nothing is drawn in the gap between strokes')
+
+
+class DotTests(unittest.TestCase):
+	def test_a_tap_that_stays_put_still_has_visible_length(self):
+		s = swarm()
+		for _ in range(4):
+			s.add_ribbon_point(300, 200, 0.5)       # the pen held still: identical points
+		for x0, y0, x1, y1, _p, _f in s.ribbon_segments():
+			self.assertGreaterEqual(abs(x1 - x0) + abs(y1 - y0), 0.6, 'a zero-length line would not draw')
+
+
 class PaintSoundTests(unittest.TestCase):
 	def test_every_palette_has_a_mood(self):
 		import paint

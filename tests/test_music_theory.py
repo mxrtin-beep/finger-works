@@ -56,8 +56,8 @@ class ScaleTests(unittest.TestCase):
 		self.assertAlmostEqual(mt.snap_to_scale(71.9, 'C', 'Major pentatonic'), 72.0)
 		self.assertAlmostEqual(mt.snap_to_scale(59.9, 'C', 'Major pentatonic'), 60.0)
 
-	def test_the_harps_scale_tuning_has_every_step_of_the_scale(self):
-		# pentatonic gaps would make melodies impossible: Twinkle Twinkle needs the F
+	def test_the_keys_use_every_step_of_the_scale(self):
+		# pentatonic gaps would make melodies impossible on the keys: Twinkle Twinkle needs the F
 		self.assertEqual(mt.diatonic_scale('Major pentatonic'), 'Major')
 		self.assertEqual(mt.diatonic_scale('Minor pentatonic'), 'Natural minor')
 		self.assertEqual(mt.diatonic_scale('Blues'), 'Natural minor')

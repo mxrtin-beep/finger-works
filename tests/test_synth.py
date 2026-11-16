@@ -127,6 +127,101 @@ class ThereminTests(unittest.TestCase):
 		self.assertLess(float(np.max(np.abs(chunk))), 1e-4)
 
 
+def band_share(y, lo, hi):
+	spec = np.abs(np.fft.rfft(y)) ** 2
+	f = np.fft.rfftfreq(len(y), 1.0 / SR)
+	return float(spec[(f >= lo) & (f < hi)].sum() / spec.sum())
+
+
+class OceanSoundTests(unittest.TestCase):
+	"""Paint's sound is meant to be smooth and oceanic, never sharp -- so
+	these measure it: soft spectra, swelling waves, seamless loops, no clicks."""
+
+	def test_surf_is_soft_low_passed_noise(self):
+		left, right = synth.render_surf(SR)
+		for ch in (left, right):
+			self.assertLessEqual(float(np.max(np.abs(ch))), 0.51)
+			self.assertLess(band_share(ch, 3000, 22050), 0.02, 'almost nothing hissy above 3 kHz')
+			self.assertGreater(band_share(ch, 20, 1500), 0.9, 'the energy is low and rumbling')
+			self.assertLess(band_share(ch, 0, 20), 0.02, 'no wasted infrasound')
+
+	def test_surf_swells_and_recedes_like_waves(self):
+		left, _ = synth.render_surf(SR)
+		win = SR // 4
+		rms = np.array([np.sqrt((left[i:i + win] ** 2).mean()) for i in range(0, len(left) - win, win)])
+		self.assertGreater(rms.max() / rms.min(), 2.5, 'quiet troughs between louder waves')
+		# two waves per 12 s loop -> two clear peaks
+		peaks = int(((rms[1:-1] > rms[:-2]) & (rms[1:-1] >= rms[2:]) & (rms[1:-1] > rms.mean())).sum())
+		self.assertIn(peaks, (2, 3))
+
+	def test_surf_loop_has_no_seam_and_is_wide(self):
+		left, right = synth.render_surf(SR)
+		for ch in (left, right):
+			typical = float(np.max(np.abs(np.diff(ch))))
+			self.assertLessEqual(abs(float(ch[0] - ch[-1])), typical * 1.5, 'audible click when the loop repeats')
+		self.assertLess(abs(float(np.corrcoef(left, right)[0, 1])), 0.5, 'left and right are different waves: a wide image')
+
+	def test_a_burst_wave_washes_in_and_out_of_silence(self):
+		left, right = synth.render_whoosh(SR)
+		for ch in (left, right):
+			self.assertLess(float(np.max(np.abs(ch[:500]))), 0.02)
+			self.assertLess(float(np.max(np.abs(ch[-500:]))), 0.02)
+			self.assertLessEqual(float(np.max(np.abs(ch))), 0.51)
+			peak_at = int(np.argmax(np.abs(ch))) / len(ch)
+			self.assertTrue(0.2 < peak_at < 0.8, 'swells to a crest in the middle')
+			self.assertLess(band_share(ch, 4000, 22050), 0.03)
+
+	def test_droplets_are_in_tune_and_never_click(self):
+		for midi in (57, 64, 72, 79):
+			f = midi_to_freq(midi)
+			y = synth.render_drop(f, SR)
+			self.assertAlmostEqual(dominant_freq(y, 3000, SR // 2), f, delta=3.0, msg=midi)
+			self.assertLessEqual(float(np.max(np.abs(y))), 0.51)
+			# a soft attack: at 3 ms in it has barely started (no pluck transient)
+			self.assertLess(float(np.max(np.abs(y[:int(0.003 * SR)]))), 0.12 * float(np.max(np.abs(y[:SR // 4]))))
+			self.assertLess(abs(float(y[-1])), 1e-3, 'ends at silence')
+			self.assertLess(float(np.max(np.abs(np.diff(y)))), 0.2 * float(np.max(np.abs(y))) + 0.05)
+
+	def test_droplets_are_much_softer_than_the_harp_pluck(self):
+		f = midi_to_freq(72)
+		drop, pluck = synth.render_drop(f, SR), synth.render_harp(f, SR)
+		first = int(0.01 * SR)
+		self.assertLess(float(np.abs(drop[:first]).max()), 0.3 * float(np.abs(pluck[:first]).max()), 'gentler onset than a pluck')
+
+	def test_ocean_pad_loops_seamlessly_in_stereo(self):
+		for quality in ('maj', 'min'):
+			left, right = synth.render_ocean_pad(50, quality, SR)
+			self.assertEqual(len(left), int(synth.OCEAN_PAD_SECONDS * SR))
+			for ch in (left, right):
+				typical = float(np.max(np.abs(np.diff(ch))))
+				self.assertLessEqual(abs(float(ch[0] - ch[-1])), typical * 1.1, f'{quality}: click at the loop point')
+			self.assertGreater(float(np.abs(left - right).max()), 0.05, 'a stereo pad, not dual mono')
+
+	def test_ocean_pad_is_deep_and_smooth(self):
+		left, _ = synth.render_ocean_pad(50, 'maj', SR)
+		self.assertGreater(band_share(left, 20, 700), 0.8, 'mostly low, warm frequencies')
+		self.assertLess(band_share(left, 3000, 22050), 0.005, 'no brightness or edge')
+		self.assertLessEqual(float(np.max(np.abs(left))), 0.51)
+
+	def test_ocean_pad_breathes_slowly(self):
+		left, _ = synth.render_ocean_pad(50, 'maj', SR)
+		win = SR // 2
+		rms = np.array([np.sqrt((left[i:i + win] ** 2).mean()) for i in range(0, len(left) - win, win)])
+		self.assertGreater(rms.max() / rms.min(), 1.05, 'it swells and ebbs')
+		self.assertLess(rms.max() / rms.min(), 3.0, 'but gently')
+
+	def test_ocean_pad_follows_the_chord_quality(self):
+		def energy_at(y, freq):
+			spec = np.abs(np.fft.rfft(y))
+			k = int(round(freq * synth.OCEAN_PAD_SECONDS))
+			return float(spec[k - 1:k + 2].max())
+		maj, _ = synth.render_ocean_pad(50, 'maj', SR)
+		mino, _ = synth.render_ocean_pad(50, 'min', SR)
+		third_maj, third_min = midi_to_freq(50 + 12 + 4), midi_to_freq(50 + 12 + 3)
+		self.assertGreater(energy_at(maj, third_maj), 3 * energy_at(maj, third_min))
+		self.assertGreater(energy_at(mino, third_min), 3 * energy_at(mino, third_maj))
+
+
 class BowedVoiceTests(unittest.TestCase):
 	def make(self, timbre):
 		return synth.BowedVoice(types.SimpleNamespace(sample_rate=SR, available=False), timbre)
